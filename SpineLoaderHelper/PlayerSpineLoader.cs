@@ -69,9 +69,8 @@ public class PlayerSpineLoader
                 var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
                 var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
                 Plugin.Log.LogInfo("Creating skeleton for " + playerSpineName);
-                CustomSkinManager.AddPlayerSpine(playerSpineName, runtimeSkeletonAsset);
-                CustomSkinManager.ChangeSelectedPlayerSpine(playerSpineName);
-                CustomSkinManager.ChangeSelectedPlayerSpineSkin(defaultSkinName);
+                CustomSkinManager.AddPlayerSpine(playerSpineName, runtimeSkeletonAsset, skinList.ToList());
+                CustomSkinManager.ChangeSelectedPlayerSpine(playerSpineName + "/" + defaultSkinName);
 
                 // PlayerFarming.Instance.Spine.skeletonDataAsset = runtimeSkeletonAsset;
                 // PlayerFarming.Instance.Spine.initialSkinName = Plugin.Instance?.SkinToLoad; //"Shepherds/Karakal"

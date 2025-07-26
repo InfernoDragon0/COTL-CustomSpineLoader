@@ -13,7 +13,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CustomSpineLoader";
-        public const string PluginVer = "0.0.1";
+        public const string PluginVer = "0.0.2";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
