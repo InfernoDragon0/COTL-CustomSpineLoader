@@ -1,3 +1,6 @@
+# Download
+- Download via [NexusMods](https://www.nexusmods.com/cultofthelamb/mods/49)
+
 # Links
 - Read more about my mods at my [Website](https://cotlminimod.infernodragon.net/)
 - Join the discord server for support, feedback, suggestions and general modding talk: [modding discord](https://discord.gg/MUjww9ndx2)
@@ -43,7 +46,7 @@ A Complete Skin folder would look something like this
 Each Spine Skin folder must have a config.json file in it. The following is how you should create the file:
 ``` 
 {   
-    "defaultSkin": "Lamb",
+    "defaultSkin": "CustomSkinName",
     "skins": [
         "CustomSkinName",
         "CustomSkinName2" 
@@ -52,12 +55,10 @@ Each Spine Skin folder must have a config.json file in it. The following is how 
 ```
 defaultSkin will be the first skin that is loaded when the game starts
 
-skins is an array of any amount of strings of the Skins that you want to load into game (currently, as of 0.0.1, this is useless)
+skins is an array of any amount of strings of the Skins that exist in your Spine Skeleton that you want to load into game
 
 ## Known Issues
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
-- Currently, will only load the final skin in the order.
-- Currently, will ignore "skins" in config file.
 
 ## Developed by [InfernoDragon0](https://github.com/InfernoDragon0)
 
