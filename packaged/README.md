@@ -4,10 +4,11 @@
 - If you like the mod, consider donating [here](https://ko-fi.com/infernodragon0)! Thank you for checking out the mod!
 
 # Custom Spine Loader
-Currently only supports the following:
-- Player Skins
+Currently features:
+- Custom Player Spines with multi skin select
+- Custom Follower Color Control
 
-If you would like to have a custom spine loader for other objects, such as enemies, it may be possible in the future.
+More features to come soon!
 
 ### How to Load Player Skins
 After installing this plugin correctly, you should be able to navigate to ```Bepinex > plugins > CotLSpineLoader > PlayerSkins``` folder and setup your custom spine skins there.
