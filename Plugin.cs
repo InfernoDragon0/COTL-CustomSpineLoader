@@ -1,5 +1,7 @@
 using BepInEx;
 using BepInEx.Logging;
+using COTL_API.CustomFollowerCommand;
+using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using System.IO;
@@ -13,7 +15,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CustomSpineLoader";
-        public const string PluginVer = "0.0.2";
+        public const string PluginVer = "0.0.3";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
@@ -24,7 +26,8 @@ namespace CustomSpineLoader
         {
             Plugin.Log = base.Logger;
             PluginPath = Path.GetDirectoryName(Info.Location);
-            PlayerSpineLoader.LoadAllPlayerSpines();
+            // PlayerSpineLoader.LoadAllPlayerSpines();
+            CustomFollowerCommandManager.Add(new CustomColorCommand());
         }
 
         private void OnEnable()

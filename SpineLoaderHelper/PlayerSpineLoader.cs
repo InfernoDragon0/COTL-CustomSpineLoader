@@ -7,12 +7,13 @@ using COTL_API.Helpers;
 using COTL_API.CustomSkins;
 using System.Linq;
 using Newtonsoft.Json;
+using UnityEngine.SceneManagement;
 
 namespace CustomSpineLoader.SpineLoaderHelper;
 
 public class PlayerSpineLoader
 {
-    public static void LoadAllPlayerSpines()
+    public static void LoadAllPlayerSpines(Material material = null)
     {
         //get the plugin path, then find the foler PlayerSkins in it
         var playerFolder = Path.Combine(Plugin.PluginPath, "PlayerSkins");
@@ -64,16 +65,17 @@ public class PlayerSpineLoader
                     tex.name = Path.GetFileNameWithoutExtension(textureFile);
                     textures[Array.IndexOf(spineTextures, textureFile)] = tex;
                 }
-
-                var mat = new Material(Shader.Find("Spine/Skeleton"));
+                
+                var mat = material ?? new Material(Shader.Find("Spine/Skeleton")); //TODO: find out what shader cotl uses
                 var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
                 var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
                 Plugin.Log.LogInfo("Creating skeleton for " + playerSpineName);
+                Plugin.Log.LogInfo("Using material name " + mat.name);
                 CustomSkinManager.AddPlayerSpine(playerSpineName, runtimeSkeletonAsset, skinList.ToList());
                 CustomSkinManager.ChangeSelectedPlayerSpine(playerSpineName + "/" + defaultSkinName);
 
                 // PlayerFarming.Instance.Spine.skeletonDataAsset = runtimeSkeletonAsset;
-                // PlayerFarming.Instance.Spine.initialSkinName = Plugin.Instance?.SkinToLoad; //"Shepherds/Karakal"
+                // PlayerFarming.Instance.Spine.initialSkinName = Plugin.Instance?.SkinToLoad;
                 // PlayerFarming.Instance.Spine.Initialize(true);
             }
             else
