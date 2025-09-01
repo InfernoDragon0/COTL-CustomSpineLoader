@@ -13,6 +13,9 @@ More features to come soon!
 ### How to Load Player Skins
 After installing this plugin correctly, you should be able to navigate to ```Bepinex > plugins > CotLSpineLoader > PlayerSkins``` folder and setup your custom spine skins there.
 
+### Base Player Template Skin
+- If you want to build your own skins, you may get the Base Player Template Skin via [NexusMods](https://www.nexusmods.com/cultofthelamb/mods/49?tab=files)
+
 #### Exporting a usable Spine Skin
 - Ensure that you have exported the Spine Skin via ```3.8.99 Spine```
 - Export as a JSON file.
@@ -57,6 +60,9 @@ skins is an array of any amount of strings of the Skins that exist in your Spine
 
 ## Known Issues
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
+
+## Contributors
+- Thumbnail Art by [LiteLikesArt](https://x.com/LiteLikesArt)
 
 ## Developed by [InfernoDragon0](https://github.com/InfernoDragon0)
 
