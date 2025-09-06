@@ -1,9 +1,9 @@
 {
     "name": "CotLSpineLoader",
-    "version_number": "0.0.4",
+    "version_number": "0.0.5",
     "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
     "description": "Helper to Load Spine Skins and overwrite existing Skins",
     "dependencies": [
-        "xhayper-COTL_API-0.2.8"
+        "xhayper-COTL_API-0.2.11"
     ]
 }

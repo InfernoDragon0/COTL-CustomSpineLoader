@@ -6,11 +6,16 @@
 # Custom Spine Loader
 Currently features:
 - Custom Player Spines with multi skin select
-- Custom Follower Color Control
 - Override Existing Structure
+- Custom Follower Color Control
+
+### Custom Player Spine
+- Completely change the look of your lamb!
+![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1753503373-1249445029.png)
 
 ### Override Existing Structure
-- Change the looks of any Structure!
+- Change the looks of any Structure! (right side is changed)
+![img](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/image.png)
 
 ### Custom Follower Color Control
 - Fully control each follower's color and transparency!
@@ -66,11 +71,54 @@ defaultSkin will be the first skin that is loaded when the game starts
 
 skins is an array of any amount of strings of the Skins that exist in your Spine Skeleton that you want to load into game
 
+### How to override existing structure designs
+Create a folder named after the structure you want to override in BuildingOverrides folder. Add images and a config.json file.
+
+A Complete structure skin folder would look something like this
+```
+| CustomSpineLoader.dll
+| BuildingOverrides
+    | FISHING_HUT
+        | fishing_hut_BACK.png
+        | fishing_hut_FRONT.png
+        | config.json
+```
+
+### Config file for Structure Overrides
+Each Structure Override Skin folder must have a config.json file in it. The following is how you should create the file:
+``` 
+{
+    "overrides": [
+        {
+            "spriteImageName": "fishing_hut_BACK.png",
+            "offset": { "x": 0, "y": 0, "z": 0 },
+            "scale": { "x": 1, "y": 1, "z": 1 },
+            "rotation": { "x": 0, "y": 0, "z": 0 }
+        },
+        {
+            "spriteImageName": "fishing_hut_FRONT.png",
+            "offset": { "x": 0, "y": 0, "z": 0 },
+            "scale": { "x": 1, "y": 1, "z": 1 },
+            "rotation": { "x": 0, "y": 0, "z": 0 }
+        },
+    ]
+}
+```
+
+Change your offset and rotation accordingly, so as to build your structure design.
+
+Few things to note when building the custom structure design:
+- when sprites are rendered at ROTATION 0,0,0 it will place the sprite flat against the ground.
+- an OFFSET Z of at least -0.027 should be applied to flat sprites to remove z fighting, then to place other sprites above it, go more negative such as -0.04
+- if the sprites should be facing the camera, a ROTATION of 300,0,0 is necessary
+
 ## Known Issues
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
 
 ## Contributors
 - Thumbnail Art by [LiteLikesArt](https://x.com/LiteLikesArt)
+- Preview Skin by Fiore
+- Preview Fishing Hut Structure by hallejr
 
 ## Developed by [InfernoDragon0](https://github.com/InfernoDragon0)
 
