@@ -1,4 +1,5 @@
-﻿using CustomSpineLoader.SpineLoaderHelper;
+﻿using COTL_API.CustomStructures;
+using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using Lamb.UI;
 using Spine;
@@ -57,7 +58,7 @@ namespace CustomSpineLoader.Patches
             }
 
         }
-        
+
         [HarmonyPatch(typeof(SaveAndLoad), nameof(SaveAndLoad.Load))]
         [HarmonyPostfix]
         private static void SaveAndLoad_Load(int saveSlot)
@@ -70,6 +71,19 @@ namespace CustomSpineLoader.Patches
         private static void SaveAndLoad_Save()
         {
             CustomColorHelper.SaveCustomColors();
+        }
+
+        //For building overrides
+        [HarmonyPatch(typeof(Structure), nameof(Structure.Start))]
+        [HarmonyPostfix]
+        private static void Structure_Start(Structure __instance)
+        {
+            var buildingName = __instance.Type.ToString();
+            var overrides = StructureBuildingOverrideHelper.GetOverridesForBuilding(buildingName);
+            if (overrides == null || overrides.Count == 0) return;
+
+            Plugin.Log.LogInfo($"Custom Spine Loader: {overrides.Count} overrides to building {buildingName}.");
+            CustomStructureManager.OverrideStructureBuilding(__instance.gameObject, overrides);
         }
     }
     

@@ -15,7 +15,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CustomSpineLoader";
-        public const string PluginVer = "0.0.3";
+        public const string PluginVer = "0.0.5";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
@@ -28,6 +28,7 @@ namespace CustomSpineLoader
             PluginPath = Path.GetDirectoryName(Info.Location);
             // PlayerSpineLoader.LoadAllPlayerSpines();
             CustomFollowerCommandManager.Add(new CustomColorCommand());
+            StructureBuildingOverrideHelper.LoadBuildingOverrides();
         }
 
         private void OnEnable()

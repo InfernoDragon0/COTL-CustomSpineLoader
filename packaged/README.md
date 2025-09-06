@@ -7,6 +7,14 @@
 Currently features:
 - Custom Player Spines with multi skin select
 - Custom Follower Color Control
+- Override Existing Structure
+
+### Override Existing Structure
+- Change the looks of any Structure!
+
+### Custom Follower Color Control
+- Fully control each follower's color and transparency!
+![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1754472602-386733900.png)
 
 More features to come soon!
 
