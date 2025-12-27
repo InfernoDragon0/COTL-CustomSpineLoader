@@ -1,6 +1,7 @@
 using BepInEx;
 using BepInEx.Logging;
 using COTL_API.CustomFollowerCommand;
+using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
@@ -14,8 +15,8 @@ namespace CustomSpineLoader
     public class Plugin : BaseUnityPlugin
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
-        public const string PluginName = "CustomSpineLoader";
-        public const string PluginVer = "0.0.5";
+        public const string PluginName = "CultTweaker";
+        public const string PluginVer = "1.0.0";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
@@ -29,6 +30,7 @@ namespace CustomSpineLoader
             // PlayerSpineLoader.LoadAllPlayerSpines();
             CustomFollowerCommandManager.Add(new CustomColorCommand());
             StructureBuildingOverrideHelper.LoadBuildingOverrides();
+            CustomItemLoader.LoadAllCustomItems();
         }
 
         private void OnEnable()

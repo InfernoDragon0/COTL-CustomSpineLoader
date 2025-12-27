@@ -10,6 +10,7 @@ public class CustomColorHelper
 {
     //TODO: maybe, each part of the body can be a different color in the future
     public static Dictionary<int, CustomFollowerColor> CustomColors { get; private set; } = [];
+    public static Dictionary<int, CustomFollowerSpineSkin> CustomFollowerSkinConfigs { get; private set; } = [];
     public static void LoadCustomColors(int saveSlot)
     {
         if (!File.Exists(Path.Combine(Plugin.PluginPath, $"CustomColors{saveSlot}.json")))
@@ -61,4 +62,11 @@ public class CustomFollowerColor(int id, float r, float g, float b, float a)
     public float G { get; set; } = Mathf.Clamp(g, 0f, 1f);
     public float B { get; set; } = Mathf.Clamp(b, 0f, 1f);
     public float A { get; set; } = Mathf.Clamp(a, 0f, 1f);
+}
+
+[Serializable]
+public class CustomFollowerSpineSkin
+{
+    public string SpineName;
+    public List<string> SkinsApplied;
 }

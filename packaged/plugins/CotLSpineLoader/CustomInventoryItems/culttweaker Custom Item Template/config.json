@@ -1,0 +1,28 @@
+{
+  "ItemName": "Cult Tweaker Test Item",
+  "Lore": "An experimental item created for testing CultTweaker.",
+  "Description": "A test item used to validate CustomInventoryItem loading.",
+  "SpritePath": "placeholder.png",
+
+  "ItemType": 0,
+
+  "CanBeRefined": true,
+  "RefineryInputQty": 10,
+  "CustomRefineryDuration": 60.0,
+
+  "FuelWeight": 2,
+  "FoodSatitation": 90,
+
+  "IsFish": false,
+  "IsFood": true,
+  "IsBigFish": false,
+  "IsCurrency": false,
+  "IsBurnableFuel": true,
+  "CanBeGivenToFollower": true,
+
+  "AddItemToOfferingShrine": true,
+  "AddItemToDungeonChests": true,
+  "DungeonChestSpawnChance": 50,
+  "DungeonChestMinAmount": 1,
+  "DungeonChestMaxAmount": 2
+}

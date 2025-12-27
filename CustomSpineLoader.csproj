@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <AssemblyName>CustomSpineLoader</AssemblyName>
+        <AssemblyName>CultTweaker</AssemblyName>
         <AssemblyVersion>1.0.0</AssemblyVersion>
         <ReleaseVersion>1.0.0</ReleaseVersion>
         <TargetFramework>netstandard2.0</TargetFramework>
@@ -32,6 +32,10 @@
       <Reference Include="COTL_API" Private="false">
         <HintPath>lib\COTL_API.dll</HintPath>
       </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="APIHelper\" />
     </ItemGroup>
 
 </Project>
