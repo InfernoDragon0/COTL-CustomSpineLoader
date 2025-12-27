@@ -6,10 +6,15 @@
 - Join the discord server for support, feedback, suggestions and general modding talk: [modding discord](https://discord.gg/MUjww9ndx2)
 - If you like the mod, consider donating [here](https://ko-fi.com/infernodragon0)! Thank you for checking out the mod!
 
-# Custom Spine Loader
+# Cult Tweaker
+A mod that allows players to add their own custom content into game! The features will be updated over time to match COTL API's functionalities.
+
 Currently features:
-- Custom Player Spines with multi skin select
+- Load Custom Player Spines
+- Load Custom Follower Spines
 - Custom Follower Color Control
+- Override Original Structure Designs
+- Load and Create Custom Items
 
 More features to come soon!
 
