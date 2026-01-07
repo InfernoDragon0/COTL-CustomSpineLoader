@@ -8,44 +8,36 @@ using UnityEngine;
 
 namespace CustomSpineLoader.APIHelper;
 
-public class CustomItemLoader
+public class CustomItemLoader : Loader<CustomItemConfig>
 {
-    public static List<InventoryItem.ITEM_TYPE> loadedItems = [];
+    public static List<InventoryItem.ITEM_TYPE> loadedItems = []; 
+    //might need to keep track of the name as well, dictionary, for custom items to be used as recipe items
+
+    public CustomItemLoader() : base("CustomInventoryItems") { }
+
     public static void LoadAllCustomItems()
     {
-        var playerFolder = Path.Combine(Plugin.PluginPath, "CustomInventoryItems");
-        if (!Directory.Exists(playerFolder))
-            Directory.CreateDirectory(playerFolder);
+        var loader = new CustomItemLoader();
+        var entries = loader.LoadAll();
 
-        var folders = Directory.GetDirectories(playerFolder);
-        Plugin.Log.LogInfo("Found " + folders.Length + " custom items to load.");
-
-        foreach (var folder in folders)
+        foreach (var entry in entries)
         {
-            //TODO: Localization
-            var customItemFolder = Path.GetFileName(folder);
+            var customItemJson = entry.Config;
+            var customItemFolder = entry.FolderName;
             Plugin.Log.LogInfo("Found custom item folder: " + customItemFolder);
-
-            var config = Directory.GetFiles(folder, "config.json", SearchOption.TopDirectoryOnly);
-            if (config.Length <= 0)
-            {
-                Plugin.Log.LogInfo("No config.json found for item: " + customItemFolder);
-                continue;
-            }
-            var customItemJson = JsonConvert.DeserializeObject<CustomItemConfig>(File.ReadAllText(config[0]));
 
             var internalName = "CULT_TWEAKER_" + customItemJson.ItemName.ToUpper().Replace(" ", "_");
 
             Plugin.Log.LogInfo("Trying to create custom item : " + customItemJson.ItemName);
-            var spritePath1 = Path.Combine(playerFolder, customItemFolder, customItemJson.SpritePath);
+            var spritePath1 = Path.Combine(entry.FolderPath, customItemJson.SpritePath);
             if (!File.Exists(spritePath1))
             {
                 Plugin.Log.LogError("Sprite file not found for item " + customItemJson.ItemName + " at path: " + spritePath1);
                 continue;
             }
 
-            Plugin.Log.LogInfo("Loading Sprite via " + Path.Combine(playerFolder, customItemFolder, customItemJson.SpritePath));
-            
+            Plugin.Log.LogInfo("Loading Sprite via " + spritePath1);
+
             try
             {
                 CustomInventoryItem CustomItem = new CultTweakerCustomItem(
@@ -55,7 +47,7 @@ public class CustomItemLoader
                     customItemJson.CanBeRefined,
                     customItemJson.RefineryInputQty,
                     customItemJson.CustomRefineryDuration,
-                    Path.Combine(playerFolder, customItemFolder, customItemJson.SpritePath),
+                    spritePath1,
                     customItemJson.FuelWeight,
                     customItemJson.FoodSatitation,
                     customItemJson.IsFish,
@@ -72,7 +64,7 @@ public class CustomItemLoader
                     customItemJson.DungeonChestMinAmount,
                     customItemJson.DungeonChestMaxAmount
                 );
-    
+
                 Plugin.Log.LogInfo("Successfully created custom item with internal name : " + CustomItem.InternalName);
                 loadedItems.Add(CustomItemManager.Add(CustomItem));
             }

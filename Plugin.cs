@@ -25,12 +25,19 @@ namespace CustomSpineLoader
 
         private void Awake()
         {
-            Plugin.Log = base.Logger;
+            Log = base.Logger;
             PluginPath = Path.GetDirectoryName(Info.Location);
             // PlayerSpineLoader.LoadAllPlayerSpines();
             CustomFollowerCommandManager.Add(new CustomColorCommand());
             StructureBuildingOverrideHelper.LoadBuildingOverrides();
+            Log.LogInfo("Loading Custom Items...");
             CustomItemLoader.LoadAllCustomItems();
+            Log.LogInfo("Loading Custom Meals...");
+            CustomMealLoader.LoadAllCustomMeals();
+            Log.LogInfo("Loading Custom Tarots...");
+            CustomTarotLoader.LoadAllCustomTarots();
+            Log.LogInfo("Loading Custom Structures...");
+            CustomStructureLoader.LoadAllCustomStructures();
         }
 
         private void OnEnable()

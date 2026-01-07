@@ -1,0 +1,16 @@
+{
+  "StructureName": "Custom Altar",
+  "SpritePath": "custom_altar.png",
+  "Overrides": [],
+
+  "BuildDurationMinutes": 60,
+
+  "BuildOnlyOne": true,
+
+  "RequiresTempleToBuild": true,
+
+  "CanBeFlipped": false,
+  "Bounds": { "X": 2, "Y": 2 },
+
+  "ItemCost": { "LOG": 20, "STONE": 10 }
+}

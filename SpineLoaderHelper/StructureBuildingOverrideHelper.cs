@@ -98,3 +98,12 @@ public class SerializableVector3
 
     public Vector3 ToVector3() => new(X, Y, Z);
 }
+
+[Serializable]
+public class SerializableVector2
+{
+    public float X;
+    public float Y;
+
+    public Vector2 ToVector2() => new(X, Y);
+}

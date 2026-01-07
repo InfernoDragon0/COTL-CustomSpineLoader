@@ -1,0 +1,36 @@
+{
+  "CardName": "Omen of Fortune",
+  "SpritePath": "omen_of_fortune.png",
+  "BackSpritePath": "tarot_back.png",
+  "Category": "Custom",
+  "TarotCardWeight": 200,
+  "MaxTarotCardLevel": 1,
+  "IsCursedRelated": false,
+
+  "Lore": "A mysterious card promising small blessings.",
+  "Description": "Increases loot and chance for relics.",
+
+  "SpiritHeartCount": 0.0,
+  "SpiritAmmoCount": 0,
+
+  "WeaponDamageMultiplierIncrease": 0.0,
+  "CurseDamageMultiplierIncrease": 0.0,
+  "WeaponCritChanceIncrease": 0.05,
+
+  "LootIncreaseModifier": 1,
+
+  "MovementSpeedMultiplier": 0.05,
+  "AttackRateMultiplier": 0.0,
+  "BlackSoulsMultiplier": 0.0,
+  "HealChance": 0.0,
+  "NegateDamageChance": 0.0,
+  "DamageAllEnemiesAmount": 0,
+  "HealthAmountMultiplier": 0,
+  "AmmoEfficiency": 0.0,
+  "BlackSoulsOnDamage": 0,
+
+  "ItemToDropInternalName": "CULT_TWEAKER_TEST_ITEM",
+  "ChanceOfGainingBlueHeart": 0.02,
+  "ChanceForRelicsMultiplier": 0.10,
+  "RelicChargeMultiplier": 0.1
+}

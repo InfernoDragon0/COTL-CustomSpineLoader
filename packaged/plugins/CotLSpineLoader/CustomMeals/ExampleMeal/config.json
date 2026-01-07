@@ -1,0 +1,36 @@
+{
+  "ItemName": "Hearty Stew",
+  "Lore": "A filling stew made from local ingredients.",
+  "Description": "Restores stamina and heals slightly.",
+  "SpritePath": "hearty_stew.png",
+
+  "ItemType": 2,
+
+  "CanBeRefined": false,
+  "RefineryInputQty": 0,
+  "CustomRefineryDuration": 0.0,
+
+  "FuelWeight": 0,
+  "FoodSatitation": 150,
+
+  "IsFish": false,
+  "IsFood": true,
+  "IsBigFish": false,
+  "IsCurrency": false,
+  "IsBurnableFuel": false,
+  "CanBeGivenToFollower": true,
+
+  "AddItemToOfferingShrine": false,
+  "AddItemToDungeonChests": false,
+  "DungeonChestSpawnChance": 0,
+  "DungeonChestMinAmount": 0,
+  "DungeonChestMaxAmount": 0,
+
+  "SatiationLevel": 3,
+  "TummyRating": 0.85,
+  "MealQuality": "GOOD",
+  "MealSafeToEat": true,
+
+  "Recipe": { "MEAT": 1, "VEGETABLE": 2 },
+  "MealEffectsDictionary": { "HEAL": 50 }
+}
