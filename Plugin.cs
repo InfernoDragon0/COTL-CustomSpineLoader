@@ -28,6 +28,7 @@ namespace CustomSpineLoader
             Log = base.Logger;
             PluginPath = Path.GetDirectoryName(Info.Location);
             // PlayerSpineLoader.LoadAllPlayerSpines();
+            Log.LogInfo("Cult Tweaker is loading! For more information or templates on how to use this mod, go to the NexusMods page!");
             CustomFollowerCommandManager.Add(new CustomColorCommand());
             StructureBuildingOverrideHelper.LoadBuildingOverrides();
             Log.LogInfo("Loading Custom Items...");

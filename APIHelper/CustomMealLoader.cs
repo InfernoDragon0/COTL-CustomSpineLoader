@@ -2,9 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using COTL_API.CustomInventory;
-using COTL_API.CustomMeal;
 using COTL_API.Helpers;
-using Newtonsoft.Json;
 using UnityEngine;
 
 namespace CustomSpineLoader.APIHelper;

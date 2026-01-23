@@ -66,7 +66,7 @@ namespace CustomSpineLoader.Patches
             CustomColorHelper.LoadCustomColors(saveSlot);
         }
 
-        [HarmonyPatch(typeof(SaveAndLoad), nameof(SaveAndLoad.Save))]
+        [HarmonyPatch(typeof(SaveAndLoad), nameof(SaveAndLoad.Save), [])]
         [HarmonyPostfix]
         private static void SaveAndLoad_Save()
         {
