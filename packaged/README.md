@@ -8,6 +8,7 @@
 
 Features:
 
+- Fleece Transmog for all player skins
 - Custom Player Spines [Multi Skin Select]
 - Custom Follower Color Control
 - Override Existing Structure Designs
@@ -17,6 +18,10 @@ Features:
   - Custom Structure
   - Custom Tarot Cards
   - More to be supported soon!
+
+### Fleece Transmog for all player skins
+
+- By pressing F7 (player 1), or F8 (player 2), you can swap between all possible visual fleeces on each of the player skins (lamb, goat, snake, owl) on the fly! You can swap visual fleeces anytime, anywhere.
 
 ### Custom Player Spine
 
@@ -40,7 +45,6 @@ You can now create your own stuff to be added into the game without code!
 Currently supports Custom Items, Food, Structures, Tarot Cards.
 
 You may use the templates provided via [NexusMods](https://www.nexusmods.com/cultofthelamb/mods/49?tab=files) for creation of custom data. The templates are in JSON format and is easy to follow.
-
 
 ### How to Load Player Skins
 

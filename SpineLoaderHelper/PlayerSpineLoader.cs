@@ -8,11 +8,50 @@ using COTL_API.CustomSkins;
 using System.Linq;
 using Newtonsoft.Json;
 using UnityEngine.SceneManagement;
+using System.Collections.Generic;
 
 namespace CustomSpineLoader.SpineLoaderHelper;
 
 public class PlayerSpineLoader
 {
+    public static List<string> FleeceRotation = []; //string of skin names that have fleeces
+    public static int currentFleeceIndexP1 = -1;
+    public static int currentFleeceIndexP2 = -1;
+
+    public static List<(string, string)> FleeceOverrideSlots = [ //(slot index, slot name)
+        ("images/PonchoLeft", "PonchoLeft"),
+        ("images/PonchoRight", "PonchoRight"),
+        ("images/PonchoLeft", "PonchoLeft2"),
+        ("images/PonchoRight", "PonchoRight2"),
+        ("images/PonchoExtra", "PonchoExtra"),
+        ("RopeTopLeft", "images/RopeTopLeft"),
+        ("RopeTopRight", "images/RopeTopRight"),
+        ("images/Rope", "images/Rope"),
+        ("images/Bell", "Bell")
+    ]; //Tuple<string, string>
+
+    public static int CycleNextFleece(int playerID)
+    {
+        var result = 0;
+        switch (playerID)
+        {
+            case 0:
+                //clamp index to 0 to FleeceRotation
+                currentFleeceIndexP1++;
+                if (currentFleeceIndexP1 >= FleeceRotation.Count) currentFleeceIndexP1 = 0;
+                result = currentFleeceIndexP1;
+                break;
+            case 1:
+                currentFleeceIndexP2++;
+                if (currentFleeceIndexP2 >= FleeceRotation.Count) currentFleeceIndexP2 = 0;
+                result = currentFleeceIndexP2;
+                break;
+        }
+
+        Plugin.Log.LogInfo("Player " + (playerID + 1) + " cycled to fleece index " + result + " (" + FleeceRotation[result] + ")");
+
+        return result;
+    }
     public static void LoadAllPlayerSpines(Material material = null)
     {
         //get the plugin path, then find the foler PlayerSkins in it
