@@ -21,22 +21,27 @@ Features:
 
 ### Fleece Transmog for all player skins
 
-- By pressing F7 (player 1), or F8 (player 2), you can swap between all possible visual fleeces on each of the player skins (lamb, goat, snake, owl) on the fly! You can swap visual fleeces anytime, anywhere.
+By pressing F7 (player 1), or F8 (player 2), you can swap between all possible visual fleeces on each of the player skins (lamb, goat, snake, owl) on the fly! You can swap visual fleeces anytime, anywhere.
+
+![image](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/images/fleececycler.png)
 
 ### Custom Player Spine
 
-- Add your own Player Spine into the game! Completely change the look of your lamb!
-  ![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1753503373-1249445029.png)
+Add your own Player Spine into the game! Completely change the look of your lamb!
+
+![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1753503373-1249445029.png)
 
 ### Override Existing Structure
 
-- Change the looks of any Structure! (right side is changed)
-  ![img](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/image.png)
+Change the looks of any Structure! (right side is changed)
+
+![img](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/image.png)
 
 ### Custom Follower Color Control
 
-- Fully control each follower's color and transparency!
-  ![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1754472602-386733900.png)
+Fully control each follower's color and transparency!
+
+![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1754472602-386733900.png)
 
 ### Custom Data Loader
 
@@ -151,6 +156,9 @@ Few things to note when building the custom structure design:
 ## Known Issues
 
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
+
+## Supporters
+- Midboy
 
 ## Contributors
 
