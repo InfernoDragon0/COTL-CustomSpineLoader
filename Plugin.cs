@@ -18,7 +18,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CultTweaker";
-        public const string PluginVer = "1.0.3";
+        public const string PluginVer = "1.0.4";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);

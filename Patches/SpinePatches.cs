@@ -3,6 +3,7 @@ using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using Lamb.UI;
+using Sirenix.Serialization.Utilities;
 using Spine;
 using Spine.Unity;
 using System;
@@ -22,6 +23,9 @@ namespace CustomSpineLoader.Patches
             var test = __instance.Spine.skeletonDataAsset.atlasAssets[0].PrimaryMaterial;
             Plugin.Log.LogInfo("Test result is " + test.name);
             Plugin.Log.LogInfo("Test shader is " + test.shader.name);
+            
+            //Temporarily remove red emissions from custom skins
+            test.SetTextureScale("_EmissionMap", new Vector2(0f, 0f));
             PlayerSpineLoader.LoadAllPlayerSpines(test);
 
             Plugin.Log.LogInfo("Creating Fleece Rotation!");

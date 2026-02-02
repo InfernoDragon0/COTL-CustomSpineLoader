@@ -10,7 +10,7 @@ Features:
 
 - Fleece Transmog for all player skins
 - Custom Player Spines [Multi Skin Select]
-- Custom Follower Control
+- Full Follower Customization
 - Override Existing Structure Designs
 - Custom Data Loader - create your own custom stuff!
   - Custom Items
@@ -37,11 +37,11 @@ Change the looks of any Structure! (right side is changed)
 
 ![img](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/image.png)
 
-### Custom Follower Control
+### Full Follower Customization
 
-Fully control each follower's looks and outfits!
+Fully control each follower's looks and outfits! You can change their Color (R,G,B,A) and what they wear (outfit, hat, necklace). This will override whatever job outfit they have and always wear the custom look instead. You must toggle "Enable Customization"  for Follower Costume Override to work as well.
 
-![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1754472602-386733900.png)
+![img](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/images/customizer.png)
 
 ### Custom Data Loader
 

@@ -1,5 +1,14 @@
 # Changelog
 
+### v1.0.4
+
+- Fixed an issue where red overlays are present on custom player spines
+
+### v1.0.3
+
+- Fix an issue where Fleece Cycling did not override some extra parts of the fleece
+- Full Follower Customization Support
+
 ### v1.0.2
 
 - Fix an issue where picking up weapons caused an error
