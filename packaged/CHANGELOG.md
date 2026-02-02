@@ -1,5 +1,9 @@
 # Changelog
 
+### v1.0.2
+
+- Fix an issue where picking up weapons caused an error
+
 ### v1.0.1
 
 - Fleece Cycling for all player skins

@@ -1,4 +1,5 @@
 ﻿using COTL_API.CustomStructures;
+using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using Lamb.UI;
@@ -66,27 +67,28 @@ namespace CustomSpineLoader.Patches
             if (CoopManager.CoopActive && __instance.playerID == 1)
             {
                 fleeceIndex = PlayerSpineLoader.currentFleeceIndexP2;
-                fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
                 Plugin.Log.LogInfo("Applying fleece skin for Player 2: " + fleeceSkinName);
             }
             else
             {
                 fleeceIndex = PlayerSpineLoader.currentFleeceIndexP1;
-                fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
             }
 
-            if (fleeceIndex == -1 || fleeceSkinName == "")
+            if (fleeceIndex == -1)
             {
                 Plugin.Log.LogInfo("No fleece skin to apply.");
                 return;
             }
-            
+
+            fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
+
+
             Plugin.Log.LogInfo("Applying fleece skin: " + fleeceSkinName);
             //first, we load the default lamb spine, then we can extract the fleece attachments from it.
             var lambSpine = __instance.Spine;
             var lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
 
-            if (lambSpine == null)
+            if (lambSpine == null) 
             {
                 Plugin.Log.LogInfo("Lamb skin was null after cycling, an error occurred! at skin name " + fleeceSkinName);
                 return;
@@ -106,10 +108,65 @@ namespace CustomSpineLoader.Patches
                 Plugin.Log.LogInfo($"Applied {slot.Item2} attachment to current skin.");
             }
 
-            
+
             Plugin.Log.LogInfo("Applied" + fleeceSkinName + " attachment to current skin.");
             lambSpine.Skeleton.SetSlotsToSetupPose();
             lambSpine.Update(0);
+        }
+        
+        [HarmonyPatch(typeof(FollowerBrain), nameof(FollowerBrain.SetFollowerCostume),
+            [typeof(Skeleton), typeof(int), typeof(string), typeof(int), typeof(FollowerOutfitType),
+                typeof(FollowerHatType), typeof(FollowerClothingType), typeof(FollowerCustomisationType),
+                typeof(FollowerSpecialType), typeof(InventoryItem.ITEM_TYPE), typeof(string), typeof(FollowerInfo)])]
+        [HarmonyPrefix]
+        public static bool FollowerBrain_SetFollowerCostume_Prefix(
+            FollowerBrain __instance,
+            Skeleton skeleton,
+            ref string skinName,
+            ref FollowerOutfitType outfit,
+            ref FollowerHatType hat,
+            ref FollowerClothingType clothing,
+            FollowerCustomisationType customisation,
+            ref FollowerSpecialType special,
+            ref InventoryItem.ITEM_TYPE necklace,
+            FollowerInfo info)
+        {
+            if (info != null)
+            {
+                Plugin.Log.LogInfo($"Follower ID: {info.ID}, Name: {info.Name}");
+                var colorData = CustomColorHelper.GetCustomColor(info.ID);
+                if (colorData == null) return true;
+                if (!colorData.CustomFollowerCostume) return true;
+
+                Plugin.Log.LogInfo($"Custom costume enabled: {colorData.CustomFollowerCostume}, ClothingType: {colorData.FollowerClothingType}, SpecialType: {colorData.FollowerSpecialType}, HatType: {colorData.FollowerHatType}, OutfitType: {colorData.FollowerOutfitType}");
+                hat = (FollowerHatType)colorData.FollowerHatType;
+                necklace = CustomColorCommand.GetNecklaceToUse(colorData.FollowerNecklaceType, info);
+                special = (FollowerSpecialType)colorData.FollowerSpecialType;
+                clothing = (FollowerClothingType)colorData.FollowerClothingType;
+                outfit = (FollowerOutfitType)colorData.FollowerOutfitType;
+
+                //snowman skin
+                if (special is FollowerSpecialType.Snowman_Bad or FollowerSpecialType.Snowman_Average or FollowerSpecialType.Snowman_Great)
+                {
+                    skinName = CustomColorCommand.GetSnowmanRandomSkin(special);
+                    Plugin.Log.LogInfo("Applying snowman skin: " + skinName);
+                }
+
+                //blacklisted clothing types
+                if (clothing is FollowerClothingType.Jumper or FollowerClothingType.Shirt or FollowerClothingType.Robe)
+                {
+                    clothing = FollowerClothingType.Normal_1;
+                    Plugin.Log.LogInfo("Clothing type was blacklisted, defaulting to Normal.");
+                }
+
+                //blacklisted outfits
+                if (outfit is FollowerOutfitType.Custom)
+                {
+                    outfit = FollowerOutfitType.None;
+                    Plugin.Log.LogInfo("Outfit type was blacklisted, defaulting to None.");
+                }
+            }
+            return true;
         }
 
 
@@ -120,7 +177,7 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void FollowerBrain_SetFollowerCostume(FollowerBrain __instance, Skeleton skeleton, FollowerInfo info)
         {
-            Plugin.Log.LogInfo("Setting follower costume for");
+            Plugin.Log.LogInfo("Setting follower costume for"); 
             if (info != null)
             {
                 Plugin.Log.LogInfo($"Follower ID: {info.ID}, Name: {info.Name}");
@@ -136,6 +193,28 @@ namespace CustomSpineLoader.Patches
                 skeleton.FindSlot("HEAD_SKIN_BTM").SetColor(new Color(colorData.R, colorData.G, colorData.B, 1));
 
                 skeleton.A = colorData.A;
+                var follower = FollowerManager.FindFollowerByID(info.ID);
+                if (follower != null)
+                {
+                    follower.transform.localScale = new Vector3(colorData.scale, colorData.scale, 1f);
+                    Plugin.Log.LogInfo("Set follower scale to " + colorData.scale);
+                }
+                
+
+                if (colorData.CustomFollowerCostume)
+                {
+                    try
+                    {
+                        
+                        Plugin.Log.LogInfo("Costume override applied successfully.");
+                    }
+                    catch (Exception)
+                    {
+                        Plugin.Log.LogWarning("The costume combinations were invalid, try another!");
+                    }
+                }
+
+                
             }
             else
             {

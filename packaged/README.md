@@ -10,7 +10,7 @@ Features:
 
 - Fleece Transmog for all player skins
 - Custom Player Spines [Multi Skin Select]
-- Custom Follower Color Control
+- Custom Follower Control
 - Override Existing Structure Designs
 - Custom Data Loader - create your own custom stuff!
   - Custom Items
@@ -37,9 +37,9 @@ Change the looks of any Structure! (right side is changed)
 
 ![img](https://raw.githubusercontent.com/InfernoDragon0/COTL-CustomSpineLoader/refs/heads/master/image.png)
 
-### Custom Follower Color Control
+### Custom Follower Control
 
-Fully control each follower's color and transparency!
+Fully control each follower's looks and outfits!
 
 ![img](https://staticdelivery.nexusmods.com/mods/4736/images/49/49-1754472602-386733900.png)
 
@@ -80,7 +80,7 @@ After installing this plugin correctly, you should be able to navigate to ``Bepi
 A Complete Skin folder would look something like this
 
 ```
-| CustomSpineLoader.dll
+| CultTweaker.dll
 | PlayerSkins
     | DEBUGSKIN
         | player-main.json
@@ -114,7 +114,7 @@ Create a folder named after the structure you want to override in BuildingOverri
 A Complete structure skin folder would look something like this
 
 ```
-| CustomSpineLoader.dll
+| CultTweaker.dll
 | BuildingOverrides
     | FISHING_HUT
         | fishing_hut_BACK.png
@@ -158,7 +158,9 @@ Few things to note when building the custom structure design:
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
 
 ## Supporters
+
 - Midboy
+- Anorak2023
 
 ## Contributors
 
