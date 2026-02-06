@@ -3,11 +3,13 @@ using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using Lamb.UI;
+using Newtonsoft.Json;
 using Sirenix.Serialization.Utilities;
 using Spine;
 using Spine.Unity;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 namespace CustomSpineLoader.Patches
@@ -15,10 +17,36 @@ namespace CustomSpineLoader.Patches
     [HarmonyPatch]
     public class SkinSelectorPatch
     {
+        [HarmonyPatch(typeof(FollowerInformationBox), nameof(FollowerInformationBox.ConfigureImpl))]
+        [HarmonyPostfix]
+        private static void FollowerInformationBox_ConfigureImpl(FollowerInformationBox __instance)
+        {
+            if (FollowerSpineLoader.CustomFollowerSkins.ContainsKey(__instance.FollowerInfo.SkinName))
+                __instance.FollowerSpine.Skeleton.Skin = FollowerSpineLoader.CustomFollowerSkins[__instance.FollowerInfo.SkinName];
+        }
+
+        [HarmonyPatch(typeof(SkeletonData), nameof(SkeletonData.FindSkin), typeof(string))]
+        [HarmonyPostfix]
+        private static void SkeletonData_FindSkin(ref Skin? __result, SkeletonData __instance, string skinName)
+        {
+            if (__result != null) return;
+            if (FollowerSpineLoader.CustomFollowerSkins.TryGetValue(skinName, out var skin))
+            {
+                __result = skin;
+                DataManager.SetFollowerSkinUnlocked(skinName);
+            }
+        }
+
         [HarmonyPatch(typeof(PlayerFarming), nameof(PlayerFarming.Awake))]
         [HarmonyPrefix]
         private static bool PlayerFarming_Awake(PlayerFarming __instance)
         {
+            if (PlayerSpineLoader.LoadedCustomSpines)
+            {
+                Plugin.Log.LogWarning("PlayerFarming_Awake was called again after all custom spines were loaded! Skipping...");
+                return true;
+            }
+
             Plugin.Log.LogInfo("PlayerFarming Awake called, checking for custom spines...");
             var test = __instance.Spine.skeletonDataAsset.atlasAssets[0].PrimaryMaterial;
             Plugin.Log.LogInfo("Test result is " + test.name);
@@ -57,6 +85,22 @@ namespace CustomSpineLoader.Patches
                 Plugin.Log.LogInfo("Added fleece skin: Owl");
             }
 
+            //add custom fleece skins
+            foreach (var kvp in PlayerSpineLoader.FleeceCyclingSpines)
+            {
+                var spineName = kvp.Key;
+
+                foreach (var fleeceName in kvp.Value.Item2)
+                {
+                    var fleeceString = "CultTweaker_" + spineName + "_" + fleeceName;
+                    if (!PlayerSpineLoader.FleeceRotation.Contains(fleeceString))
+                    {
+                        PlayerSpineLoader.FleeceRotation.Add(fleeceString);
+                        Plugin.Log.LogInfo("Added custom fleece skin: " + fleeceString);
+                    }
+                }
+            }
+
             return true;
         }
 
@@ -64,6 +108,7 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void PlayerFarming_SetSkin(ref Skin __result, PlayerFarming __instance, bool BlackAndWhite)
         {
+            if (!Plugin.FleeceCyclingEnabled.Value) return;
 
             var fleeceIndex = -1;
             var fleeceSkinName = "";
@@ -84,13 +129,51 @@ namespace CustomSpineLoader.Patches
                 return;
             }
 
+            if (fleeceIndex >= PlayerSpineLoader.FleeceRotation.Count)
+            {
+                Plugin.Log.LogInfo("Fleece skin index out of range. Cycle with F7 or F8 to fix.");
+                return;
+            }
+
             fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
 
 
             Plugin.Log.LogInfo("Applying fleece skin: " + fleeceSkinName);
             //first, we load the default lamb spine, then we can extract the fleece attachments from it.
             var lambSpine = __instance.Spine;
-            var lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+            // var lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+
+            Skin lambSkin;
+
+            if (fleeceSkinName.Contains("CultTweaker_"))
+            {
+                //split the name for the custom fleece, CultTweaker_SpineName_FleeceName, max split of 2
+                var split = fleeceSkinName.Split(['_'], count: 3);
+                if (split.Length < 3)
+                {
+                    Plugin.Log.LogWarning("Invalid custom fleece skin name: " + fleeceSkinName);
+                    return;
+                }
+
+                var SpineName = split[1];
+                if (!PlayerSpineLoader.FleeceCyclingSpines.ContainsKey(SpineName))
+                {
+                    Plugin.Log.LogWarning("Invalid spine skin name: " + fleeceSkinName + " for spine: " + SpineName);
+                    return;
+                }
+
+                lambSkin = PlayerSpineLoader.FleeceCyclingSpines[SpineName].Item1.skeletonData.FindSkin(split[2]);
+
+                if (lambSkin == null)
+                {
+                    Plugin.Log.LogWarning("Defaulting to default as Custom Fleece skin not found: " + fleeceSkinName);
+                    lambSkin = lambSpine.Skeleton.Data.FindSkin("Lamb");
+                }
+            }
+            else
+            {
+                lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+            }
 
             if (lambSpine == null) 
             {
@@ -157,7 +240,7 @@ namespace CustomSpineLoader.Patches
                 }
 
                 //blacklisted clothing types
-                if (clothing is FollowerClothingType.Jumper or FollowerClothingType.Shirt or FollowerClothingType.Robe)
+                if (clothing is FollowerClothingType.Jumper or FollowerClothingType.Shirt or FollowerClothingType.Robe or FollowerClothingType.Count)
                 {
                     clothing = FollowerClothingType.Normal_1;
                     Plugin.Log.LogInfo("Clothing type was blacklisted, defaulting to Normal.");
@@ -181,6 +264,26 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void FollowerBrain_SetFollowerCostume(FollowerBrain __instance, Skeleton skeleton, FollowerInfo info)
         {
+            //debug dump all slots to a text file
+            if (Plugin.DebugDumpFollowerSpineAtlas.Value)
+            {
+                Plugin.Log.LogWarning("Debug Dump is enabled! Performance may be impacted");
+                var fileName = Path.Combine(Plugin.PluginPath, "followerSlots.json");
+                if (File.Exists(fileName))
+                    Plugin.Log.LogInfo("followerSlots.json already exists, skipping dump. Delete the file to dump again.");
+                else
+                {
+                    Plugin.Log.LogInfo("Creating dump for followerslots");
+                    List<DebugOutputSkin> list = [];
+                    foreach (var slot in skeleton.Skin.Attachments)
+                    {
+                        list.Add(new DebugOutputSkin { SlotIndex = slot.SlotIndex, PartName = slot.Name });
+                    }
+                    var jsonString = JsonConvert.SerializeObject(list, Formatting.Indented);
+                    File.AppendAllText(fileName, jsonString);
+                }
+            }
+
             Plugin.Log.LogInfo("Setting follower costume for"); 
             if (info != null)
             {

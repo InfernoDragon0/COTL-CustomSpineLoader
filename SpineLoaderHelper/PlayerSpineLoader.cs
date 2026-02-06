@@ -9,14 +9,21 @@ using System.Linq;
 using Newtonsoft.Json;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
+using Spine.Unity;
 
 namespace CustomSpineLoader.SpineLoaderHelper;
 
 public class PlayerSpineLoader
 {
     public static List<string> FleeceRotation = []; //string of skin names that have fleeces
+    public static Dictionary<string, Tuple<SkeletonDataAsset, List<string>>> FleeceCyclingSpines = []; //spineName: Skel and list of skin names
     public static int currentFleeceIndexP1 = -1;
     public static int currentFleeceIndexP2 = -1;
+
+    public static string currentFleeceSpineNameP1 = "";
+    public static string currentFleeceSpineNameP2 = "";
+
+    public static bool LoadedCustomSpines = false;
 
     public static List<(string, string)> FleeceOverrideSlots = [ //(slot index, slot name)
         ("images/PonchoLeft", "PonchoLeft"),
@@ -58,6 +65,11 @@ public class PlayerSpineLoader
     }
     public static void LoadAllPlayerSpines(Material material = null)
     {
+        if (LoadedCustomSpines)
+        {
+            Plugin.Log.LogInfo("Load Player Spines was called again but already loaded!");
+            return;
+        }
         //get the plugin path, then find the foler PlayerSkins in it
         var playerFolder = Path.Combine(Plugin.PluginPath, "PlayerSkins");
         //check if the player folder exists
@@ -78,6 +90,7 @@ public class PlayerSpineLoader
 
             var defaultSkinName = "Lamb";
             var skinList = new string[0];
+            var isFleeceCycleSkin = false;
 
             if (config.Length > 0)
             {
@@ -87,6 +100,7 @@ public class PlayerSpineLoader
                 {
                     defaultSkinName = configObj.DefaultSkin;
                     skinList = configObj.Skins;
+                    isFleeceCycleSkin = configObj.FleeceCyclingOnly;
                     Plugin.Log.LogInfo($"Using default skin: {defaultSkinName}");
                     Plugin.Log.LogInfo($"Using skin list: {string.Join(", ", skinList)}");
                 }
@@ -108,14 +122,24 @@ public class PlayerSpineLoader
                     tex.name = Path.GetFileNameWithoutExtension(textureFile);
                     textures[Array.IndexOf(spineTextures, textureFile)] = tex;
                 }
-                
+
                 var mat = material ?? new Material(Shader.Find("Spine/Skeleton")); //TODO: find out what shader cotl uses
                 var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
                 var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
                 Plugin.Log.LogInfo("Creating skeleton for " + playerSpineName);
                 Plugin.Log.LogInfo("Using material name " + mat.name);
-                CustomSkinManager.AddPlayerSpine(playerSpineName, runtimeSkeletonAsset, skinList.ToList());
-                CustomSkinManager.ChangeSelectedPlayerSpine(playerSpineName + "/" + defaultSkinName);
+
+                if (isFleeceCycleSkin)
+                {
+                    Plugin.Log.LogInfo("Skin: " + playerSpineName + " is added as a fleece cycle skin.");
+                    FleeceCyclingSpines.Add(playerSpineName, new(runtimeSkeletonAsset, [.. skinList]));
+                }
+                else
+                {
+                    CustomSkinManager.AddPlayerSpine(playerSpineName, runtimeSkeletonAsset, [.. skinList]);
+                    CustomSkinManager.ChangeSelectedPlayerSpine(playerSpineName + "/" + defaultSkinName);
+                }
+
 
                 // PlayerFarming.Instance.Spine.skeletonDataAsset = runtimeSkeletonAsset;
                 // PlayerFarming.Instance.Spine.initialSkinName = Plugin.Instance?.SkinToLoad;
@@ -127,6 +151,8 @@ public class PlayerSpineLoader
             }
 
         }
+        
+        LoadedCustomSpines = true;
     }
 }
 
@@ -134,4 +160,5 @@ public class PlayerSpineConfig
 {
     public string DefaultSkin { get; set; }
     public string[] Skins { get; set; }
+    public bool FleeceCyclingOnly { get; set; } = false;
 }

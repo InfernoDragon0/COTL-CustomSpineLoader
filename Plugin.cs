@@ -6,6 +6,7 @@ using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
+using Spine;
 using System.IO;
 using UnityEngine;
 
@@ -18,15 +19,19 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CultTweaker";
-        public const string PluginVer = "1.0.4";
+        public const string PluginVer = "1.0.5";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
 
         internal static string PluginPath;
 
-        private ConfigEntry<int> CurrentFleeceIndexP1 { get; set; }
-        private ConfigEntry<int> CurrentFleeceIndexP2 { get; set; }
+        public static ConfigEntry<int> CurrentFleeceIndexP1 { get; set; }
+        public static ConfigEntry<int> CurrentFleeceIndexP2 { get; set; }
+
+        public static ConfigEntry<bool> DebugDumpFollowerSpineAtlas { get; set; }
+
+        public static ConfigEntry<bool> FleeceCyclingEnabled { get; set; }
 
         private void Awake()
         {
@@ -44,15 +49,42 @@ namespace CustomSpineLoader
             CustomTarotLoader.LoadAllCustomTarots();
             Log.LogInfo("Loading Custom Structures...");
             CustomStructureLoader.LoadAllCustomStructures();
+            Log.LogInfo("Loading Custom Follower Overrides...");
+            FollowerSpineLoader.LoadAllNonSpineSkins();
 
             CurrentFleeceIndexP1 = Config.Bind("Fleece", "CurrentFleeceIndexP1", -1, "Current Fleece Index for Player 1");
             CurrentFleeceIndexP2 = Config.Bind("Fleece", "CurrentFleeceIndexP2", -1, "Current Fleece Index for Player 2");
+            DebugDumpFollowerSpineAtlas = Config.Bind(
+                "Debug", "DumpFollowerSpineAtlas", false,
+                "If true, will dump the follower spine slots to a json file. May impact performance when enabled. Ensure followerSlots.json is not present before dumping.");
+            FleeceCyclingEnabled = Config.Bind("Fleece", "FleeceCyclingEnabled", true, "Enable Fleece Cycling for all players.");
+            
+            
             PlayerSpineLoader.currentFleeceIndexP1 = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
         }
 
         public void Update()
         {
+            if (Input.GetKeyDown(KeyCode.F9))
+            {
+                Log.LogInfo("Toggling Fleece Cycling to " + !FleeceCyclingEnabled.Value);
+                FleeceCyclingEnabled.Value = !FleeceCyclingEnabled.Value;
+
+                if (!FleeceCyclingEnabled.Value && PlayerFarming.Instance != null)
+                {
+                    if (CoopManager.CoopActive)
+                    {
+                        PlayerFarming.players[1].SetSkin();
+                    }
+                    PlayerFarming.Instance.SetSkin();
+                    
+                }
+                else
+                {
+                    TestApplySpineOverride(cycle: false);
+                }
+            }
 
             if (Input.GetKeyDown(KeyCode.F7))
             {
@@ -65,9 +97,28 @@ namespace CustomSpineLoader
                 TestApplySpineOverride(1);
             }
         }
-        private void TestApplySpineOverride(int playerID = 0)
+        private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
         {
-            var fleeceIndex = PlayerSpineLoader.CycleNextFleece(playerID);
+            if (!FleeceCyclingEnabled.Value)
+            {
+                Log.LogWarning("Fleece Cycling is disabled, Press F9 to enable first!");
+                return;
+            }
+
+            var fleeceIndex = -1;
+            if (cycle)
+            {
+                fleeceIndex = PlayerSpineLoader.CycleNextFleece(playerID);
+            }
+            else
+            {
+                fleeceIndex = playerID switch
+                {
+                    0 => CurrentFleeceIndexP1.Value,
+                    1 => CurrentFleeceIndexP2.Value,
+                    _ => -1
+                };
+            }
             var fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
             Log.LogInfo("Applying fleece skin: " + fleeceSkinName);
             //first, we load the default lamb spine, then we can extract the fleece attachments from it.
@@ -92,9 +143,39 @@ namespace CustomSpineLoader
                 CurrentFleeceIndexP1.Value = fleeceIndex;
             }
 
-            var lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+            Skin lambSkin;
 
-            if (lambSpine == null)
+            if (fleeceSkinName.Contains("CultTweaker_"))
+            {
+                //split the name for the custom fleece, CultTweaker_SpineName_FleeceName, max split of 2
+                var split = fleeceSkinName.Split(['_'], count: 3);
+                if (split.Length < 3)
+                {
+                    Log.LogWarning("Invalid custom fleece skin name: " + fleeceSkinName);
+                    return;
+                }
+
+                var SpineName = split[1];
+                if (!PlayerSpineLoader.FleeceCyclingSpines.ContainsKey(SpineName))
+                {
+                    Log.LogWarning("Invalid spine skin name: " + fleeceSkinName + " for spine: " + SpineName);
+                    return;
+                }
+
+                lambSkin = PlayerSpineLoader.FleeceCyclingSpines[SpineName].Item1.skeletonData.FindSkin(split[2]);
+
+                if (lambSkin == null)
+                {
+                    Log.LogWarning("Defaulting to default as Custom Fleece skin not found: " + fleeceSkinName);
+                    lambSkin = lambSpine.Skeleton.Data.FindSkin("Lamb");
+                }
+            }
+            else
+            {
+                lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+            }
+
+            if (lambSpine == null || lambSkin == null)
             {
                 Log.LogInfo("Lamb skin was null after cycling, an error occurred! at skin name " + fleeceSkinName);
                 return;
