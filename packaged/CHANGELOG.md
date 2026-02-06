@@ -1,5 +1,14 @@
 # Changelog
 
+### v1.0.5
+
+- Fixed an issue where fleece cycling was going over array bounds
+- Fixed an issue where fleece cycling caused a softlock
+- Added Custom Player Spine Fleece Cycling support
+- Added a toggle to turn on or off fleece cycling (F9)
+- Added Custom Follower Form + Variant support
+- Added a config to dump follower spine slots
+
 ### v1.0.4
 
 - Fixed an issue where red overlays are present on custom player spines
