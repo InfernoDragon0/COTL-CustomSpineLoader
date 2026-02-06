@@ -156,6 +156,7 @@ Image file is optional, if you do not have one, you can override slot colors by 
 
 ```json
 {
+    "overrideBaseSkin": "Cat",
     "partConfigs": {
         "part2": {
             "SlotIndex": 89,
