@@ -1,0 +1,46 @@
+{
+    "partConfigs": {
+        "part2": {
+            "SlotIndex": 89,
+            "PartName": "HEAD_SKIN_BTM",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "rotation": -90.0,
+            "offsetX": 0.0,
+            "offsetY": 0.0,
+            "colorChoices": ["#FF0000"],
+
+            "templateComment": "Only SlotIndex and PartName is required, the rest of the values are optional. defaults are - scaleX: 1, scaleY: 1, rotation: -90, offsetX: 0, offsetY: 0",
+            "templateComment2": "colorChoices must have the same length for each partConfig, otherwise it will not be added.",
+            "templateComment3": "Each partConfig is named after the image file without the extension. part2.png = part2",
+            "templateComment4": "Image file is optional, if you do not have one, you can override slot colors by adding partConfigs, like color_leg_left",
+            "templateComment5": "To get the slot index and names, enable DumpFollowerSpineAtlas in InfernoDragon0.cotl.CustomSpineLoader.cfg file."
+        },
+        "part1back": {
+            "SlotIndex": 89,
+            "PartName": "HEAD_SKIN_BTM_BACK",
+            "colorChoices": ["#FF0000"]
+        },
+        "part2top": {
+            "SlotIndex": 91,
+            "PartName": "HEAD_SKIN_TOP",
+            "colorChoices": ["#FF0000"]
+        },
+        "part1backtop": {
+            "SlotIndex": 91,
+            "PartName": "HEAD_SKIN_TOP_BACK",
+            "colorChoices": ["#FF0000"]
+        },
+        "color_leg_left": {
+            "SlotIndex": 48,
+            "PartName": "LEG_LEFT_SKIN",
+            "colorChoices": ["#0000FF"],
+            "templateComment": "This is an example of an override without image file. It will only override the color."
+        },
+        "color_leg_right": {
+            "SlotIndex": 49,
+            "PartName": "LEG_RIGHT_SKIN",
+            "colorChoices": ["#0000FF"]
+        }
+    }
+}

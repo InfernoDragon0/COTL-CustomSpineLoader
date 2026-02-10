@@ -7,8 +7,11 @@ using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using Spine;
+using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace CustomSpineLoader
 {
@@ -19,7 +22,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CultTweaker";
-        public const string PluginVer = "1.0.5";
+        public const string PluginVer = "1.0.6";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
@@ -58,12 +61,12 @@ namespace CustomSpineLoader
                 "Debug", "DumpFollowerSpineAtlas", false,
                 "If true, will dump the follower spine slots to a json file. May impact performance when enabled. Ensure followerSlots.json is not present before dumping.");
             FleeceCyclingEnabled = Config.Bind("Fleece", "FleeceCyclingEnabled", true, "Enable Fleece Cycling for all players.");
-            
-            
+
+
             PlayerSpineLoader.currentFleeceIndexP1 = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
         }
-
+    
         public void Update()
         {
             if (Input.GetKeyDown(KeyCode.F9))
@@ -78,7 +81,7 @@ namespace CustomSpineLoader
                         PlayerFarming.players[1].SetSkin();
                     }
                     PlayerFarming.Instance.SetSkin();
-                    
+
                 }
                 else
                 {

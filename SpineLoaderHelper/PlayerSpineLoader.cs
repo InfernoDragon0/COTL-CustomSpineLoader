@@ -38,7 +38,8 @@ public class PlayerSpineLoader
         ("RopeTopLeft", "images/RopeTopLeft"),
         ("RopeTopRight", "images/RopeTopRight"),
         ("images/Rope", "images/Rope"),
-        ("images/Bell", "Bell")
+        ("images/Bell", "Bell"),
+        ("images/Body", "Body")
     ]; //Tuple<string, string>
 
     public static int CycleNextFleece(int playerID)

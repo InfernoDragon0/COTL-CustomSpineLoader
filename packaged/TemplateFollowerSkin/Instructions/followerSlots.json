@@ -1,0 +1,702 @@
+[
+  {
+    "SlotIndex": 36,
+    "PartName": "ARM_LEFT_SKIN"
+  },
+  {
+    "SlotIndex": 74,
+    "PartName": "ARM_RIGHT_SKIN"
+  },
+  {
+    "SlotIndex": 54,
+    "PartName": "BODY_BTM"
+  },
+  {
+    "SlotIndex": 54,
+    "PartName": "BODY_BTM_UP"
+  },
+  {
+    "SlotIndex": 53,
+    "PartName": "Body_Naked"
+  },
+  {
+    "SlotIndex": 53,
+    "PartName": "Body_Naked_Up"
+  },
+  {
+    "SlotIndex": 55,
+    "PartName": "BODY_TOP"
+  },
+  {
+    "SlotIndex": 55,
+    "PartName": "BODY_TOP_UP"
+  },
+  {
+    "SlotIndex": 47,
+    "PartName": "WEAPON_HAND_SKIN"
+  },
+  {
+    "SlotIndex": 66,
+    "PartName": "BowlBtm"
+  },
+  {
+    "SlotIndex": 67,
+    "PartName": "BowlFood"
+  },
+  {
+    "SlotIndex": 68,
+    "PartName": "BowlFront"
+  },
+  {
+    "SlotIndex": 88,
+    "PartName": "EXTRA_BTM"
+  },
+  {
+    "SlotIndex": 94,
+    "PartName": "EXTRA_TOP"
+  },
+  {
+    "SlotIndex": 94,
+    "PartName": "EXTRA_TOP_BACK"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_ANGRY_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_ANGRY_UP_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_CLOSED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_DEAD"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_HALF_CLOSED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_HALF_CLOSED_ANGRY_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SACRIFICE_1"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SACRIFICE_2"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SHOCKED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SLEEPING"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SLEEPY_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SMILE"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SMILE_DOWN"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SMILE_UP"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SQUINT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_UNCONVERTED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_UP"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SICK_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SICK_2_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_VERY_ANGRY"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_CRAZY"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_WORRIED_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_ENLIGHTENED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_DISSENTER_ANGRY"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_BLACK"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SLEEPING_SICK"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_SLEEPING_TIRED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_DISSENTER"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_BRAINWASHED"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_INSANE_LEFT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_STARS"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_WHITE"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE7"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE6"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE5"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE4"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE3"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE2"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "Face/EYE_FIRE1"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_WORRIED_LEFT_FREEZING"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_DEAD_LEFT_FREEZING"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_LEFT_HOT"
+  },
+  {
+    "SlotIndex": 102,
+    "PartName": "EYE_CURSED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_ANGRY"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_ANGRY_UP"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_CLOSED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_DEAD"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_HALF_CLOSED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_HALF_CLOSED_ANGRY"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SACRIFICE_1"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SACRIFICE_2"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SHOCKED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SLEEPING"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SLEEPY_RIGHT"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SMILE"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SMILE_DOWN"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SMILE_UP"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SQUINT"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_UNCONVERTED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_UP"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SICK_RIGHT"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SICK_2_RIGHT"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_VERY_ANGRY"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_CRAZY"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_WORRIED_RIGHT"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_ENLIGHTENED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_DISSENTER_ANGRY"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_BLACK"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SLEEPING_SICK"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_SLEEPING_TIRED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_DISSENTER"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_BRAINWASHED"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_INSANE"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_STARS"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_WHITE"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE1"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE2"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE3"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE4"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE5"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE6"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "Face/EYE_FIRE7"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_WORRIED_RIGHT_FREEZING"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_DEAD_FREEZING"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_HOT"
+  },
+  {
+    "SlotIndex": 101,
+    "PartName": "EYE_CURSED"
+  },
+  {
+    "SlotIndex": 93,
+    "PartName": "Angry_Colouring"
+  },
+  {
+    "SlotIndex": 93,
+    "PartName": "Sick_Colouring"
+  },
+  {
+    "SlotIndex": 93,
+    "PartName": "Possessed_Colouring"
+  },
+  {
+    "SlotIndex": 93,
+    "PartName": "Embarrassed_Colouring"
+  },
+  {
+    "SlotIndex": 93,
+    "PartName": "Freezing_Colouring"
+  },
+  {
+    "SlotIndex": 93,
+    "PartName": "Hot_Colouring"
+  },
+  {
+    "SlotIndex": 89,
+    "PartName": "HEAD_SKIN_BTM"
+  },
+  {
+    "SlotIndex": 89,
+    "PartName": "HEAD_SKIN_BTM_BACK"
+  },
+  {
+    "SlotIndex": 91,
+    "PartName": "HEAD_SKIN_TOP"
+  },
+  {
+    "SlotIndex": 91,
+    "PartName": "HEAD_SKIN_TOP_BACK"
+  },
+  {
+    "SlotIndex": 48,
+    "PartName": "LEG_LEFT_SKIN"
+  },
+  {
+    "SlotIndex": 49,
+    "PartName": "LEG_RIGHT_SKIN"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_HAPPY"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_SAD"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_DISSENTER"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_POSSESSED"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_SCARED"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_SIN"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_BRAINWASHED"
+  },
+  {
+    "SlotIndex": 103,
+    "PartName": "LESHY_FACE_SICK"
+  },
+  {
+    "SlotIndex": 92,
+    "PartName": "MARKINGS"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_BEDREST"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_CHEEKY"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_DEAD"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_DERP"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_ENLIGHTENED"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_GRIN"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_HAPPY"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_HAPPY-2"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_HUNGRY1"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_HUNGRY2"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_INDIFFERENT"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_INDIFFERENT_HUNGRY"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_INSANE"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_KISS"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_KISS_BIG"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_MUMBLE"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_MUMBLE_HUNGRY"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_RED"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SACRIFICE"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SAD"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SADDER"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SCARED"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SICK"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SLEEP_0"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_SLEEP_1"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_TALK_HAPPY"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_TALK_INDIFFERENT"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_TONGUE_1"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_TONGUE_2"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_TONGUE_3"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_TONGUE_4"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_WORRIED"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "MOUTH_ENLIGHTENED2"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "MOUTH_FREEZING1"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "MOUTH_FREEZING2"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "MOUTH_DEAD_FREEZING"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_HOT"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "Face/MOUTH_CURSED"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "MOUTH_CHATTERING1"
+  },
+  {
+    "SlotIndex": 96,
+    "PartName": "MOUTH_CHATTERING2"
+  },
+  {
+    "SlotIndex": 37,
+    "PartName": "SLEEVE_LEFT_BTM"
+  },
+  {
+    "SlotIndex": 75,
+    "PartName": "SLEEVE_RIGHT_BTM"
+  },
+  {
+    "SlotIndex": 56,
+    "PartName": "BODY_EXTRA_UP"
+  },
+  {
+    "SlotIndex": 56,
+    "PartName": "BODY_EXTRA"
+  },
+  {
+    "SlotIndex": 85,
+    "PartName": "SHAWL"
+  },
+  {
+    "SlotIndex": 85,
+    "PartName": "SHAWL_UP"
+  },
+  {
+    "SlotIndex": 86,
+    "PartName": "SHAWL"
+  },
+  {
+    "SlotIndex": 86,
+    "PartName": "SHAWL_UP"
+  },
+  {
+    "SlotIndex": 38,
+    "PartName": "SLEEVE_LEFT_TOP"
+  },
+  {
+    "SlotIndex": 76,
+    "PartName": "SLEEVE_RIGHT_TOP"
+  }
+]
