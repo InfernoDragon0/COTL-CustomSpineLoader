@@ -1,5 +1,9 @@
 # Changelog
 
+### v1.0.6
+
+- Fixed an issue where fleece cycling did not include parts of certain fleeces
+
 ### v1.0.5
 
 - Fixed an issue where fleece cycling was going over array bounds

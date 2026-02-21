@@ -38,6 +38,11 @@ public class CustomColorHelper
         return CustomColors.TryGetValue(id, out var color) ? color : null;
     }
 
+    public static float GetCustomScale(int id)
+    {
+        return CustomColors.TryGetValue(id,out _) ? CustomColors[id].scale : -1f;
+    }
+
     public static void SetCustomColor(int id, float r, float g, float b, float a, float scale = 1f)
     {
         var color = new CustomFollowerColor(id, r, g, b, a, scale);

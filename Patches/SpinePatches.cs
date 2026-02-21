@@ -175,7 +175,7 @@ namespace CustomSpineLoader.Patches
                 lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
             }
 
-            if (lambSpine == null) 
+            if (lambSpine == null)
             {
                 Plugin.Log.LogInfo("Lamb skin was null after cycling, an error occurred! at skin name " + fleeceSkinName);
                 return;
@@ -199,6 +199,17 @@ namespace CustomSpineLoader.Patches
             Plugin.Log.LogInfo("Applied" + fleeceSkinName + " attachment to current skin.");
             lambSpine.Skeleton.SetSlotsToSetupPose();
             lambSpine.Update(0);
+        }
+
+        [HarmonyPatch(typeof(Follower), nameof(Follower.Update))]
+        [HarmonyPostfix]
+        public static void Follower_FacePosition(Follower __instance)
+        {
+            var followerId = __instance.Brain.Info.ID;
+            var scale = CustomColorHelper.GetCustomScale(followerId);
+
+            if (scale <= 0) return;
+            __instance.Spine.skeleton.ScaleX = __instance.transform.position.x < __instance._destPos.x ? -scale : scale;
         }
         
         [HarmonyPatch(typeof(FollowerBrain), nameof(FollowerBrain.SetFollowerCostume),
@@ -303,7 +314,9 @@ namespace CustomSpineLoader.Patches
                 var follower = FollowerManager.FindFollowerByID(info.ID);
                 if (follower != null)
                 {
-                    follower.transform.localScale = new Vector3(colorData.scale, colorData.scale, 1f);
+                    // follower.transform.localScale = new Vector3(colorData.scale, colorData.scale, 1f);
+                    follower.Spine.skeleton.scaleY = colorData.scale;
+                    follower.Spine.skeleton.scaleX = colorData.scale;
                     Plugin.Log.LogInfo("Set follower scale to " + colorData.scale);
                 }
                 

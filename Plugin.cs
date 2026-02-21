@@ -22,7 +22,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CultTweaker";
-        public const string PluginVer = "1.0.6";
+        public const string PluginVer = "1.0.7";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
@@ -40,7 +40,7 @@ namespace CustomSpineLoader
         {
             Log = base.Logger;
             PluginPath = Path.GetDirectoryName(Info.Location);
-            // PlayerSpineLoader.LoadAllPlayerSpines();
+            PlayerSpineLoader.LoadAllPlayerSpines();
             Log.LogInfo("Cult Tweaker is loading! For more information or templates on how to use this mod, go to the NexusMods page!");
             CustomFollowerCommandManager.Add(new CustomColorCommand());
             StructureBuildingOverrideHelper.LoadBuildingOverrides();

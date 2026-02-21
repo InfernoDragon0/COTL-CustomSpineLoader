@@ -70,7 +70,9 @@ public class CustomColorCommand : CustomFollowerCommand
                     interaction.follower.Spine.skeleton.FindSlot("ARM_RIGHT_SKIN").SetColor(new Color(currentRed, currentGreen, currentBlue, 1));
                     interaction.follower.Spine.skeleton.FindSlot("HEAD_SKIN_BTM").SetColor(new Color(currentRed, currentGreen, currentBlue, 1));
                     interaction.follower.Spine.skeleton.A = currentAlpha;
-                    interaction.follower.transform.localScale = new Vector3(currentAlpha, currentScale, 1f);
+                    // interaction.follower.transform.localScale = new Vector3(currentAlpha, currentScale, 1f);
+                    interaction.follower.Spine.skeleton.ScaleX = currentScale;
+                    interaction.follower.Spine.skeleton.ScaleY = currentScale;
 
                     Plugin.Log.LogInfo("Scale is set to: " + currentScale + "X is " + interaction.follower.Spine.Skeleton.ScaleX + " Y is " + interaction.follower.Spine.Skeleton.ScaleY);
 
@@ -194,8 +196,8 @@ public class CustomColorCommand : CustomFollowerCommand
         var sliderAlpha = UnityEngine.Object.Instantiate(sliderTemplate, leftContentScrollViewViewportContent);
 
         //scale
-        // var spacerInstance11 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
-        // var sliderScale = UnityEngine.Object.Instantiate(sliderTemplate, leftContentScrollViewViewportContent);
+        var spacerInstance11 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
+        var sliderScale = UnityEngine.Object.Instantiate(sliderTemplate, leftContentScrollViewViewportContent);
 
         //toggle for follow costume enable disable
         var spacerInstance10 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
@@ -224,42 +226,42 @@ public class CustomColorCommand : CustomFollowerCommand
         var sliderGreenText = sliderGreen.GetComponentInChildren<TMP_Text>();
         var sliderBlueText = sliderBlue.GetComponentInChildren<TMP_Text>();
         var sliderAlphaText = sliderAlpha.GetComponentInChildren<TMP_Text>();
-        // var sliderScaleText = sliderScale.GetComponentInChildren<TMP_Text>();
+        var sliderScaleText = sliderScale.GetComponentInChildren<TMP_Text>();
         var toggleCustomColorText = toggleCustomColor.GetComponentInChildren<TMP_Text>();
 
         var sliderRedComponent = sliderRed.GetComponentInChildren<MMSlider>();
         var sliderGreenComponent = sliderGreen.GetComponentInChildren<MMSlider>();
         var sliderBlueComponent = sliderBlue.GetComponentInChildren<MMSlider>();
         var sliderAlphaComponent = sliderAlpha.GetComponentInChildren<MMSlider>();
-        // var sliderScaleComponent = sliderScale.GetComponentInChildren<MMSlider>();
+        var sliderScaleComponent = sliderScale.GetComponentInChildren<MMSlider>();
         var toggleCustomColorComponent = toggleCustomColor.GetComponentInChildren<MMToggle>();
 
         sliderRed.name = "SliderRed";
         sliderGreen.name = "SliderGreen";
         sliderBlue.name = "SliderBlue";
         sliderAlpha.name = "SliderAlpha";
-        // sliderScale.name = "SliderScale";
+        sliderScale.name = "SliderScale";
         toggleCustomColor.name = "ToggleCustomColor";
 
         sliderRedText.text = "Red";
         sliderGreenText.text = "Green";
         sliderBlueText.text = "Blue";
         sliderAlphaText.text = "Alpha";
-        // sliderScaleText.text = "Scale";
+        sliderScaleText.text = "Scale";
         toggleCustomColorText.text = "Enable Customization";
 
         sliderRedComponent.onValueChanged.AddListener(value => OnSliderValueChanged("Red", value));
         sliderGreenComponent.onValueChanged.AddListener(value => OnSliderValueChanged("Green", value));
         sliderBlueComponent.onValueChanged.AddListener(value => OnSliderValueChanged("Blue", value));
         sliderAlphaComponent.onValueChanged.AddListener(value => OnSliderValueChanged("Alpha", value));
-        // sliderScaleComponent.onValueChanged.AddListener(value => OnSliderValueChanged("Scale", value));
+        sliderScaleComponent.onValueChanged.AddListener(value => OnSliderValueChanged("Scale", value));
         toggleCustomColorComponent.OnValueChanged += (value) => OnToggleValueChanged(value, _followerSummaryMenuController._follower);
 
         sliderRedComponent._increment = 1;
         sliderGreenComponent._increment = 1;
         sliderBlueComponent._increment = 1;
         sliderAlphaComponent._increment = 1;
-        // sliderScaleComponent._increment = 1;
+        sliderScaleComponent._increment = 1;
 
         sliderRedComponent.value = _followerSummaryMenuController._follower.Spine.skeleton.FindSlot("ARM_LEFT_SKIN").R * 100f;
         sliderGreenComponent.value = _followerSummaryMenuController._follower.Spine.skeleton.FindSlot("ARM_LEFT_SKIN").G * 100f;
@@ -267,7 +269,7 @@ public class CustomColorCommand : CustomFollowerCommand
         sliderAlphaComponent.value = _followerSummaryMenuController._follower.Spine.skeleton.A * 100f;
 
         //scale is from 0.1 to 5.0, a percentage from 0 to 1
-        // sliderScaleComponent.value = ((currentScale - 0.1f) / 4.9f) * 100f;
+        sliderScaleComponent.value = ((currentScale - 0.1f) / 4.9f) * 100f;
 
         #endregion
 
