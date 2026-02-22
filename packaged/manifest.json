@@ -1,9 +1,9 @@
 {
     "name": "CotLSpineLoader",
-    "version_number": "1.0.6",
+    "version_number": "1.0.8",
     "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
     "description": "Also known as [CultTweaker]! This mod allows you to add custom stuff yourself, such as custom player skins, items, structures and more!",
     "dependencies": [
-        "xhayper-COTL_API-0.3.1"
+        "xhayper-COTL_API-0.3.2"
     ]
 }

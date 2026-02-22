@@ -41,66 +41,68 @@ namespace CustomSpineLoader.Patches
         [HarmonyPrefix]
         private static bool PlayerFarming_Awake(PlayerFarming __instance)
         {
-            if (PlayerSpineLoader.LoadedCustomSpines)
+            if (!PlayerSpineLoader.LoadedFleeceCycling)
             {
-                Plugin.Log.LogWarning("PlayerFarming_Awake was called again after all custom spines were loaded! Skipping...");
-                return true;
-            }
-
-            Plugin.Log.LogInfo("PlayerFarming Awake called, checking for custom spines...");
-            var test = __instance.Spine.skeletonDataAsset.atlasAssets[0].PrimaryMaterial;
-            Plugin.Log.LogInfo("Test result is " + test.name);
-            Plugin.Log.LogInfo("Test shader is " + test.shader.name);
-            
-            //Temporarily remove red emissions from custom skins
-            test.SetTextureScale("_EmissionMap", new Vector2(0f, 0f));
-            PlayerSpineLoader.LoadAllPlayerSpines(test);
-
-            Plugin.Log.LogInfo("Creating Fleece Rotation!");
-            var playerSpine = __instance.Spine;
-            foreach (var skinName in playerSpine.Skeleton.Data.Skins)
-            {
-                //skip lamb_intro and lamb_0
-                if (skinName.Name.ToLower().Contains("lamb_intro") || skinName.Name.ToLower().Contains("lamb_0")) continue;
-                if (skinName.Name.ToLower().Contains("lamb"))
+                Plugin.Log.LogInfo("Creating Fleece Rotation!");
+                var playerSpine = __instance.Spine;
+                foreach (var skinName in playerSpine.Skeleton.Data.Skins)
                 {
-                    PlayerSpineLoader.FleeceRotation.Add(skinName.Name);
-                    Plugin.Log.LogInfo("Added fleece skin: " + skinName.Name);
-                }
-            }
-            //add Goat, Snake, Owl if not exist
-            if (!PlayerSpineLoader.FleeceRotation.Contains("Goat"))
-            {
-                PlayerSpineLoader.FleeceRotation.Add("Goat");
-                Plugin.Log.LogInfo("Added fleece skin: Goat");
-            }
-            if (!PlayerSpineLoader.FleeceRotation.Contains("Snake"))
-            {
-                PlayerSpineLoader.FleeceRotation.Add("Snake");
-                Plugin.Log.LogInfo("Added fleece skin: Snake");
-            }
-            if (!PlayerSpineLoader.FleeceRotation.Contains("Owl"))
-            {
-                PlayerSpineLoader.FleeceRotation.Add("Owl");
-                Plugin.Log.LogInfo("Added fleece skin: Owl");
-            }
-
-            //add custom fleece skins
-            foreach (var kvp in PlayerSpineLoader.FleeceCyclingSpines)
-            {
-                var spineName = kvp.Key;
-
-                foreach (var fleeceName in kvp.Value.Item2)
-                {
-                    var fleeceString = "CultTweaker_" + spineName + "_" + fleeceName;
-                    if (!PlayerSpineLoader.FleeceRotation.Contains(fleeceString))
+                    if (PlayerSpineLoader.FleeceRotation.Contains(skinName.Name)) continue;
+                    //skip and lamb_0
+                    if (skinName.Name.ToLower().Contains("lamb_0")) continue;
+                    if (skinName.Name.ToLower().Contains("lamb"))
                     {
-                        PlayerSpineLoader.FleeceRotation.Add(fleeceString);
-                        Plugin.Log.LogInfo("Added custom fleece skin: " + fleeceString);
+                        PlayerSpineLoader.FleeceRotation.Add(skinName.Name);
+                        Plugin.Log.LogInfo("Added fleece skin: " + skinName.Name);
                     }
                 }
+                //add Goat, Snake, Owl if not exist
+                if (!PlayerSpineLoader.FleeceRotation.Contains("Goat"))
+                {
+                    PlayerSpineLoader.FleeceRotation.Add("Goat");
+                    Plugin.Log.LogInfo("Added fleece skin: Goat");
+                }
+                if (!PlayerSpineLoader.FleeceRotation.Contains("Snake"))
+                {
+                    PlayerSpineLoader.FleeceRotation.Add("Snake");
+                    Plugin.Log.LogInfo("Added fleece skin: Snake");
+                }
+                if (!PlayerSpineLoader.FleeceRotation.Contains("Owl"))
+                {
+                    PlayerSpineLoader.FleeceRotation.Add("Owl");
+                    Plugin.Log.LogInfo("Added fleece skin: Owl");
+                }
+
+                //add custom fleece skins
+                foreach (var kvp in PlayerSpineLoader.FleeceCyclingSpines)
+                {
+                    var spineName = kvp.Key;
+
+                    foreach (var fleeceName in kvp.Value.Item2)
+                    {
+                        var fleeceString = "CultTweaker_" + spineName + "_" + fleeceName;
+                        if (!PlayerSpineLoader.FleeceRotation.Contains(fleeceString))
+                        {
+                            PlayerSpineLoader.FleeceRotation.Add(fleeceString);
+                            Plugin.Log.LogInfo("Added custom fleece skin: " + fleeceString);
+                        }
+                    }
+                }
+
+                PlayerSpineLoader.LoadedFleeceCycling = true;
             }
 
+            if (!PlayerSpineLoader.LoadedCustomSpines)
+            {
+                Plugin.Log.LogInfo("PlayerFarming Awake called, checking for custom spines...");
+                var test = __instance.Spine.skeletonDataAsset.atlasAssets[0].PrimaryMaterial;
+                Plugin.Log.LogInfo("Test result is " + test.name);
+                Plugin.Log.LogInfo("Test shader is " + test.shader.name);
+                
+                //Temporarily remove red emissions from custom skins
+                test.SetTextureScale("_EmissionMap", new Vector2(0f, 0f));
+                PlayerSpineLoader.LoadAllPlayerSpines(test);
+            }
             return true;
         }
 

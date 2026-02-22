@@ -1,5 +1,13 @@
 # Changelog
 
+### v1.0.7 / v1.0.8
+
+- Added Scale setting (1x to 5x) to followers
+- Player Spine loader now supports co-op separate spine loading
+- Re-added Intro fleece to the fleece transmogs
+- Player Spines now load in instantly instead of loading it when entering the base for the first time
+  - This allows the custom lamb skins to be used in Intro
+
 ### v1.0.6
 
 - Fixed an issue where fleece cycling did not include parts of certain fleeces

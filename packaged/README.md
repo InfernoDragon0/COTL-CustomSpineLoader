@@ -252,6 +252,7 @@ Few things to note when building the custom structure design:
 
 - Midboy
 - Anorak2023
+- The Seraph of Tomorrow
 
 ## Contributors
 

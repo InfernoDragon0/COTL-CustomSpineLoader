@@ -24,6 +24,7 @@ public class PlayerSpineLoader
     public static string currentFleeceSpineNameP2 = "";
 
     public static bool LoadedCustomSpines = false;
+    public static bool LoadedFleeceCycling = false;
 
     public static List<(string, string)> FleeceOverrideSlots = [ //(slot index, slot name)
         ("images/PonchoLeft", "PonchoLeft"),
