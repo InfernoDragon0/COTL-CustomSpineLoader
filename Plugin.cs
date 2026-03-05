@@ -9,9 +9,11 @@ using HarmonyLib;
 using Spine;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
+using UnityEngine.UIElements.Collections;
 
 namespace CustomSpineLoader
 {
@@ -65,6 +67,8 @@ namespace CustomSpineLoader
 
             PlayerSpineLoader.currentFleeceIndexP1 = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
+
+            CustomDungeonManager.Add(new CustomDungeon());
         }
     
         public void Update()
@@ -99,6 +103,12 @@ namespace CustomSpineLoader
                 Log.LogInfo("F8 Pressed - Fleece Cycle Player 2");
                 TestApplySpineOverride(1);
             }
+            if (Input.GetKeyDown(KeyCode.F5))
+            {
+                Log.LogInfo("F5 Pressed - Test Custom Dungeon");
+                CustomDungeonManager.CustomDungeonList.Values.ElementAt(0).EnterDungeon();
+            }
+
         }
         private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
         {
