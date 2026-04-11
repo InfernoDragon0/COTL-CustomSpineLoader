@@ -1,6 +1,7 @@
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
+using COTL_API.CustomEnemy;
 using COTL_API.CustomFollowerCommand;
 using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.Commands;
@@ -68,7 +69,14 @@ namespace CustomSpineLoader
             PlayerSpineLoader.currentFleeceIndexP1 = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
 
-            CustomDungeonManager.Add(new CustomDungeon());
+            var customTestDungeon = new CustomDungeon();
+            var newEnemy = new TestCustomEnemy();
+            var enemyType = CustomEnemyManager.Add(newEnemy);
+            StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(newEnemy));
+            customTestDungeon.NormalEnemyList.Add(enemyType);
+            Plugin.Log.LogInfo($"Custom Test Enemy added with type {enemyType}, now size is {customTestDungeon.NormalEnemyList.Count}");
+
+            CustomDungeonManager.Add(customTestDungeon);
         }
     
         public void Update()

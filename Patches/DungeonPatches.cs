@@ -119,7 +119,7 @@ namespace CustomSpineLoader.Patches
             GenCheck = true;
 
             Plugin.Log.LogInfo("GenerateRoom_Generate for custom dungeon " + BiomeGenerator.Instance.DungeonLocation);
-            //Still need to find out which type of room it is, and if it is already completed or not. 
+            //TODO: this seems to run once for every room instance which makes it run multiple times. 
             Plugin.Log.LogInfo("Room complete status: " + BiomeGenerator.Instance.CurrentRoom.Completed);
             // if not completed, then spawn monsters
             if (!BiomeGenerator.Instance.CurrentRoom.Completed)
@@ -131,6 +131,7 @@ namespace CustomSpineLoader.Patches
                         break;
                     case ConnectionTypes.True:
                         Plugin.Log.LogInfo("True Room Generated");//mob room
+                        CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation].SpawnEnemies(__instance, NextRoomConnectionType);
                         break;
                     case ConnectionTypes.Entrance:
                         Plugin.Log.LogInfo("Entrance Room Generated");

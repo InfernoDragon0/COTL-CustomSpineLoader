@@ -22,6 +22,7 @@
 
     <ItemGroup Condition="'$(TargetFramework.TrimEnd(`0123456789`))' == 'net'">
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.2" PrivateAssets="all" />
+
     </ItemGroup>
 
     <ItemGroup>
@@ -31,6 +32,9 @@
     <ItemGroup>
       <Reference Include="COTL_API" Private="false">
         <HintPath>lib\COTL_API.dll</HintPath>
+      </Reference>
+      <Reference Include="AstarPathfindingProject" Private="false">
+        <HintPath>lib\AstarPathfindingProject.dll</HintPath>
       </Reference>
     </ItemGroup>
 
