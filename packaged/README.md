@@ -12,12 +12,22 @@ Features:
 - Custom Player Spines [Multi Skin Select]
 - Full Follower Customization + Custom Follower Forms
 - Override Existing Structure Designs
+- Custom Dungeons [Experimental!]
 - Custom Data Loader - create your own custom stuff!
   - Custom Items
   - Custom Food [WIP]
   - Custom Structure
   - Custom Tarot Cards
-  - More to be supported soon!
+  - More to be supported soon
+
+
+### Custom Dungeons [Experimental]
+
+Supports creating custom dungeon runs. This is an experimental feature that will be improved over time.
+
+Currently, you can only code a custom dungeon, JSON is not supported yet.
+
+You can specify the number of rooms and type of enemies to spawn in the dungeon, you can also specify what happens when the dungeon level completes. (once you reach the end room door, the dungeon completes. You can continue a new dungeon level, go back to base, etc..)
 
 ### Fleece Transmog for all player skins
 

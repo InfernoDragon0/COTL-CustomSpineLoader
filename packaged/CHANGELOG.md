@@ -1,5 +1,10 @@
 # Changelog
 
+### v1.1.0
+
+- Added Custom Dungeons
+- Fixed an issue with Custom Structures not loading fully (use new custom structure template)
+
 ### v1.0.7 / v1.0.8
 
 - Added Scale setting (1x to 5x) to followers

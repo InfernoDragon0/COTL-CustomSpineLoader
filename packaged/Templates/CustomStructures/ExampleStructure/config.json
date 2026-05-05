@@ -1,5 +1,6 @@
 {
   "StructureName": "Custom Altar",
+  "StructureDescription": "A custom altar for your cult.",
   "SpritePath": "custom_altar.png",
   "Overrides": [],
 
