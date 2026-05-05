@@ -70,7 +70,9 @@ namespace CustomSpineLoader
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
 
             var customTestDungeon = new CustomDungeon();
-            var newEnemy = new TestCustomEnemy();
+            var newEnemy = new BaseCustomEnemy();
+            // newEnemy.SpineOverride
+
             var enemyType = CustomEnemyManager.Add(newEnemy);
             StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(newEnemy));
             customTestDungeon.NormalEnemyList.Add(enemyType);

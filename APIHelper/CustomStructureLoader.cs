@@ -55,17 +55,21 @@ public class CustomStructureLoader : Loader<CustomStructureConfig>
                     }
                 }
 
-                CustomStructure custom = new CultTweakerCustomStructure(
-                    internalName,
-                    spritePath,
-                    cfg.BuildDurationMinutes,
-                    cfg.BuildOnlyOne,
-                    cfg.RequiresTempleToBuild,
-                    cfg.CanBeFlipped,
-                    bounds,
-                    itemCostList,
-                    buildingParts
-                );
+                CultTweakerCustomStructure custom = new()
+                {
+                    _internalName = internalName,
+                    _spritePath = spritePath,
+                    _buildDurationMinutes = cfg.BuildDurationMinutes,
+                    _buildOnlyOne = cfg.BuildOnlyOne,
+                    _requiresTempleToBuild = cfg.RequiresTempleToBuild,
+                    _canBeFlipped = cfg.CanBeFlipped,
+                    _bounds = bounds,
+                    _itemCost = itemCostList,
+                    _buildingParts = buildingParts,
+                    _structureNameTemp = cfg.StructureName,
+                    _structureDescriptionTemp = cfg.StructureDescription
+                };
+
 
                 Plugin.Log.LogInfo("Successfully created custom structure with internal name : " + custom.InternalName);
                 loadedStructures.Add(CustomStructureManager.Add(custom));
@@ -80,28 +84,29 @@ public class CustomStructureLoader : Loader<CustomStructureConfig>
     }
 }
 
-public class CultTweakerCustomStructure(
-    string internalName,
-    string spritePath,
-    int buildDurationMinutes,
-    bool buildOnlyOne,
-    bool requiresTempleToBuild,
-    bool canBeFlipped,
-    Vector2Int bounds,
-    List<StructuresData.ItemCost> itemCost,
-    List<CustomStructureBuildingData> buildingParts
-) : CustomStructure
+// string internalName,
+    // string spritePath,
+    // int buildDurationMinutes,
+    // bool buildOnlyOne,
+    // bool requiresTempleToBuild,
+    // bool canBeFlipped,
+    // Vector2Int bounds,
+    // List<StructuresData.ItemCost> itemCost,
+    // List<CustomStructureBuildingData> buildingParts
+public class CultTweakerCustomStructure : CustomStructure
 {
-    public readonly string _internalName = internalName;
-    public readonly string _spritePath = spritePath;
-    public readonly int _buildDurationMinutes = buildDurationMinutes;
-    public readonly bool _buildOnlyOne = buildOnlyOne;
-    public readonly bool _requiresTempleToBuild = requiresTempleToBuild;
-    public readonly bool _canBeFlipped = canBeFlipped;
-    public readonly Vector2Int _bounds = bounds;
-    public readonly List<StructuresData.ItemCost> _itemCost = itemCost;
+    public string _internalName = "EMPTY_CULTTWEAKER_CUSTOM_STRUCTURE";
+    public string _spritePath = "";
+    public string _structureNameTemp = "Nameless CultTweaker Structure";
+    public string _structureDescriptionTemp = "No description provided.";
+    public int _buildDurationMinutes = 30;
+    public bool _buildOnlyOne = false;
+    public bool _requiresTempleToBuild = true;
+    public bool _canBeFlipped = true;
+    public Vector2Int _bounds = new(1, 1);
+    public List<StructuresData.ItemCost> _itemCost = [];
 
-    public readonly List<CustomStructureBuildingData> _buildingParts = buildingParts;
+    public List<CustomStructureBuildingData> _buildingParts = [];
 
     //#########################################
 
@@ -115,12 +120,23 @@ public class CultTweakerCustomStructure(
     public override bool CanBeFlipped() => _canBeFlipped;
     public override Vector2Int Bounds => _bounds;
     public override List<StructuresData.ItemCost> Cost => _itemCost;
+
+    public override string GetLocalizedDescription()
+    {
+        return _structureDescriptionTemp;
+    }
+
+    public override string GetLocalizedName()
+    {
+        return _structureNameTemp;
+    }
 }
 
 public class CustomStructureConfig
 {
     //TODO: localization
     public string StructureName;
+    public string StructureDescription; //localization not supported yet!
     public string SpritePath;
     public List<StructureBuildingOverride> Overrides = [];
 
