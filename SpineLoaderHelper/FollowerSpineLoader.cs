@@ -135,21 +135,25 @@ public class FollowerSpineLoader
                     Plugin.Log.LogInfo("Variant will be created using base skin: " + configObj.OverrideBaseSkin);
 
                     List<Tuple<int, string, Texture2D, FollowerSkinPartConfig>> skinOverrideList = []; //slot name, part name, texture
-                    foreach (var textureFile in overrides)
+                    foreach (var partConfig in configObj.PartConfigs)
                     {
-                        var fileName = Path.GetFileNameWithoutExtension(textureFile);
-                        if (!configObj.PartConfigs.ContainsKey(fileName))
+                        var fileName = partConfig.Key;
+                        var partConfigVal = partConfig.Value;
+                        var textureFile = Path.Combine(variant, fileName + ".png");
+                        Texture2D tex = null;
+
+                        if (!File.Exists(textureFile))
                         {
-                            Plugin.Log.LogWarning($"{followerSkinName} variant: {variant} - {fileName} is not registered as a part in the config.json! Ignoring...");
-                            continue;
+                            Plugin.Log.LogWarning("Part config " + fileName + " does not have a corresponding PNG file in the variant folder, using only config values!");
                         }
-
-                        var partConfig = configObj.PartConfigs[fileName];
-
-                        Plugin.Log.LogInfo("Reading texture from " + Path.GetFileName(textureFile));
-                        Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
-                        tex.name = Path.GetFileNameWithoutExtension(textureFile);
-                        skinOverrideList.Add(new(partConfig.SlotIndex, partConfig.PartName, tex, partConfig));
+                        else
+                        {
+                            Plugin.Log.LogInfo("Reading texture from " + Path.GetFileName(textureFile));
+                            tex = TextureHelper.CreateTextureFromPath(textureFile);
+                            tex.name = Path.GetFileNameWithoutExtension(textureFile);
+                        }
+                        
+                        skinOverrideList.Add(new(partConfigVal.SlotIndex, partConfigVal.PartName, tex, partConfigVal)); //tex is now nullable
                     }
                     Plugin.Log.LogInfo(followerSkinName + " variant " + variant + " has a total of " + overrides.Length + " and " + skinOverrideList.Count + " were registered successfully.");
                     FollowerSkinOverrides.Add(followerSkinName + "_" + Path.GetFileName(variant), skinOverrideList);
@@ -245,6 +249,19 @@ public class FollowerSpineLoader
 
         foreach (var skinOverride in skinData)
         {
+            if (skinOverride.Item4.HideSlot)
+            {
+                finalSkin.RemoveAttachment(skinOverride.Item1, skinOverride.Item2);
+                Plugin.Log.LogInfo($"Hiding slot {skinOverride.Item1} for skin variant {skinVariantName}");
+                continue;
+            }
+
+            if (skinOverride.Item3 == null)
+            {
+                Plugin.Log.LogWarning($"No texture found for override part {skinOverride.Item2} in slot {skinOverride.Item1} for skin variant {skinVariantName}, apply config values only");
+                continue;
+            }
+
             try
             {
                 //build atlas per image provided
@@ -495,6 +512,7 @@ public class FollowerSkinPartConfig
     public float Rotation { get; set; } = -90f;
     public float OffsetX { get; set; } = 0f;
     public float OffsetY { get; set; } = 0f;
+    public bool HideSlot { get; set; } = false;
 
     public List<string> ColorChoices { get; set; } = ["#FFF"];
 }

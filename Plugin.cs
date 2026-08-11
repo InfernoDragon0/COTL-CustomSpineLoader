@@ -14,6 +14,8 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
+using UnityEngine.SceneManagement;
+using CustomSpineLoader.MapEditor;
 using UnityEngine.UIElements.Collections;
 
 namespace CustomSpineLoader
@@ -25,7 +27,7 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CultTweaker";
-        public const string PluginVer = "1.1.0";
+        public const string PluginVer = "1.1.1";
 
         internal static ManualLogSource Log;
         internal readonly static Harmony Harmony = new(PluginGuid);
@@ -38,6 +40,8 @@ namespace CustomSpineLoader
         public static ConfigEntry<bool> DebugDumpFollowerSpineAtlas { get; set; }
 
         public static ConfigEntry<bool> FleeceCyclingEnabled { get; set; }
+
+        private RuntimeMapEditor runtimeMapEditor;
 
         private void Awake()
         {
@@ -69,14 +73,17 @@ namespace CustomSpineLoader
             PlayerSpineLoader.currentFleeceIndexP1 = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
 
-            var customTestDungeon = new CustomDungeon();
-            var newEnemy = new BaseCustomEnemy();
-            // newEnemy.SpineOverride
+            SceneManager.sceneLoaded += OnSceneLoaded;
+            TryCreateRuntimeEditor(SceneManager.GetActiveScene());
 
-            var enemyType = CustomEnemyManager.Add(newEnemy);
-            StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(newEnemy));
-            customTestDungeon.NormalEnemyList.Add(enemyType);
-            Plugin.Log.LogInfo($"Custom Test Enemy added with type {enemyType}, now size is {customTestDungeon.NormalEnemyList.Count}");
+            var customTestDungeon = new CustomDungeon();
+            // TODO: Re-enable when BaseCustomEnemy is ready
+            // var newEnemy = new BaseCustomEnemy();
+            // // newEnemy.SpineOverride
+            // var enemyType = CustomEnemyManager.Add(newEnemy);
+            // StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(newEnemy));
+            // customTestDungeon.NormalEnemyList.Add(enemyType);
+            // Plugin.Log.LogInfo($"Custom Test Enemy added with type {enemyType}, now size is {customTestDungeon.NormalEnemyList.Count}");
 
             CustomDungeonManager.Add(customTestDungeon);
         }
@@ -119,6 +126,10 @@ namespace CustomSpineLoader
                 CustomDungeonManager.CustomDungeonList.Values.ElementAt(0).EnterDungeon();
             }
 
+            if (Input.GetKeyDown(KeyCode.F4) && runtimeMapEditor != null)
+            {
+                runtimeMapEditor.ToggleEditor();
+            }
         }
         private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
         {
@@ -240,6 +251,35 @@ namespace CustomSpineLoader
         {
             Harmony.PatchAll();
             Logger.LogInfo($"Loaded {PluginName}!");
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            if (scene.name == "Dungeon1")
+            {
+                TryCreateRuntimeEditor(scene);
+            }
+            else
+            {
+                DestroyRuntimeEditor();
+            }
+        }
+
+        private void TryCreateRuntimeEditor(Scene scene)
+        {
+            if (scene.name != "Dungeon1") return;
+            if (runtimeMapEditor != null) return;
+
+            var editorHost = new GameObject("RuntimeMapEditorHost");
+            runtimeMapEditor = editorHost.AddComponent<RuntimeMapEditor>();
+            DontDestroyOnLoad(editorHost);
+        }
+
+        private void DestroyRuntimeEditor()
+        {
+            if (runtimeMapEditor == null) return;
+            Destroy(runtimeMapEditor.gameObject);
+            runtimeMapEditor = null;
         }
 
         private void OnDisable()

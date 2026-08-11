@@ -1,5 +1,10 @@
 # Changelog
 
+### v1.1.1
+
+- Added hide slot for follower skins to hide specific slots
+- Removed test code for custom dungeons to prevent errors
+
 ### v1.1.0
 
 - Added Custom Dungeons
