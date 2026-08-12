@@ -4,7 +4,7 @@
         <AssemblyName>CultTweaker</AssemblyName>
         <AssemblyVersion>1.0.0</AssemblyVersion>
         <ReleaseVersion>1.0.0</ReleaseVersion>
-        <TargetFramework>netstandard2.0</TargetFramework>
+        <TargetFramework>netstandard2.1</TargetFramework>
         <LangVersion>latest</LangVersion>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <DebugType>full</DebugType>
@@ -35,6 +35,12 @@
       </Reference>
       <Reference Include="AstarPathfindingProject" Private="false">
         <HintPath>lib\AstarPathfindingProject.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.2D.SpriteShape.Runtime" Private="false">
+        <HintPath>lib\Unity.2D.SpriteShape.Runtime.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.2D.Common.Runtime" Private="false">
+        <HintPath>lib\Unity.2D.Common.Runtime.dll</HintPath>
       </Reference>
     </ItemGroup>
 

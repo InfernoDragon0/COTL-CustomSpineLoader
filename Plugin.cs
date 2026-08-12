@@ -270,9 +270,10 @@ namespace CustomSpineLoader
             if (scene.name != "Dungeon1") return;
             if (runtimeMapEditor != null) return;
 
+            // Not DontDestroyOnLoad: the editor is scoped to this scene and OnSceneLoaded
+            // destroys it on any other, so persisting it would only leak.
             var editorHost = new GameObject("RuntimeMapEditorHost");
             runtimeMapEditor = editorHost.AddComponent<RuntimeMapEditor>();
-            DontDestroyOnLoad(editorHost);
         }
 
         private void DestroyRuntimeEditor()
