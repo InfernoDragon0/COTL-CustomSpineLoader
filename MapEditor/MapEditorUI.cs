@@ -361,6 +361,34 @@ public class MapEditorUI
         return scrollbar;
     }
 
+    // A texture row for the option panels (blueprint snapshot previews). The outer row fixes
+    // the height for the layout group; the inner RawImage letterboxes to the texture's aspect.
+    public GameObject CreateImage(Transform parent, Texture2D texture, float height = 100f)
+    {
+        var row = new GameObject("Preview");
+        row.transform.SetParent(parent, false);
+        row.AddComponent<RectTransform>();
+        ApplyRowLayout(row, height);
+
+        var imageGO = new GameObject("Image");
+        imageGO.transform.SetParent(row.transform, false);
+        var rt = imageGO.AddComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+
+        var raw = imageGO.AddComponent<RawImage>();
+        raw.texture = texture;
+
+        var fitter = imageGO.AddComponent<AspectRatioFitter>();
+        fitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+        fitter.aspectRatio = texture != null && texture.height > 0
+            ? (float)texture.width / texture.height : 16f / 9f;
+
+        return row;
+    }
+
     // Vertical list container with padding, used for the tool option panels.
     public RectTransform CreateColumn(Transform parent, string name, float spacing = 6f)
     {

@@ -69,8 +69,48 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
     public void OnExit() => DestroyPreview();
 
+    // The loader wipes and rebuilds the room; anything this tool was tracking is gone.
+    public void ResetTracking()
+    {
+        _placed.Clear();
+        _pending = StructureBrain.TYPES.NONE;
+        DestroyPreview();
+    }
+
+    // The room snapshot skips objects this tool already serializes.
+    public bool IsTracked(GameObject go)
+    {
+        foreach (var placed in _placed)
+            if (placed.Instance == go) return true;
+        return false;
+    }
+
+    // Adopts a ctrl-drag clone of one of our placed structures so it saves with its type.
+    public bool TryAdoptClone(GameObject source, GameObject clone)
+    {
+        foreach (var placed in _placed)
+        {
+            if (placed.Instance != source) continue;
+            _placed.Add(new PlacedStructure
+            {
+                Type = placed.Type,
+                IsCustom = placed.IsCustom,
+                Instance = clone,
+                Rotation = placed.Rotation,
+                FlipX = placed.FlipX
+            });
+            return true;
+        }
+        return false;
+    }
+
     public void OnUpdate()
     {
+        // The unlock/affordability window is held open for the whole picker session and released
+        // the moment the menu is gone, so nothing leaks into normal gameplay.
+        if (MapAssetsTab.ForceUnlockAll && (_menu == null || !_menu.isActiveAndEnabled))
+            MapAssetsTab.ForceUnlockAll = false;
+
         if (_pending == StructureBrain.TYPES.NONE) return;
 
         // Do not place while the picker is still on screen.
@@ -120,7 +160,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
         if (prefab != null)
         {
-            _preview = Object.Instantiate(prefab);
+            // Via the ghost helper, never a plain Instantiate: the placement prefabs carry
+            // Interaction components that would register with Interactor half-initialized and
+            // make Interactor.Update throw every frame. Scripts stay on - they build the visuals.
+            _preview = MapEditorGhost.Create(prefab, _editor.transform, "CultTweaker_PlacementPreview",
+                disableBehaviours: false);
         }
         else
         {
@@ -129,17 +173,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
             var renderer = _preview.AddComponent<SpriteRenderer>();
             renderer.sprite = entry?.IconImage;
             renderer.sortingOrder = 9999;
+            renderer.color = new Color(1f, 1f, 1f, 0.6f);
         }
 
-        _preview.name = "CultTweaker_PlacementPreview";
-        _preview.transform.position = _editor.MouseWorld();
-
-        // Ghost it, and make sure the preview can never be interacted with or collided against.
-        foreach (var collider in _preview.GetComponentsInChildren<Collider2D>(true))
-            collider.enabled = false;
-
-        foreach (var renderer in _preview.GetComponentsInChildren<SpriteRenderer>(true))
-            renderer.color = new Color(renderer.color.r, renderer.color.g, renderer.color.b, 0.6f);
+        if (_preview != null) _preview.transform.position = _editor.MouseWorld();
     }
 
     private void DestroyPreview()
@@ -157,6 +194,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
             _editor.SetStatus("UIManager unavailable; cannot open the picker.");
             return;
         }
+
+        // Held for the whole picker session (released in OnUpdate when the menu closes): the
+        // vanilla tabs populate outside MapAssetsTab's transient window, so without this their
+        // items stay greyed out by unlock state and material costs.
+        MapAssetsTab.ForceUnlockAll = true;
 
         try
         {
@@ -189,29 +231,21 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
     private void OnBuildingChosen(StructureBrain.TYPES type)
     {
+        // The menu's edit-buildings shortcut fires this with a sentinel type; base-only feature.
+        if (type == StructureBrain.TYPES.EDIT_BUILDINGS || type == StructureBrain.TYPES.NONE)
+        {
+            _editor.SetStatus("Edit buildings is not available in the map editor.");
+            return;
+        }
+
         _pending = type;
         _editor.SetStatus($"Selected {type}. Left-click in the world to place it.");
     }
 
     private void Place(StructureBrain.TYPES type, Vector3 position)
     {
-        var root = SceneRefs.ContentRoot;
-        if (root == null)
-        {
-            _editor.SetStatus("No room content root; cannot place here.");
-            return;
-        }
-
         var isCustom = CustomStructureManager.CustomStructureList.ContainsKey(type);
-        var prefabPath = ResolvePrefabPath(type, isCustom);
-
-        if (string.IsNullOrEmpty(prefabPath))
-        {
-            _editor.SetStatus($"{type} has no prefab path; cannot place it.");
-            return;
-        }
-
-        _editor.StartCoroutine(PlaceRoutine(type, isCustom, prefabPath, position, root));
+        _editor.StartCoroutine(PlaceAt(type, isCustom, position, 0f, false, deferNav: false));
     }
 
     private static string ResolvePrefabPath(StructureBrain.TYPES type, bool isCustom)
@@ -233,9 +267,26 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
             : "Assets/" + data.PrefabPath + ".prefab";
     }
 
-    private IEnumerator PlaceRoutine(StructureBrain.TYPES type, bool isCustom, string prefabPath,
-        Vector3 position, Transform root)
+    // Shared by direct placement and the blueprint loader. Self-registers into _placed so the
+    // next save round-trips. deferNav skips the per-placement A* rescan; the loader does one
+    // batch rebuild at the end instead.
+    public IEnumerator PlaceAt(StructureBrain.TYPES type, bool isCustom, Vector3 position,
+        float rotation, bool flipX, bool deferNav)
     {
+        var root = SceneRefs.ContentRoot;
+        if (root == null)
+        {
+            _editor.SetStatus("No room content root; cannot place here.");
+            yield break;
+        }
+
+        var prefabPath = ResolvePrefabPath(type, isCustom);
+        if (string.IsNullOrEmpty(prefabPath))
+        {
+            _editor.SetStatus($"{type} has no prefab path; cannot place it.");
+            yield break;
+        }
+
         AsyncOperationHandle<GameObject> handle;
         try
         {
@@ -262,16 +313,24 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         go.transform.position = position;
         go.name = $"CultTweaker_Placed_{type}";
 
+        if (Mathf.Abs(rotation) > 0.001f)
+            go.transform.eulerAngles = new Vector3(0f, 0f, rotation);
+        if (flipX)
+        {
+            var s = go.transform.localScale;
+            go.transform.localScale = new Vector3(-s.x, s.y, s.z);
+        }
+
         _placed.Add(new PlacedStructure
         {
             Type = type,
             IsCustom = isCustom,
             Instance = go,
-            Rotation = 0f,
-            FlipX = false
+            Rotation = rotation,
+            FlipX = flipX
         });
 
-        SceneRefs.RescanNavigation();
+        if (!deferNav) SceneRefs.RescanNavigation();
         _editor.SetStatus($"Placed {type} at {position}.");
     }
 
@@ -291,7 +350,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         _editor.SetStatus($"Removed the last {last.Type}.");
     }
 
-    public void ContributeTo(MapData map)
+    public void ContributeTo(CTNodeBlueprint map)
     {
         map.Structures.Clear();
         foreach (var placed in _placed)
@@ -299,12 +358,50 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
             if (placed.Instance == null) continue;
             map.Structures.Add(new MapStructureData
             {
-                TypeName = placed.Type.ToString(),
+                // Custom types are saved by InternalName: ToString() on a GuidManager-minted
+                // enum prints a bare integer that resolves differently on the next launch.
+                TypeName = placed.IsCustom ? CustomInternalName(placed.Type) : placed.Type.ToString(),
                 IsCustom = placed.IsCustom,
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
                 Rotation = placed.Rotation,
                 FlipX = placed.FlipX
             });
         }
+    }
+
+    private static string CustomInternalName(StructureBrain.TYPES type)
+    {
+        return CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom)
+            ? custom.InternalName
+            : type.ToString();
+    }
+
+    // Resolves a saved TypeName back to a live enum value. Custom names scan the registered
+    // custom-structure list; vanilla names parse the enum, with a numeric legacy fallback.
+    public static bool TryResolveType(string typeName, bool isCustom, out StructureBrain.TYPES type)
+    {
+        type = StructureBrain.TYPES.NONE;
+        if (string.IsNullOrEmpty(typeName)) return false;
+
+        if (isCustom)
+        {
+            foreach (var pair in CustomStructureManager.CustomStructureList)
+            {
+                if (pair.Value == null || pair.Value.InternalName != typeName) continue;
+                type = pair.Key;
+                return true;
+            }
+
+            // Old saves wrote the raw enum integer; honour it if the value still exists.
+            if (int.TryParse(typeName, out var raw) &&
+                CustomStructureManager.CustomStructureList.ContainsKey((StructureBrain.TYPES)raw))
+            {
+                type = (StructureBrain.TYPES)raw;
+                return true;
+            }
+            return false;
+        }
+
+        return System.Enum.TryParse(typeName, out type) && type != StructureBrain.TYPES.NONE;
     }
 }

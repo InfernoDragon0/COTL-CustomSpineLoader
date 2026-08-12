@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using COTL_API.Utility;
@@ -11,17 +12,12 @@ using UnityEngine.UI;
 namespace CustomSpineLoader.MapEditor;
 
 // TODO:
-// add a enemy placement tool
-// add a weapon podium placement tool
 // add a trigger collider volume placement tool that can be used to trigger events in the map
 // add a npc placement tool
 // improve the UI so that it is less wordy and more intuitive
 // fix the zoom issue, each time a structure is selected, the zoom gets further
 // cant zoom in or out yet with Z X
 // check the increment for z axis data for each shape to stack on top of each other
-// build menu should allow everything to be built, regardless of materials
-// build menu needs to show the unbuildable items
-// structures should be able to be cloned with CTRL click drag
 public class RuntimeMapEditor : MonoBehaviour
 {
     private Canvas _canvas;
@@ -51,6 +47,11 @@ public class RuntimeMapEditor : MonoBehaviour
     private TMP_Text _nameLabel;
     private bool _renaming;
     private string _nameBuffer = "";
+    private string _promptLabel = "map name";
+    private System.Action<string> _promptDone;
+
+    private bool _saveArmed;
+    private float _saveArmedAt;
 
     private GameObject _resetButton;
     private bool _resetArmed;
@@ -58,7 +59,7 @@ public class RuntimeMapEditor : MonoBehaviour
     private const string ResetLabel = "Reset Room";
     private const float ResetArmWindow = 5f;
 
-    public MapData Map { get; } = new();
+    public CTNodeBlueprint Map { get; private set; } = new();
     public MapEditorUI UI => _ui;
 
     public bool IsEditing => _editing;
@@ -71,6 +72,10 @@ public class RuntimeMapEditor : MonoBehaviour
         BuildTools();
         CreateUi();
         _canvas.enabled = false;
+
+        // A level run survives the scene reload as static state; the new host re-binds it
+        // (and starts the entrance-room load if the run was waiting on this scene entry).
+        LevelPlayback.OnEditorReady(this);
     }
 
     private void BuildTools()
@@ -78,8 +83,35 @@ public class RuntimeMapEditor : MonoBehaviour
         _tools.Add(new SelectTool(this));
         _tools.Add(new ShapeTool(this));
         _tools.Add(new StructureTool(this));
+        _tools.Add(new EnemyTool(this));
+        _tools.Add(new PodiumTool(this));
         _tools.Add(new DoorTool(this));
+        _tools.Add(new MusicTool(this));
         _tools.Add(new ClearTool(this));
+        _tools.Add(new LoadTool(this));
+        _tools.Add(new LevelTool(this));
+    }
+
+    public T GetTool<T>() where T : class, IMapEditorTool => _tools.OfType<T>().FirstOrDefault();
+
+    // One loader shared by every consumer (Load Map tool, level playback), so the IsLoading
+    // guard actually covers concurrent load attempts.
+    private BlueprintLoader _loader;
+    public BlueprintLoader Loader => _loader ??= new BlueprintLoader(this);
+
+    // Swaps the working blueprint for one that was just loaded, so a subsequent Save round-trips.
+    public void AdoptBlueprint(CTNodeBlueprint bp)
+    {
+        if (bp == null) return;
+        Map = bp;
+        UpdateNameLabel();
+    }
+
+    // The loader needs to close the editor (restore time, HUD, camera) before the walk-in entry
+    // can run: GoToAndStop paths on scaled time, and Update would re-freeze timeScale otherwise.
+    public void ExitForPlayback()
+    {
+        if (_editing) ExitEditorMode();
     }
 
     private void OnDestroy()
@@ -119,6 +151,11 @@ public class RuntimeMapEditor : MonoBehaviour
         _savedTimeScale = Time.timeScale;
         Time.timeScale = 0f;
         TakeCameraControl();
+
+        // Capture the shape template and profiles NOW, while the room is intact: the shape tool
+        // otherwise captures lazily on first entry, and clearing the terrain before ever opening
+        // it would leave no sprite shape in the scene to base new shapes on.
+        GetTool<ShapeTool>()?.PrepareForLoad();
 
         SelectTool(_tools.FirstOrDefault());
         SetStatus("Editor open. WASD/arrows pan, scroll zooms.");
@@ -169,6 +206,7 @@ public class RuntimeMapEditor : MonoBehaviour
         if (Time.timeScale != 0f) Time.timeScale = 0f;
 
         if (_resetArmed && Time.unscaledTime - _resetArmedAt > ResetArmWindow) DisarmReset();
+        if (_saveArmed && Time.unscaledTime - _saveArmedAt > ResetArmWindow) _saveArmed = false;
 
         // While naming, the keyboard belongs to the text field: panning and tools must not also
         // consume the same keystrokes.
@@ -228,10 +266,22 @@ public class RuntimeMapEditor : MonoBehaviour
         if (Mathf.Abs(scroll) > 0.01f) zoomDelta -= scroll * 4f;
 
         if (Mathf.Abs(zoomDelta) > 0.001f)
-        {
             _zoom = Mathf.Clamp(_zoom + zoomDelta * ZoomSpeed * dt, MinZoom, MaxZoom);
-            CinematicCameraManager.Zoom(_zoom);
-        }
+
+        // Asserted EVERY frame, and via CameraSetZoom rather than CameraSetTargetZoom: the
+        // camera only chases targetDistance with scaled deltaTime, which is 0 while the editor
+        // is paused, so a target-only write never becomes visible. Meanwhile game menus opened
+        // from the editor drift the real distance through their own unscaled zoom path, which
+        // is why the view crept further out on every build-menu open. Setting distance and
+        // target together each frame makes Z/X work under pause and pins the drift.
+        ApplyZoom();
+    }
+
+    private void ApplyZoom()
+    {
+        var gm = GameManager.GetInstance();
+        if (gm == null || gm.CamFollowTarget == null) return;
+        gm.CameraSetZoom(_zoom);
     }
 
     // Hands the camera to a dummy object we can move freely, and lifts the room's camera bounds
@@ -245,6 +295,11 @@ public class RuntimeMapEditor : MonoBehaviour
 
         _cameraAnchor = new GameObject("MapEditor_CameraAnchor");
         _cameraAnchor.transform.position = start;
+
+        // Start from wherever the game's zoom actually is, so opening the editor never jumps.
+        var gm = GameManager.GetInstance();
+        if (gm != null && gm.CamFollowTarget != null)
+            _zoom = Mathf.Clamp(gm.CamFollowTarget.targetDistance, MinZoom, MaxZoom);
 
         CinematicCameraManager.SetCameraLimits(false, default);
         CinematicCameraManager.SetFollowTarget(_cameraAnchor);
@@ -373,6 +428,58 @@ public class RuntimeMapEditor : MonoBehaviour
         if (_statusText != null) _statusText.text = message;
     }
 
+    // Restarts the blueprint's music event whenever it stops; FMOD events only loop when
+    // authored to, so this is what makes one-shot tracks usable as room music. Null stops
+    // the loop (a load without MusicLoop, or one with no music at all).
+    private Coroutine _musicLoopRoutine;
+
+    public void SetMusicLoop(string eventPath)
+    {
+        if (_musicLoopRoutine != null)
+        {
+            StopCoroutine(_musicLoopRoutine);
+            _musicLoopRoutine = null;
+        }
+        if (!string.IsNullOrEmpty(eventPath))
+            _musicLoopRoutine = StartCoroutine(MusicLoopRoutine(eventPath));
+    }
+
+    private IEnumerator MusicLoopRoutine(string eventPath)
+    {
+        while (true)
+        {
+            yield return new WaitForSecondsRealtime(1f);
+
+            var audio = AudioManager.Instance;
+            if (audio == null) continue;
+
+            var stopped = true;
+            try
+            {
+                var instance = audio.CurrentMusicInstance;
+                if (instance.isValid())
+                {
+                    instance.getPlaybackState(out var state);
+                    stopped = state == FMOD.Studio.PLAYBACK_STATE.STOPPED;
+                }
+            }
+            catch (System.Exception)
+            {
+                // Instance released mid-check; treat as stopped and restart below.
+            }
+
+            if (!stopped) continue;
+            try
+            {
+                audio.PlayMusic(eventPath);
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning($"MapEditor: music loop restart failed: {e.Message}");
+            }
+        }
+    }
+
     private void SelectTool(IMapEditorTool tool)
     {
         if (tool == null || tool == _activeTool) return;
@@ -480,33 +587,46 @@ public class RuntimeMapEditor : MonoBehaviour
         return rt;
     }
 
-    // Inline rename driven straight off Input.inputString rather than a TMP_InputField: text
+    // Inline text entry driven straight off Input.inputString rather than a TMP_InputField: text
     // fields route through the EventSystem, which this game hands to Rewired's pointer module,
-    // whereas raw keyboard input is known to work here.
-    private void BeginRename()
+    // whereas raw keyboard input is known to work here. Generic so any tool can prompt for text.
+    public void PromptText(string label, string initial, System.Action<string> onDone)
     {
         _renaming = true;
-        _nameBuffer = Map.MapName ?? "";
+        _promptLabel = label;
+        _nameBuffer = initial ?? "";
+        _promptDone = onDone;
         UpdateNameLabel();
-        SetStatus("Type a map name. Enter confirms, Escape cancels.");
+        SetStatus($"Type a {label}. Enter confirms, Escape cancels.");
+    }
+
+    private void BeginRename()
+    {
+        PromptText("map name", Map.MapName, value =>
+        {
+            Map.MapName = string.IsNullOrWhiteSpace(value) ? "UntitledMap" : value.Trim();
+            SetStatus("Map name set to '" + Map.MapName + "'.");
+        });
     }
 
     private void HandleRenameInput()
     {
         if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
         {
-            Map.MapName = string.IsNullOrWhiteSpace(_nameBuffer) ? "UntitledMap" : _nameBuffer.Trim();
             _renaming = false;
+            var done = _promptDone;
+            _promptDone = null;
+            done?.Invoke(_nameBuffer);
             UpdateNameLabel();
-            SetStatus("Map name set to '" + Map.MapName + "'.");
             return;
         }
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             _renaming = false;
+            _promptDone = null;
             UpdateNameLabel();
-            SetStatus("Rename cancelled.");
+            SetStatus("Text entry cancelled.");
             return;
         }
 
@@ -528,19 +648,69 @@ public class RuntimeMapEditor : MonoBehaviour
     private void UpdateNameLabel()
     {
         if (_nameLabel == null) return;
-        _nameLabel.text = _renaming ? "Name: " + _nameBuffer + "_" : "Name: " + Map.MapName;
+        _nameLabel.text = _renaming
+            ? _promptLabel + ": " + _nameBuffer + "_"
+            : "Name: " + Map.MapName;
     }
 
     private void SaveMap()
     {
+        // Overwrite guard: a name that already exists on disk takes a second press to confirm.
+        if (!_saveArmed && MapEditorSerialization.Exists(Map.MapName))
+        {
+            _saveArmed = true;
+            _saveArmedAt = Time.unscaledTime;
+            SetStatus($"'{MapEditorSerialization.Sanitize(Map.MapName)}.json' already exists - press Save again to overwrite.");
+            return;
+        }
+        _saveArmed = false;
+
         Map.SceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
 
         // Snapshot live tool state into the map immediately before writing.
         foreach (var tool in _tools.OfType<IMapDataContributor>())
             tool.ContributeTo(Map);
 
+        // Then everything the tools do not own: the full-room prop snapshot.
+        RoomSnapshot.Collect(Map, this);
+
         var path = MapEditorSerialization.Save(Map);
         SetStatus(path != null ? "Saved to " + path : "Save failed, see log.");
+
+        if (path != null) StartCoroutine(CaptureSnapshot());
+    }
+
+    // Captures the room with every piece of editor chrome hidden and writes it next to the
+    // json as <mapname>.png - the stable pairing a future preview UI reads. Exiting the active
+    // tool is what clears its handles, gizmos and cursor previews from the world.
+    private IEnumerator CaptureSnapshot()
+    {
+        var tool = _activeTool;
+        tool?.OnExit();
+        _canvas.enabled = false;
+
+        // The screen must actually render a frame without the UI before it is read back.
+        yield return new WaitForEndOfFrame();
+
+        try
+        {
+            var texture = ScreenCapture.CaptureScreenshotAsTexture();
+            var png = texture.EncodeToPNG();
+            Destroy(texture);
+
+            var pngPath = System.IO.Path.Combine(MapEditorSerialization.RootPath,
+                MapEditorSerialization.Sanitize(Map.MapName) + ".png");
+            System.IO.File.WriteAllBytes(pngPath, png);
+            Plugin.Log.LogInfo("MapEditor: snapshot saved to " + pngPath);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: snapshot capture failed: " + e.Message);
+        }
+
+        _canvas.enabled = true;
+        tool?.OnEnter();
+        SetStatus($"Saved '{Map.MapName}' with snapshot.");
     }
 
     // Re-enters the dungeon, regenerating the room from scratch. This is the undo story, and it
@@ -586,5 +756,5 @@ public class RuntimeMapEditor : MonoBehaviour
 // Tools that own state which must end up in the saved map implement this.
 public interface IMapDataContributor
 {
-    void ContributeTo(MapData map);
+    void ContributeTo(CTNodeBlueprint map);
 }

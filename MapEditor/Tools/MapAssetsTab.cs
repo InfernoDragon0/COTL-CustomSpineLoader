@@ -137,7 +137,10 @@ public static class MapAssetsTab
         var catalog = BuildCatalog();
 
         // CheckCanAfford short-circuits on this, which keeps every entry clickable regardless of
-        // the player's resources. Restored immediately afterwards.
+        // the player's resources. Restored to the PREVIOUS value, not false: the structure tool
+        // holds ForceUnlockAll for the whole picker session, and this populate pass runs inside
+        // that window.
+        var previousUnlock = ForceUnlockAll;
         var previousFree = CheatConsole.BuildingsFree;
         ForceUnlockAll = true;
         CheatConsole.BuildingsFree = true;
@@ -147,7 +150,7 @@ public static class MapAssetsTab
         }
         finally
         {
-            ForceUnlockAll = false;
+            ForceUnlockAll = previousUnlock;
             CheatConsole.BuildingsFree = previousFree;
         }
 
@@ -216,5 +219,27 @@ public static class MapAssetsTab
     private static void StructuresData_IsUpgradeStructure(ref bool __result)
     {
         if (ForceUnlockAll) __result = false;
+    }
+
+    // The per-item affordability gate on the VANILLA tabs, which populate outside our transient
+    // window. The structure tool holds ForceUnlockAll for the whole picker session, so every
+    // item stays coloured and clickable regardless of materials. Editor placement instantiates
+    // prefabs directly and never deducts, so nothing needs patching on the placement side.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(BuildMenuItem), "CheckCanAfford")]
+    private static void BuildMenuItem_CheckCanAfford(ref bool __result)
+    {
+        if (ForceUnlockAll) __result = true;
+    }
+
+    // The menu's own Update re-shows the "edit buildings" hint every frame; edit mode is a base
+    // feature and does nothing in a dungeon, so it is hidden while the editor's picker is open.
+    // (The shortcut itself is neutralised in StructureTool.OnBuildingChosen.)
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(UIBuildMenuController), "Update")]
+    private static void UIBuildMenuController_Update(UIBuildMenuController __instance)
+    {
+        if (ForceUnlockAll && __instance._editBuildingsText != null)
+            __instance._editBuildingsText.SetActive(false);
     }
 }

@@ -5,18 +5,22 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Click an object to select it, then delete it individually.
+// Click an object to select it, then delete it individually. Ctrl-click-drag clones it.
 //
 // Picking uses physics first, then falls back to renderer bounds, because much of the room
 // dressing is purely visual and carries no collider.
-public class SelectTool : IMapEditorTool, IMapDataContributor
+//
+// Deleting needs no bookkeeping: the blueprint is a full snapshot of what exists at save time,
+// so a deleted object is simply absent from it.
+public class SelectTool : IMapEditorTool
 {
     public string Name => "Select";
 
     private readonly RuntimeMapEditor _editor;
-    private readonly List<string> _deleted = [];
 
     private GameObject _selected;
+    private bool _cloneDragging;
+    private Vector3 _cloneGrabOffset;
     private readonly List<Renderer> _highlighted = [];
     private readonly List<Color> _originalColors = [];
     private GameObject _outline;
@@ -31,7 +35,7 @@ public class SelectTool : IMapEditorTool, IMapDataContributor
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
         ui.CreateLabel(panel, "Select Tool", 20, TMPro.TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Left-click an object to select.\nDelete key or button removes it.", 14, TMPro.TextAlignmentOptions.Center);
+        ui.CreateLabel(panel, "Left-click an object to select.\nDelete key or button removes it.\nCtrl-click-drag clones it.", 14, TMPro.TextAlignmentOptions.Center);
         ui.CreateButton(panel, "Delete Selected", DeleteSelected);
         ui.CreateButton(panel, "Deselect", () => Select(null));
 
@@ -47,11 +51,17 @@ public class SelectTool : IMapEditorTool, IMapDataContributor
 
     public void OnUpdate()
     {
+        if (HandleCloneDrag()) return;
+
         if (Input.GetMouseButtonDown(0))
         {
             if (_editor.PointerOverUi())
             {
                 // _editor.SetStatus("Click was over the editor UI, ignored.");
+            }
+            else if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+            {
+                BeginClone();
             }
             else
             {
@@ -74,6 +84,62 @@ public class SelectTool : IMapEditorTool, IMapDataContributor
             DeleteSelected();
 
         SyncGizmos();
+    }
+
+    // Ctrl-click on an object spawns a copy under the same parent and drags it until the button
+    // is released. Doors can never be cloned: they are protected, so PickAtMouse never returns
+    // them. A cloned editor-placed structure is adopted by the structure tool so it saves with
+    // its type; anything else is picked up by the room snapshot's name-based resolution.
+    private void BeginClone()
+    {
+        var source = PickAtMouse();
+        if (source == null)
+        {
+            _editor.SetStatus("Ctrl-click: nothing to clone here.");
+            return;
+        }
+
+        // A cloned podium carries post-Awake state and self-destroys or misbehaves on enable;
+        // the podium tool is the supported way to add more.
+        if (source.GetComponentInChildren<Interaction_WeaponSelectionPodium>(true) != null)
+        {
+            _editor.SetStatus("Weapon podiums cannot be cloned. Use the Podium tool instead.");
+            return;
+        }
+
+        var clone = Object.Instantiate(source, source.transform.parent);
+        clone.transform.position = source.transform.position;
+
+        var structures = _editor.GetTool<StructureTool>();
+        var adopted = structures != null && structures.TryAdoptClone(source, clone);
+
+        Select(clone);
+        _cloneDragging = true;
+        _cloneGrabOffset = clone.transform.position - _editor.MouseWorld();
+
+        _editor.SetStatus(adopted
+            ? $"Cloned structure {source.name}. Release to drop."
+            : $"Cloned {source.name}. Release to drop.");
+    }
+
+    // Returns true while a clone drag is in progress so the normal click handling stays out of
+    // the way for that frame.
+    private bool HandleCloneDrag()
+    {
+        if (!_cloneDragging) return false;
+
+        if (_selected == null || !Input.GetMouseButton(0))
+        {
+            _cloneDragging = false;
+            if (_selected != null)
+                _editor.SetStatus($"Placed clone {_selected.name} at {_selected.transform.position}.");
+            SyncGizmos();
+            return false;
+        }
+
+        SetSelectedPosition(_editor.MouseWorld() + _cloneGrabOffset);
+        SyncGizmos();
+        return true;
     }
 
     // Keeps the outline and grip on the selection as it is dragged or nudged.
@@ -139,12 +205,21 @@ public class SelectTool : IMapEditorTool, IMapDataContributor
         if (renderer == null || !renderer.enabled) return false;
         if (!renderer.gameObject.activeInHierarchy) return false;
         if (renderer is ParticleSystemRenderer) return false;
+        if (IsPickIgnored(renderer.gameObject)) return false;
         return renderer is SpriteRenderer || renderer is MeshRenderer || renderer is SkinnedMeshRenderer;
+    }
+
+    // Enemy HP bars are sprite objects spawned as SIBLINGS of their enemy, so they are not
+    // caught by any enemy check and were being picked as ordinary scenery.
+    private static bool IsPickIgnored(GameObject go)
+    {
+        return go.GetComponentInParent<HPBar>() != null;
     }
 
     private static bool IsSelectable(GameObject go)
     {
         if (go == null || MapEditorProtection.IsProtected(go)) return false;
+        if (IsPickIgnored(go)) return false;
 
         foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
             if (IsVisibleRenderer(renderer)) return true;
@@ -315,7 +390,6 @@ public class SelectTool : IMapEditorTool, IMapDataContributor
         }
 
         var path = HierarchyPath(_selected.transform);
-        _deleted.Add(path);
 
         ClearHighlight();
         Object.Destroy(_selected);
@@ -335,12 +409,6 @@ public class SelectTool : IMapEditorTool, IMapDataContributor
             parent = parent.parent;
         }
         return path;
-    }
-
-    public void ContributeTo(MapData map)
-    {
-        map.Deleted.Clear();
-        map.Deleted.AddRange(_deleted);
     }
 }
 

@@ -121,6 +121,38 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         ui.CreateButton(panel, "Center View On Shape", CenterOnShape);
     }
 
+    // The loader must call this BEFORE clearing the room: the template clone and the profile
+    // list are harvested from scene objects that Clear Terrain destroys.
+    public void PrepareForLoad()
+    {
+        CaptureTemplate();
+        CollectProfiles();
+    }
+
+    // The loader wipes the room; everything this tool tracked is gone. Show Collision is also
+    // switched off so a stale toggle cannot redraw the green outline over the loaded map.
+    public void ResetTracking()
+    {
+        _shapes.Clear();
+        _active = null;
+        _showCollision = false;
+        ClearHandles();
+        if (_collisionOverlay != null)
+        {
+            Object.Destroy(_collisionOverlay);
+            _collisionOverlay = null;
+        }
+    }
+
+    public SpriteShape FindProfile(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        if (_profiles.Count == 0) CollectProfiles();
+        foreach (var p in _profiles)
+            if (p != null && p.name == name) return p;
+        return null;
+    }
+
     public void OnEnter()
     {
         _toolActive = true;
@@ -205,6 +237,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
             Add(deco.SpriteShapeSecondary);
             Add(deco.SpriteShapeBack);
         }
+
+        // Disk-built CultTweaker_* profiles next, ahead of the global asset sweep, so their
+        // names always resolve to the custom asset.
+        foreach (var custom in CustomShapeProfiles.All)
+            Add(custom);
 
         foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
             Add(ctrl.spriteShape);
@@ -685,14 +722,24 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
     // would turn each island back into a solid standalone body and block the player outright.
     private void SetVanillaFloorCollision(bool enabled)
     {
+        var affected = ApplyVanillaFloorFlag(enabled);
+
+        SceneRefs.RegenerateRoomCollision();
+        RefreshCollisionOverlay();
+
+        _editor.SetStatus(enabled
+            ? $"Vanilla floor collision restored ({affected} piece(s))."
+            : $"Vanilla floor collision disabled ({affected} piece(s)); shapes now define the floor.");
+    }
+
+    // Flag application without the collision rebuild, for the loader, which batches one rebuild
+    // at the end of the whole load instead.
+    public int ApplyVanillaFloorFlag(bool enabled)
+    {
         _useVanillaFloor = enabled;
 
         var room = SceneRefs.Room;
-        if (room?.Pieces == null)
-        {
-            _editor.SetStatus("No island pieces in this room.");
-            return;
-        }
+        if (room?.Pieces == null) return 0;
 
         var affected = 0;
         foreach (var piece in room.Pieces)
@@ -705,13 +752,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
             collider.enabled = enabled;
             affected++;
         }
-
-        SceneRefs.RegenerateRoomCollision();
-        RefreshCollisionOverlay();
-
-        _editor.SetStatus(enabled
-            ? $"Vanilla floor collision restored ({affected} piece(s))."
-            : $"Vanilla floor collision disabled ({affected} piece(s)); shapes now define the floor.");
+        return affected;
     }
 
     // Hands the baked collider to the room's composite instead of leaving it as a standalone
@@ -879,10 +920,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         _centerHandle = null;
     }
 
-    public void ContributeTo(MapData map)
+    public void ContributeTo(CTNodeBlueprint map)
     {
+        map.UseVanillaFloorCollision = _useVanillaFloor;
+
         map.Shapes.Clear();
-        foreach (var ctrl in _shapes)
+        foreach (var ctrl in CollectSerializableShapes())
         {
             if (ctrl == null) continue;
 
@@ -892,6 +935,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
                 Position = MapEditorSerialization.V3(ctrl.transform.position),
                 Profile = ctrl.spriteShape != null ? ctrl.spriteShape.name : "",
                 IsOpenEnded = spline.isOpenEnded,
+                HasCollision = ShapeHasCollision(ctrl),
                 ColliderDetail = ctrl.colliderDetail,
                 ColliderOffset = ctrl.colliderOffset
             };
@@ -912,6 +956,147 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
 
             map.Shapes.Add(data);
         }
+    }
+
+    // The blueprint is a full snapshot, so every standalone sprite shape in the room is saved as
+    // spline data, not only the ones this tool created. Shapes under island pieces are excluded:
+    // the island roots are captured as prefab props and bring their own shapes back on load.
+    // Door pads are excluded too - they are derived from door presence and rebuilt on load, so
+    // serializing them would duplicate the floor patch.
+    private List<SpriteShapeController> CollectSerializableShapes()
+    {
+        var list = new List<SpriteShapeController>();
+
+        foreach (var s in _shapes)
+            if (s != null && !list.Contains(s)) list.Add(s);
+
+        foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
+        {
+            if (ctrl == null || ctrl == _template || list.Contains(ctrl)) continue;
+            if (ctrl.gameObject.name.StartsWith(DoorTool.PadName)) continue;
+            if (ctrl.GetComponentInParent<RuntimeMapEditor>() != null) continue;
+            if (ctrl.GetComponentInParent<MMRoomGeneration.IslandPiece>() != null) continue;
+            list.Add(ctrl);
+        }
+
+        return list;
+    }
+
+    // Bare template clone for auxiliary geometry (door pads): untracked, unserialized. The
+    // caller owns the spline and collider setup; FinalizeLoadedShape a frame later bakes it.
+    public SpriteShapeController CreateUntrackedShape(Transform parent, string name)
+    {
+        CaptureTemplate();
+        if (_template == null || parent == null) return null;
+
+        var go = Object.Instantiate(_template.gameObject, parent);
+        go.name = name;
+        go.SetActive(true);
+
+        var ctrl = go.GetComponent<SpriteShapeController>();
+        foreach (var inherited in go.GetComponents<Collider2D>())
+            Object.DestroyImmediate(inherited);
+
+        ctrl.spline.Clear();
+        return ctrl;
+    }
+
+    public static void EnsureShapeCollider(SpriteShapeController ctrl) => EnsureCollider(ctrl);
+
+    // Recreates one saved shape from spline data. Self-registers into _shapes so a subsequent
+    // save round-trips. The caller is responsible for calling FinalizeLoadedShape a frame later.
+    public SpriteShapeController RebuildShape(MapShapeData data)
+    {
+        if (data == null || data.Points == null || data.Points.Count < 3) return null;
+
+        var composite = SceneRefs.RoomComposite;
+        var root = composite != null ? composite.transform : SceneRefs.ContentRoot;
+        if (root == null) return null;
+
+        CaptureTemplate();
+        if (_template == null)
+        {
+            Plugin.Log.LogWarning("MapEditor: no shape template available, cannot rebuild shape.");
+            return null;
+        }
+
+        var go = Object.Instantiate(_template.gameObject, root);
+        go.name = "CultTweaker_Shape";
+        go.SetActive(true);
+        go.transform.position = MapEditorSerialization.ToVector3(data.Position);
+
+        var ctrl = go.GetComponent<SpriteShapeController>();
+
+        // The template carries the source shape's baked colliders; the shape either gets fresh
+        // ones below or stays visual-only.
+        foreach (var inherited in go.GetComponents<Collider2D>())
+            Object.DestroyImmediate(inherited);
+
+        var profile = FindProfile(data.Profile);
+        if (profile != null) ctrl.spriteShape = profile;
+        else Plugin.Log.LogWarning($"MapEditor: profile '{data.Profile}' not found, keeping template profile.");
+
+        var spline = ctrl.spline;
+        spline.Clear();
+        var added = 0;
+        for (var i = 0; i < data.Points.Count; i++)
+        {
+            var p = data.Points[i];
+            try
+            {
+                spline.InsertPointAt(added, MapEditorSerialization.ToVector3(p.Position));
+
+                // Tangent mode first: setting it recomputes the tangents, which would clobber
+                // the saved values if they were applied before it.
+                if (System.Enum.TryParse<ShapeTangentMode>(p.TangentMode, out var mode))
+                    spline.SetTangentMode(added, mode);
+                spline.SetLeftTangent(added, MapEditorSerialization.ToVector3(p.LeftTangent));
+                spline.SetRightTangent(added, MapEditorSerialization.ToVector3(p.RightTangent));
+                spline.SetHeight(added, p.Height);
+                spline.SetSpriteIndex(added, p.SpriteIndex);
+                spline.SetCorner(added, p.Corner);
+                added++;
+            }
+            catch (System.Exception e)
+            {
+                // A coincident point throws; losing one point must not lose the whole shape.
+                Plugin.Log.LogWarning($"MapEditor: skipped point {i} of shape '{data.Profile}': {e.Message}");
+            }
+        }
+
+        if (added < 3)
+        {
+            Object.Destroy(go);
+            Plugin.Log.LogWarning("MapEditor: shape had fewer than 3 usable points, dropped.");
+            return null;
+        }
+
+        spline.isOpenEnded = data.IsOpenEnded;
+
+        if (data.HasCollision)
+        {
+            ctrl.autoUpdateCollider = true;
+            ctrl.colliderDetail = data.ColliderDetail;
+            ctrl.colliderOffset = data.ColliderOffset;
+            EnsureCollider(ctrl);
+        }
+        else
+        {
+            ctrl.autoUpdateCollider = false;
+        }
+
+        ctrl.RefreshSpriteShape();
+        _shapes.Add(ctrl);
+        return ctrl;
+    }
+
+    // Bake and composite-join for a rebuilt shape. Must run a frame after RebuildShape: mesh
+    // generation is deferred to end of frame, and baking earlier captures the stale outline.
+    public void FinalizeLoadedShape(SpriteShapeController ctrl)
+    {
+        if (ctrl == null || !ShapeHasCollision(ctrl)) return;
+        ctrl.BakeCollider();
+        JoinRoomComposite(ctrl);
     }
 
     private void CenterOnShape()

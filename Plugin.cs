@@ -77,13 +77,21 @@ namespace CustomSpineLoader
             TryCreateRuntimeEditor(SceneManager.GetActiveScene());
 
             var customTestDungeon = new CustomDungeon();
-            // TODO: Re-enable when BaseCustomEnemy is ready
-            // var newEnemy = new BaseCustomEnemy();
-            // // newEnemy.SpineOverride
-            // var enemyType = CustomEnemyManager.Add(newEnemy);
-            // StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(newEnemy));
-            // customTestDungeon.NormalEnemyList.Add(enemyType);
-            // Plugin.Log.LogInfo($"Custom Test Enemy added with type {enemyType}, now size is {customTestDungeon.NormalEnemyList.Count}");
+
+            // Registered for the map editor's enemy picker. Deliberately NOT added to
+            // NormalEnemyList: that would auto-spawn it in every dungeon room, which gets in the
+            // way of map editing.
+            try
+            {
+                var newEnemy = new BaseCustomEnemy();
+                CustomEnemyManager.Add(newEnemy);
+                StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(newEnemy));
+                Log.LogInfo("Custom test enemy registered.");
+            }
+            catch (System.Exception e)
+            {
+                Log.LogWarning("Custom test enemy could not be registered (missing Spine assets?): " + e.Message);
+            }
 
             CustomDungeonManager.Add(customTestDungeon);
         }

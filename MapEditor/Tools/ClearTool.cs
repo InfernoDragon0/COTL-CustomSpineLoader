@@ -8,12 +8,11 @@ namespace CustomSpineLoader.MapEditor.Tools;
 //
 // Biome lighting, BiomeVolume and parallax are deliberately left alone: removing them makes the
 // scene unreadable and they are not part of what "background objects" means here.
-public class ClearTool : IMapEditorTool, IMapDataContributor
+public class ClearTool : IMapEditorTool
 {
     public string Name => "Clear";
 
     private readonly RuntimeMapEditor _editor;
-    private string _clearedLevel = "None";
 
     public ClearTool(RuntimeMapEditor editor)
     {
@@ -32,7 +31,8 @@ public class ClearTool : IMapEditorTool, IMapDataContributor
     public void OnExit() { }
     public void OnUpdate() { }
 
-    private void ClearScenery()
+    // Public: the blueprint loader clears the whole room before rebuilding it.
+    public void ClearScenery()
     {
         var room = SceneRefs.Room;
         if (room == null)
@@ -49,12 +49,11 @@ public class ClearTool : IMapEditorTool, IMapDataContributor
         // 1(Clone)") rather than under SceneryTransform, so it has to be swept separately.
         destroyed += ClearRoomRoot(room, includeTerrain: false);
 
-        _clearedLevel = "Scenery";
         SceneRefs.RescanNavigation();
         _editor.SetStatus($"Cleared {destroyed} scenery object(s).");
     }
 
-    private void ClearTerrain()
+    public void ClearTerrain()
     {
         var room = SceneRefs.Room;
         if (room == null)
@@ -98,7 +97,6 @@ public class ClearTool : IMapEditorTool, IMapDataContributor
 
         destroyed += ClearRoomRoot(room, includeTerrain: true);
 
-        _clearedLevel = "Terrain";
         SceneRefs.RescanNavigation();
         _editor.SetStatus($"Cleared terrain: {destroyed} object(s) removed. Doors preserved.");
     }
@@ -160,10 +158,5 @@ public class ClearTool : IMapEditorTool, IMapDataContributor
             destroyed++;
         }
         return destroyed;
-    }
-
-    public void ContributeTo(MapData map)
-    {
-        map.Cleared = _clearedLevel;
     }
 }
