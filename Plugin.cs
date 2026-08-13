@@ -94,6 +94,10 @@ namespace CustomSpineLoader
             }
 
             CustomDungeonManager.Add(customTestDungeon);
+
+            // After the test dungeon: F5 enters CustomDungeonList[0], which must stay the
+            // test dungeon. Level runs enter CTLevelDungeon through the Level tool instead.
+            MapEditor.CTLevelDungeon.Register();
         }
     
         public void Update()

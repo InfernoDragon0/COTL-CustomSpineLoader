@@ -4,6 +4,7 @@ using CustomSpineLoader.MapEditor.Tools;
 using MMRoomGeneration;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.U2D;
 
 namespace CustomSpineLoader.MapEditor;
@@ -33,6 +34,7 @@ public static class RoomSnapshot
         if (room == null) return;
 
         map.KeptAuthored.Clear();
+        map.SourceRoom = StripClone(room.gameObject.name);
 
         var prefabPaths = BuildPrefabPathLookup();
         var resolved = 0;
@@ -232,13 +234,115 @@ public static class RoomSnapshot
 
     public static IslandPiece FindIslandPrefab(GenerateRoom room, string prefabName)
     {
-        if (room == null || string.IsNullOrEmpty(prefabName)) return null;
+        var go = FindIslandPrefabObject(room, prefabName);
+        return go != null ? go.GetComponent<IslandPiece>() : null;
+    }
 
-        foreach (var list in new[] { room.StartPieces, room.IslandPieces, room.ResourcePieces })
+    // name -> island prefab, across every source. Cached because tier 2 blocks on a load.
+    private static readonly Dictionary<string, GameObject> _islandPrefabs = [];
+
+    // Islands are the room's floor: a missing one leaves a hole in the collision union and the
+    // player walled off from part of the map. Resolution cannot stop at the current room's
+    // lists, because each room prefab carries its OWN addressable island set (Addr_StartPieces
+    // and friends) - an entrance room's islands simply are not in a normal room's lists, so a
+    // blueprint authored in one room type would lose its terrain in the other.
+    public static GameObject FindIslandPrefabObject(GenerateRoom room, string prefabName)
+    {
+        if (string.IsNullOrEmpty(prefabName)) return null;
+        if (_islandPrefabs.TryGetValue(prefabName, out var cached) && cached != null) return cached;
+
+        // Tier 1: this room's own lists.
+        if (room != null)
         {
-            if (list == null) continue;
-            foreach (var piece in list)
-                if (piece != null && piece.name == prefabName) return piece;
+            foreach (var list in new[] { room.StartPieces, room.IslandPieces, room.ResourcePieces })
+            {
+                if (list == null) continue;
+                foreach (var piece in list)
+                    if (piece != null && piece.name == prefabName) return CacheIsland(prefabName, piece.gameObject);
+            }
+        }
+
+        // Tier 2: the addressables catalog - islands are addressable assets, so every room's
+        // set is reachable regardless of which room is loaded.
+        var catalog = CatalogByName();
+        if (catalog.TryGetValue(prefabName, out var key) && key != null)
+        {
+            try
+            {
+                var result = Addressables.LoadAssetAsync<GameObject>(key).WaitForCompletion();
+                if (result != null && result.GetComponent<IslandPiece>() != null)
+                {
+                    Plugin.Log.LogInfo($"MapEditor: island '{prefabName}' resolved from the addressables catalog.");
+                    return CacheIsland(prefabName, result);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning($"MapEditor: island '{prefabName}' failed to load from '{key}': {e.Message}");
+            }
+        }
+
+        // Tier 3: any island prefab still held in memory from an earlier room.
+        foreach (var piece in Resources.FindObjectsOfTypeAll<IslandPiece>())
+        {
+            if (piece == null || piece.name != prefabName) continue;
+            // Prefab assets only - a live scene instance would be a copy of the room we are
+            // about to clear.
+            if (piece.gameObject.scene.IsValid()) continue;
+            Plugin.Log.LogInfo($"MapEditor: island '{prefabName}' resolved from loaded assets.");
+            return CacheIsland(prefabName, piece.gameObject);
+        }
+
+        return null;
+    }
+
+    private static GameObject CacheIsland(string name, GameObject prefab)
+    {
+        _islandPrefabs[name] = prefab;
+        return prefab;
+    }
+
+    public static string StripClone(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return name;
+        while (name.EndsWith("(Clone)"))
+            name = name.Substring(0, name.Length - "(Clone)".Length).TrimEnd();
+        return name;
+    }
+
+    // Any prefab in the addressables catalog, by filename. Used to reach a room prefab that is
+    // not the one currently loaded.
+    public static GameObject FindPrefabByName(string prefabName)
+    {
+        if (string.IsNullOrEmpty(prefabName)) return null;
+
+        var catalog = CatalogByName();
+        if (!catalog.TryGetValue(prefabName, out var key) || key == null) return null;
+
+        try
+        {
+            return Addressables.LoadAssetAsync<GameObject>(key).WaitForCompletion();
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: prefab '{prefabName}' failed to load from '{key}': {e.Message}");
+            return null;
+        }
+    }
+
+    // Depth-first search for a named descendant, used to locate an authored object inside a
+    // room prefab whose container layout may differ from the live room's.
+    public static Transform FindChildByName(Transform root, string name, int depth = 0)
+    {
+        if (root == null || depth > 6) return null;
+
+        for (var i = 0; i < root.childCount; i++)
+        {
+            var child = root.GetChild(i);
+            if (child.name == name) return child;
+
+            var nested = FindChildByName(child, name, depth + 1);
+            if (nested != null) return nested;
         }
         return null;
     }

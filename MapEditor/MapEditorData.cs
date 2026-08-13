@@ -24,6 +24,10 @@ public class CTNodeBlueprint
 {
     public string MapName = "UntitledMap";
     public string SceneName = "Dungeon1";
+    // The room prefab this blueprint was authored in ("Entrance Room Dungeon 1"). KeptAuthored
+    // objects have no prefab key of their own - they are children of this prefab - so loading
+    // into a different room type needs it to copy them across.
+    public string SourceRoom = "";
     public bool UseVanillaFloorCollision = true;
     public string MusicEvent = "";   // FMOD event path (event:/music/...); empty = vanilla music
     // Restart MusicEvent when it finishes. FMOD events loop only if authored to; this covers

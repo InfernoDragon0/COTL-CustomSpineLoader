@@ -12,11 +12,24 @@ namespace CustomSpineLoader.Patches
     {
         public static ConnectionTypes NextRoomConnectionType = ConnectionTypes.Entrance;
         public static bool GenCheck = false;
+        // Direction of the last door the player walked through; the next room's blueprint
+        // entry prefers the opposite side.
+        public static string LastDoorDirection = null;
 
         [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.OnEnable))]
         [HarmonyPrefix]
         private static void BiomeGenerator_OnEnable(BiomeGenerator __instance)
         {
+            // A dungeon entry that is not the level run's own ends that run, so its statics
+            // never leak into the next scene. FollowerLocation.None means "no entry pending"
+            // (a later re-enable of the same biome), which must leave a run alone.
+            var entering = CustomDungeonManager.EnteringCustomDungeon;
+            var levelLocation = MapEditor.CTLevelDungeon.Instance != null
+                ? MapEditor.CTLevelDungeon.Instance.Location
+                : FollowerLocation.None;
+            if (entering != FollowerLocation.None && entering != levelLocation)
+                MapEditor.LevelPlayback.Stop();
+
             if (CustomDungeonManager.CustomDungeonList.ContainsKey(CustomDungeonManager.EnteringCustomDungeon))
             {
                 Plugin.Log.LogInfo("Entering Custom Dungeon ONENABLE " + CustomDungeonManager.EnteringCustomDungeon);
@@ -25,6 +38,12 @@ namespace CustomSpineLoader.Patches
                 Plugin.Log.LogInfo("Custom Room Count for " + __instance.DungeonLocation + ": " + CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation].NumRooms);
                 __instance.NumberOfRooms = CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation].NumRooms;
                 // __instance.StartWithBossRoomDoor = true;
+
+                // Statics survive from the previous run; without this the entrance room's
+                // Generate hook is skipped (GenCheck stuck true from the last door used).
+                GenCheck = false;
+                NextRoomConnectionType = ConnectionTypes.Entrance;
+                LastDoorDirection = null;
 
                 CustomDungeonManager.EnteringCustomDungeon = FollowerLocation.None;
                 
@@ -61,6 +80,7 @@ namespace CustomSpineLoader.Patches
             }
             Plugin.Log.LogInfo("Entering room type " + __instance.ConnectionType);
             NextRoomConnectionType = __instance.ConnectionType;
+            LastDoorDirection = __instance.direction.ToString();
             GenCheck = false;
             return true;
         }
@@ -118,6 +138,11 @@ namespace CustomSpineLoader.Patches
 
             GenCheck = true;
 
+            // Harmony's enumerator patch supplies a null __instance in some invocations (seen
+            // on the boot-time entrance room). GenerateRoom.Instance is the same object -
+            // OnEnable assigns it before Generate is ever called - so it is the safer handle.
+            var room = __instance != null ? __instance : GenerateRoom.Instance;
+
             Plugin.Log.LogInfo("GenerateRoom_Generate for custom dungeon " + BiomeGenerator.Instance.DungeonLocation);
             //TODO: this seems to run once for every room instance which makes it run multiple times. 
             Plugin.Log.LogInfo("Room complete status: " + BiomeGenerator.Instance.CurrentRoom.Completed);
@@ -131,7 +156,7 @@ namespace CustomSpineLoader.Patches
                         break;
                     case ConnectionTypes.True:
                         Plugin.Log.LogInfo("True Room Generated");//mob room
-                        CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation].SpawnEnemies(__instance, NextRoomConnectionType);
+                        CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation].SpawnEnemies(room, NextRoomConnectionType);
                         break;
                     case ConnectionTypes.Entrance:
                         Plugin.Log.LogInfo("Entrance Room Generated");
@@ -167,11 +192,17 @@ namespace CustomSpineLoader.Patches
                         Plugin.Log.LogInfo("LoreStoneRoom Generated");
                         break;
                     default:
-                        Plugin.Log.LogInfo("Default Room Generated"); 
+                        Plugin.Log.LogInfo("Default Room Generated");
                         break;
-                    
+
                 }
             }
+
+            // Data-driven dungeons (CTLevelDungeon) build the room's content here, for every
+            // connection type. Deliberately outside the Completed guard: revisiting a room
+            // regenerates its vanilla content, so blueprint-driven rooms must re-apply too.
+            CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation]
+                .OnRoomGenerated(room, NextRoomConnectionType);
             // complete room manually with (RoomLockController.RoomCompleted(true,true))
         }
     }

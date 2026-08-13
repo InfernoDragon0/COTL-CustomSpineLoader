@@ -159,6 +159,16 @@ public class LevelTool : IMapEditorTool
         _dynamic.Add(_ui.CreateLabel(_panel,
             $"Room {_selectedRoom + 1} pool\n(empty pool = any saved node)", 14, TextAlignmentOptions.Center));
 
+        // A pool can also offer the room the game would have generated, so a level mixes
+        // authored rooms with vanilla ones.
+        var vanillaInPool = selected.NodePool.Contains(CTLevelRoom.VanillaNode);
+        _dynamic.Add(_ui.CreateButton(_panel, (vanillaInPool ? "[x] " : "[  ] ") + "Vanilla generated room", () =>
+        {
+            if (vanillaInPool) selected.NodePool.Remove(CTLevelRoom.VanillaNode);
+            else selected.NodePool.Add(CTLevelRoom.VanillaNode);
+            Rebuild();
+        }));
+
         var nodes = MapEditorSerialization.LoadAll();
         if (nodes.Count == 0)
         {

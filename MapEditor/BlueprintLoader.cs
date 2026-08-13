@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using CustomSpineLoader.MapEditor.Tools;
+using MMBiomeGeneration;
 using MMRoomGeneration;
 using Pathfinding;
 using UnityEngine;
@@ -24,6 +25,11 @@ public class BlueprintLoader
     private readonly RuntimeMapEditor _editor;
 
     public bool IsLoading { get; private set; }
+
+    // Per-load tallies, reported at the end so a room that came back wrong says so in the log
+    // instead of only looking wrong on screen.
+    private int _propsSpawned;
+    private int _propsFailed;
 
     public BlueprintLoader(RuntimeMapEditor editor)
     {
@@ -87,6 +93,7 @@ public class BlueprintLoader
         yield return null;
 
         RestoreKeptAuthored(keptObjects, room);
+        SpawnMissingKeptAuthored(bp, room, keptObjects);
 
         shapeTool?.ApplyVanillaFloorFlag(bp.UseVanillaFloorCollision);
 
@@ -104,6 +111,8 @@ public class BlueprintLoader
             shapeTool?.FinalizeLoadedShape(ctrl);
 
         // ---- Phase 3: props ----------------------------------------------------------------
+        _propsSpawned = 0;
+        _propsFailed = 0;
         yield return SpawnProps(bp, room);
 
         // ---- Phase 4: structures -----------------------------------------------------------
@@ -139,7 +148,18 @@ public class BlueprintLoader
                     Plugin.Log.LogWarning($"MapEditor: {d.Direction} door could not be created, skipped.");
                     continue;
                 }
-                door.transform.position = MapEditorSerialization.ToVector3(d.Position);
+                // Move the whole door ISLAND, not just the door object. The island carries the
+                // doorway's floor, and each room prefab places its doors at its own edges - so
+                // moving the door alone left its floor out at the generated edge, disconnected
+                // from the blueprint's terrain. That is the "composite outline has 2 path(s)"
+                // warning, and walking in put the player on the stranded side of it.
+                var target = MapEditorSerialization.ToVector3(d.Position);
+                var island = door.GetComponentInParent<IslandPiece>(true);
+                if (island != null && island.transform != door.transform)
+                    island.transform.position += target - door.transform.position;
+                else
+                    door.transform.position = target;
+
                 door.transform.eulerAngles = new Vector3(0f, 0f, d.RotationZ);
 
                 // Pad placement depends on the final door position, so it comes last.
@@ -209,7 +229,9 @@ public class BlueprintLoader
 
         yield return PlayerEntryRoutine(room, bp, doorTool, preferredEntryDirection);
 
-        Plugin.Log.LogInfo($"MapEditor: blueprint '{bp.MapName}' loaded.");
+        Plugin.Log.LogInfo($"MapEditor: blueprint '{bp.MapName}' loaded - " +
+                           $"{_propsSpawned}/{bp.Props.Count} prop(s) rebuilt" +
+                           (_propsFailed > 0 ? $", {_propsFailed} FAILED (see warnings above)" : "") + ".");
         IsLoading = false;
     }
 
@@ -338,6 +360,64 @@ public class BlueprintLoader
         }
     }
 
+    // Kept-authored objects are children of the room prefab the blueprint was saved in, so a
+    // room generated from a different prefab simply does not have them - that is every
+    // "not present in this room" line in the log. They have no prefab key to respawn from, but
+    // their source room does: load that prefab from the catalog and copy the object out of it.
+    private static void SpawnMissingKeptAuthored(CTNodeBlueprint bp, GenerateRoom room, List<KeptObject> restored)
+    {
+        if (bp.KeptAuthored.Count == 0) return;
+
+        var present = new HashSet<string>();
+        foreach (var k in restored)
+            if (k.Data != null) present.Add(k.Data.Name);
+
+        var missing = new List<MapKeptData>();
+        foreach (var data in bp.KeptAuthored)
+            if (!present.Contains(data.Name)) missing.Add(data);
+
+        if (missing.Count == 0) return;
+
+        if (string.IsNullOrEmpty(bp.SourceRoom))
+        {
+            Plugin.Log.LogInfo($"MapEditor: {missing.Count} authored object(s) are absent from this room and the " +
+                               "blueprint predates source-room tracking - re-save it to bring them across.");
+            return;
+        }
+
+        var sourcePrefab = RoomSnapshot.FindPrefabByName(bp.SourceRoom);
+        if (sourcePrefab == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: source room prefab '{bp.SourceRoom}' not found; " +
+                                  $"{missing.Count} authored object(s) stay missing.");
+            return;
+        }
+
+        var copied = 0;
+        foreach (var data in missing)
+        {
+            var source = RoomSnapshot.FindChildByName(sourcePrefab.transform, data.Name);
+            if (source == null)
+            {
+                Plugin.Log.LogInfo($"MapEditor: authored object '{data.Name}' is not in '{bp.SourceRoom}' either.");
+                continue;
+            }
+
+            var parent = ParentFor(data.Parent, room) ?? room.transform;
+            var copy = Object.Instantiate(source.gameObject, parent);
+            // Instantiate appends "(Clone)", which would make the next save treat this as a
+            // runtime spawn instead of the authored object it stands in for.
+            copy.name = data.Name;
+            copy.transform.position = MapEditorSerialization.ToVector3(data.Position);
+            copy.transform.eulerAngles = new Vector3(0f, 0f, data.RotationZ);
+            if (data.Scale != null && data.Scale.X != 0f)
+                copy.transform.localScale = MapEditorSerialization.ToVector3(data.Scale);
+            copied++;
+        }
+
+        Plugin.Log.LogInfo($"MapEditor: copied {copied}/{missing.Count} authored object(s) from '{bp.SourceRoom}'.");
+    }
+
     // Loose objects directly under Room Transform (the backdrop sprite, previous loads'
     // island-parented props) are otherwise never cleared: the room-root sweep deliberately
     // skips this subtree and the terrain pass only covers registered island pieces - so they
@@ -420,13 +500,17 @@ public class BlueprintLoader
             // art - the prefab alone renders only its flat placeholder fill.
             if (prop.IsIslandRef)
             {
-                var prefab = RoomSnapshot.FindIslandPrefab(room, prop.Key);
+                var prefab = RoomSnapshot.FindIslandPrefabObject(room, prop.Key);
                 if (prefab == null)
                 {
-                    Plugin.Log.LogWarning($"MapEditor: island prefab '{prop.Key}' not found in this room's lists, skipped.");
+                    _propsFailed++;
+                    Plugin.Log.LogWarning($"MapEditor: island prefab '{prop.Key}' could not be resolved from this " +
+                                          "room's lists, the addressables catalog or loaded assets - the floor it " +
+                                          "carries will be missing.");
                     continue;
                 }
-                var island = Object.Instantiate(prefab.gameObject, parent);
+                _propsSpawned++;
+                var island = Object.Instantiate(prefab, parent);
                 ApplyPropTransform(island, prop, room);
                 // Vanilla's InitIsland hides the prefab's authored placeholder sprites (the flat
                 // green "Sprite + Collider" fill) before spawning the textured art. We spawn the
@@ -448,7 +532,13 @@ public class BlueprintLoader
                     go =>
                     {
                         pending--;
-                        if (go == null) return;
+                        if (go == null)
+                        {
+                            _propsFailed++;
+                            Plugin.Log.LogWarning($"MapEditor: prop '{captured.Key}' spawned nothing.");
+                            return;
+                        }
+                        _propsSpawned++;
                         ApplyPropTransform(go, captured, room);
                     },
                     prop.IsAddressable);
@@ -456,6 +546,7 @@ public class BlueprintLoader
             catch (System.Exception e)
             {
                 pending--;
+                _propsFailed++;
                 Plugin.Log.LogWarning($"MapEditor: prop '{prop.Key}' failed to spawn: {e.Message}");
             }
         }
@@ -590,6 +681,7 @@ public class BlueprintLoader
                 }
 
                 _editor.StartCoroutine(ReleaseDoorAfterEntry(door));
+                _editor.StartCoroutine(FinishArrival());
                 Plugin.Log.LogInfo("MapEditor: player entry complete.");
             },
             maxDuration: -1f, forcePositionOnTimeout: true);
@@ -600,6 +692,50 @@ public class BlueprintLoader
     {
         yield return new WaitForSeconds(1f);
         if (door != null) door.Used = false;
+    }
+
+    // Everything vanilla does at the end of its own room arrival
+    // (BiomeGenerator.PlayersFirstEnterRoomDelayedGotoAndStop's GoToAndStop callback). Our
+    // walk-in replaces vanilla's, so its callback never fires - which left the entry cinematic
+    // running: letterbox bars stuck on screen, camera in conversation mode, allies frozen and
+    // every input except movement swallowed.
+    private static IEnumerator FinishArrival()
+    {
+        // Vanilla routes this through DelayEndConversation's 0.3s wait.
+        yield return new WaitForSeconds(0.3f);
+
+        var manager = GameManager.GetInstance();
+        if (manager != null)
+        {
+            try
+            {
+                // SetPlayerToIdle: false, exactly as vanilla - GoToAndStop's IdleOnEnd has
+                // already restored the state by the time this runs.
+                manager.OnConversationEnd(SetPlayerToIdle: false);
+                manager.CameraSetOffset(Vector3.zero);
+                manager.AddPlayerToCamera();
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning("MapEditor: conversation hand-off failed: " + e.Message);
+            }
+        }
+
+        // Rebinds the input maps; without it only movement survives the entry.
+        try
+        {
+            PlayerFarming.ResetMainPlayer();
+            CoopManager.RefreshCoopPlayerRewired();
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: player input hand-off failed: " + e.Message);
+        }
+
+        // Vanilla's DelayActivateRoom: the room only counts as entered once the arrival ends.
+        yield return new WaitForSeconds(0.5f);
+        var biome = BiomeGenerator.Instance;
+        if (biome != null && biome.CurrentRoom != null) biome.CurrentRoom.Active = true;
     }
 
     private static Vector3? SnapToWalkable(Vector3 probe)

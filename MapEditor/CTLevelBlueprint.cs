@@ -27,6 +27,11 @@ public class CTLevelBlueprint
 [Serializable]
 public class CTLevelRoom
 {
+    // A pool entry that means "leave this room exactly as the game generated it", so a level
+    // can mix authored rooms with vanilla ones. Angle brackets keep it out of reach of real
+    // map names, which Sanitize strips those characters from.
+    public const string VanillaNode = "<vanilla>";
+
     public string Role = "Normal"; // Entrance | Normal | Exit
     public List<string> NodePool = []; // CTNodeBlueprint MapNames allowed here; empty = any saved node
 

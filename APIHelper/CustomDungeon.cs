@@ -71,6 +71,11 @@ public class CustomDungeon
         GameManager.GetInstance().OnConversationNew();
     }
 
+    // Called once per newly generated room, for every connection type (SpawnEnemies is only
+    // invoked for True rooms). Subclasses that build room content from data - CTLevelDungeon
+    // applying node blueprints - hook here. Default: vanilla-generated rooms stay as they are.
+    public virtual void OnRoomGenerated(GenerateRoom room, ConnectionTypes connectionType) { }
+
     public virtual void SpawnEnemies(GenerateRoom room, ConnectionTypes connectionType)
     {
         Plugin.Log.LogInfo($"Spawning enemies for connection type {connectionType} in custom dungeon {this.Location}");

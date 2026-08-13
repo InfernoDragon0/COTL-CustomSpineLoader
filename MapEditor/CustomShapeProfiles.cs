@@ -117,6 +117,9 @@ public static class CustomShapeProfiles
                 end = rangeConfig.End,
                 order = rangeConfig.Order
             };
+            // The game's SpriteShape build does not initialize these lists in the parameterless
+            // constructors - Add on them was the NullReferenceException that killed the build.
+            range.sprites ??= [];
 
             foreach (var spriteConfig in rangeConfig.Sprites)
             {
@@ -126,6 +129,7 @@ public static class CustomShapeProfiles
                 if (sprite != null) range.sprites.Add(sprite);
             }
 
+            shape.angleRanges ??= [];
             shape.angleRanges.Add(range);
         }
 
@@ -141,7 +145,9 @@ public static class CustomShapeProfiles
             if (sprite == null) continue;
 
             var corner = new CornerSprite { cornerType = cornerType };
+            corner.sprites ??= [];
             corner.sprites.Add(sprite);
+            shape.cornerSprites ??= [];
             shape.cornerSprites.Add(corner);
         }
 

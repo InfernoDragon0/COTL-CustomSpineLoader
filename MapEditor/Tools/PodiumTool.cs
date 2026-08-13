@@ -7,10 +7,59 @@ namespace CustomSpineLoader.MapEditor.Tools;
 
 // Per-podium equip behavior. Vanilla treats a room's podiums as choose-one-of-N: equipping
 // from one disables all the others. With ClearAllOnEquip false only the used podium is
-// consumed - the OnInteract patch below blanks the disable-others list for the call.
+// consumed.
+//
+// Three layers enforce that, because the podium prefab we place carries an empty
+// otherWeaponOptions array while the room's authored podiums carry a populated one - so the
+// podium that does the disabling is often not one we spawned:
+//   1. PodiumTool's OnInteract patch blanks the used podium's disable-others list;
+//   2. its IsPodiumInSameRoom patch makes vanilla skip any podium marked keep-usable;
+//   3. this component restores its own podium if something turned it off anyway.
 public class CTPodiumBehavior : MonoBehaviour
 {
     public bool ClearAllOnEquip = true;
+
+    private Interaction_WeaponSelectionPodium _podium;
+    private float _nextCheck;
+
+    private void Awake() => _podium = GetComponentInChildren<Interaction_WeaponSelectionPodium>(true);
+
+    private void Update()
+    {
+        if (ClearAllOnEquip) return;
+        if (Time.time < _nextCheck) return;
+        _nextCheck = Time.time + 0.25f;
+
+        if (_podium == null)
+        {
+            _podium = GetComponentInChildren<Interaction_WeaponSelectionPodium>(true);
+            if (_podium == null) return;
+        }
+
+        // This podium was the one used (or is a spent relic podium): it stays consumed.
+        if (_podium.WeaponTaken || _podium.activated) return;
+
+        // Untouched and still lit: nothing to do.
+        if (_podium.Interactable && _podium.enabled &&
+            (_podium.podiumOn == null || _podium.podiumOn.activeSelf)) return;
+
+        Restore();
+    }
+
+    // The exact inverse of vanilla's disable-others block.
+    private void Restore()
+    {
+        _podium.enabled = true;
+        _podium.Interactable = true;
+        if (_podium.Lighting != null) _podium.Lighting.SetActive(true);
+        if (_podium.IconSpriteRenderer != null) _podium.IconSpriteRenderer.enabled = true;
+        if (_podium.podiumOn != null) _podium.podiumOn.SetActive(true);
+        if (_podium.podiumOff != null) _podium.podiumOff.SetActive(false);
+        if (_podium.particleEffect != null) _podium.particleEffect.Play();
+        if (_podium.AvailableGoop != null) _podium.AvailableGoop.Play("Show");
+
+        Plugin.Log.LogInfo("MapEditor: podium kept usable after another podium was equipped.");
+    }
 }
 
 // Places weapon selection podiums (the pedestals guaranteed in every dungeon's first room).
@@ -73,6 +122,22 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
         }
     }
 
+    // Vanilla's disable-others loop only touches podiums this returns true for, so reporting
+    // "not in this room" for a keep-usable podium is the cleanest way to exempt it - and it
+    // works no matter which podium was equipped, including the room's authored ones whose
+    // otherWeaponOptions array is the one actually populated.
+    [HarmonyPatch(typeof(Interaction_WeaponSelectionPodium), "IsPodiumInSameRoom")]
+    private static class Podium_IsPodiumInSameRoom_Patch
+    {
+        private static void Postfix(Interaction_WeaponSelectionPodium otherPodium, ref bool __result)
+        {
+            if (!__result || otherPodium == null) return;
+
+            var marker = otherPodium.GetComponentInParent<CTPodiumBehavior>(true);
+            if (marker != null && !marker.ClearAllOnEquip) __result = false;
+        }
+    }
+
     public PodiumTool(RuntimeMapEditor editor)
     {
         _editor = editor;
@@ -108,15 +173,22 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
         ui.CreateToggle(panel, "Equip clears all", _clearAllOnEquip, v =>
         {
             _clearAllOnEquip = v;
+            var count = ApplyBehaviorToRoom(v);
             _editor.SetStatus(v
-                ? "Vanilla behavior: equipping from one podium disables the room's others."
-                : "Equipping consumes only that podium; the others stay usable.");
+                ? $"Vanilla behavior: equipping disables the room's other podiums ({count} updated)."
+                : $"Equipping consumes only that podium ({count} updated).");
         });
 
         ui.CreateButton(panel, "Undo Last Podium", UndoLast);
     }
 
-    public void OnEnter() => _editor.SetStatus("Podium tool: pick a type, enable placement, click the world.");
+    public void OnEnter()
+    {
+        // Re-assert on entry: a blueprint load (or a fresh room) brings in podiums that never
+        // saw the toggle, and its value should describe the whole room while the tool is open.
+        ApplyBehaviorToRoom(_clearAllOnEquip, onlyUnmarked: true);
+        _editor.SetStatus("Podium tool: pick a type, enable placement, click the world.");
+    }
     public void OnExit() => DestroyPreview();
 
     public void OnUpdate()
@@ -164,6 +236,36 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
     {
         if (_preview != null) Object.Destroy(_preview);
         _preview = null;
+    }
+
+    // The toggle is the room's podium rule, not just a stamp on the next placement: it applies
+    // to every podium already in the room, including the ones the room generated with. Those
+    // carry no marker of their own, and they are the podiums whose otherWeaponOptions array is
+    // actually populated - so while they kept vanilla's clear-all rule, equipping from one of
+    // them wiped the placed podiums no matter what the toggle said.
+    // onlyUnmarked: fill in podiums that have no setting yet (the room's authored ones) without
+    // overwriting values a loaded blueprint brought in.
+    public int ApplyBehaviorToRoom(bool clearAllOnEquip, bool onlyUnmarked = false)
+    {
+        var count = 0;
+        foreach (var podium in Object.FindObjectsOfType<Interaction_WeaponSelectionPodium>())
+        {
+            if (podium == null) continue;
+
+            var marker = podium.GetComponentInParent<CTPodiumBehavior>(true);
+            if (marker == null) marker = podium.gameObject.AddComponent<CTPodiumBehavior>();
+            else if (onlyUnmarked) continue;
+
+            marker.ClearAllOnEquip = clearAllOnEquip;
+            count++;
+        }
+
+        if (!onlyUnmarked)
+            foreach (var placed in _placed) placed.ClearAllOnEquip = clearAllOnEquip;
+
+        if (count > 0)
+            Plugin.Log.LogInfo($"MapEditor: podium clear-all set to {clearAllOnEquip} on {count} podium(s).");
+        return count;
     }
 
     // The room snapshot skips objects this tool already serializes.
@@ -312,7 +414,9 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
                 // The originally chosen type, not the post-roll runtime value, so Random
                 // round-trips as Random.
                 Type = placed.SavedType,
-                ClearAllOnEquip = placed.ClearAllOnEquip
+                // The live marker is the truth: the toggle rewrites it on every podium in the
+                // room, including ones placed before it was flipped.
+                ClearAllOnEquip = LiveClearAll(placed.Instance, placed.ClearAllOnEquip)
             });
         }
 
@@ -324,14 +428,21 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
         foreach (var podium in Object.FindObjectsOfType<Interaction_WeaponSelectionPodium>())
         {
             if (podium == null || IsTrackedOrChild(podium.gameObject)) continue;
-            var marker = podium.GetComponentInParent<CTPodiumBehavior>();
             map.Podiums.Add(new MapPodiumData
             {
                 Position = MapEditorSerialization.V3(podium.transform.position),
                 Type = podium.Type.ToString(),
-                ClearAllOnEquip = marker == null || marker.ClearAllOnEquip
+                ClearAllOnEquip = LiveClearAll(podium.gameObject, _clearAllOnEquip)
             });
         }
+    }
+
+    private static bool LiveClearAll(GameObject podium, bool fallback)
+    {
+        if (podium == null) return fallback;
+        var marker = podium.GetComponentInParent<CTPodiumBehavior>(true)
+                     ?? podium.GetComponentInChildren<CTPodiumBehavior>(true);
+        return marker != null ? marker.ClearAllOnEquip : fallback;
     }
 
     private bool IsTrackedOrChild(GameObject go)
