@@ -162,6 +162,10 @@ public static class LevelPlayback
         ReleaseHold();
         if (CTLevelDungeon.Instance != null) CTLevelDungeon.Instance.Level = null;
         if (_editor != null) _editor.SetMusicLoop(null);
+
+        // The run's last room may have left a lighting override in place; it is global state,
+        // so it would follow the player out of the level.
+        Tools.LightingTool.ClearOverride();
     }
 
     // Called by every freshly created editor host (one per scene load). The entrance room's
@@ -320,6 +324,9 @@ public static class LevelPlayback
         if (_resolvedRooms[state.Slot] == CTLevelRoom.VanillaNode)
         {
             Plugin.Log.LogInfo($"MapEditor: slot {state.Slot + 1} is a vanilla room; left as generated.");
+            // A previous room's lighting override is global and outlives the room that set it,
+            // so a vanilla room has to drop it or it keeps that room's mood.
+            Tools.LightingTool.ClearOverride();
             ReleaseHold();
             yield break;
         }
@@ -356,6 +363,22 @@ public static class LevelPlayback
         {
             if (Abort(token)) yield break;
             yield return null;
+        }
+
+        // Nothing gates a room the blueprint left empty: vanilla releases the door locks when
+        // the room's encounter is cleared, and with its content suppressed and no blueprint
+        // enemies there is no encounter to clear - so the locks would stay shut for good.
+        if (bp.Enemies.Count == 0)
+        {
+            try
+            {
+                RoomLockController.RoomCompleted();
+                Plugin.Log.LogInfo("MapEditor: no enemies in this room; doors unlocked.");
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning("MapEditor: could not unlock the room's doors: " + e.Message);
+            }
         }
 
         ReleaseHold();

@@ -33,6 +33,7 @@ public class CTNodeBlueprint
     // Restart MusicEvent when it finishes. FMOD events loop only if authored to; this covers
     // one-shot tracks used as room music.
     public bool MusicLoop;
+    public MapLightingData Lighting = new();
     public List<MapShapeData> Shapes = [];
     public List<MapPropData> Props = [];
     public List<MapKeptData> KeptAuthored = [];
@@ -124,7 +125,39 @@ public class MapEnemyData
     public SerializableVector3 Position;
 }
 
+// Lighting and fog are not objects in the room - they are a BiomeLightingSettings asset the
+// game's LightingManager applies - so a blueprint stores the values rather than a prefab.
+// Enabled = false leaves the biome's own lighting alone.
 [Serializable]
+public class MapLightingData
+{
+    public bool Enabled;
+
+    public SerializableColor Ambient = new();
+    public SerializableColor DirectionalLight = new();
+    public float DirectionalIntensity = 1f;
+    public float ShadowStrength = 0.5f;
+    public float Exposure = 1.15f;
+
+    public SerializableColor Fog = new();
+    public float FogNear = 10f;
+    public float FogFar = 15f;
+    public float FogHeight = 0.5f;
+    public float FogSpread = 1f;
+}
+
+[Serializable]
+public class SerializableColor
+{
+    public float R;
+    public float G;
+    public float B;
+    public float A = 1f;
+
+    public static SerializableColor From(Color c) => new() { R = c.r, G = c.g, B = c.b, A = c.a };
+    public Color ToColor() => new(R, G, B, A);
+}
+
 public class MapPodiumData
 {
     public SerializableVector3 Position;

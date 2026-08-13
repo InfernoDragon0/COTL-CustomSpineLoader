@@ -41,6 +41,7 @@ public class SelectTool : IMapEditorTool
 
         ui.CreateButton(panel, "Send Back (Z+)", () => NudgeZ(ZStep));
         ui.CreateButton(panel, "Bring Front (Z-)", () => NudgeZ(-ZStep));
+        ui.CreateButton(panel, "Rotate 180°", () => Rotate(180f));
     }
 
     private const float ZStep = 0.1f;
@@ -356,6 +357,34 @@ public class SelectTool : IMapEditorTool
         var p = _selected.transform.position;
         _selected.transform.position = new Vector3(p.x, p.y, p.z + delta);
         _editor.SetStatus($"{_selected.name} Z: {_selected.transform.position.z:0.###}");
+    }
+
+    // Spins the selection about its own Z axis. Doors are refused: their walkable pad, barrier
+    // and lock visuals are all built from the direction they face, so a rotated door would keep
+    // its doorway pointing the old way.
+    private void Rotate(float degrees)
+    {
+        if (_selected == null)
+        {
+            _editor.SetStatus("Nothing selected.");
+            return;
+        }
+
+        if (_selected.GetComponentInChildren<Door>(true) != null ||
+            _selected.GetComponentInParent<Door>(true) != null)
+        {
+            _editor.SetStatus("Doors cannot be rotated - their doorway and barrier follow their direction.");
+            return;
+        }
+
+        _selected.transform.Rotate(0f, 0f, degrees);
+
+        // Structures serialise their own rotation rather than reading it back off the transform,
+        // so the tracked value has to follow or the turn would be lost on save.
+        _editor.GetTool<StructureTool>()?.TryRotate(_selected, degrees);
+
+        _editor.KeepCullingSuspended = true;
+        _editor.SetStatus($"{_selected.name} rotated to {_selected.transform.eulerAngles.z:0}°.");
     }
 
     private void ClearHighlight()

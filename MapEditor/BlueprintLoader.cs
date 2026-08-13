@@ -93,7 +93,7 @@ public class BlueprintLoader
         yield return null;
 
         RestoreKeptAuthored(keptObjects, room);
-        SpawnMissingKeptAuthored(bp, room, keptObjects);
+        yield return SpawnMissingKeptAuthored(bp, room, keptObjects);
 
         shapeTool?.ApplyVanillaFloorFlag(bp.UseVanillaFloorCollision);
 
@@ -164,6 +164,7 @@ public class BlueprintLoader
 
                 // Pad placement depends on the final door position, so it comes last.
                 doorTool.RefreshPad(door, deferCollision: true);
+                DoorTool.RefreshMovementAnchors(door);
             }
 
             doorTool.RemoveDoorsNotIn(wanted);
@@ -188,6 +189,11 @@ public class BlueprintLoader
         }
 
         // ---- Phase 8: one batched collision + pathfinding rebuild --------------------------
+        // The doorway pads built in phase 5 only have a mesh - and therefore a bakeable
+        // collider - at end of frame, so the union must not be rebuilt before they are in it.
+        yield return null;
+        doorTool?.FinalizeAllPads();
+
         yield return RebuildCollisionAndWait(room);
 
         // The room now holds blueprint content: stop vanilla re-entry code from re-rolling
@@ -226,6 +232,11 @@ public class BlueprintLoader
             }
         }
         _editor.SetMusicLoop(bp.MusicLoop && !string.IsNullOrEmpty(bp.MusicEvent) ? bp.MusicEvent : null);
+
+        // Lighting and fog are values rather than objects, so they are applied here rather than
+        // rebuilt with the room. A blueprint that never set them leaves the biome alone.
+        if (bp.Lighting != null && bp.Lighting.Enabled) LightingTool.Apply(bp.Lighting);
+        else LightingTool.ClearOverride();
 
         yield return PlayerEntryRoutine(room, bp, doorTool, preferredEntryDirection);
 
@@ -364,9 +375,10 @@ public class BlueprintLoader
     // room generated from a different prefab simply does not have them - that is every
     // "not present in this room" line in the log. They have no prefab key to respawn from, but
     // their source room does: load that prefab from the catalog and copy the object out of it.
-    private static void SpawnMissingKeptAuthored(CTNodeBlueprint bp, GenerateRoom room, List<KeptObject> restored)
+    private static IEnumerator SpawnMissingKeptAuthored(CTNodeBlueprint bp, GenerateRoom room,
+        List<KeptObject> restored)
     {
-        if (bp.KeptAuthored.Count == 0) return;
+        if (bp.KeptAuthored.Count == 0) yield break;
 
         var present = new HashSet<string>();
         foreach (var k in restored)
@@ -376,21 +388,22 @@ public class BlueprintLoader
         foreach (var data in bp.KeptAuthored)
             if (!present.Contains(data.Name)) missing.Add(data);
 
-        if (missing.Count == 0) return;
+        if (missing.Count == 0) yield break;
 
         if (string.IsNullOrEmpty(bp.SourceRoom))
         {
             Plugin.Log.LogInfo($"MapEditor: {missing.Count} authored object(s) are absent from this room and the " +
                                "blueprint predates source-room tracking - re-save it to bring them across.");
-            return;
+            yield break;
         }
 
-        var sourcePrefab = RoomSnapshot.FindPrefabByName(bp.SourceRoom);
+        GameObject sourcePrefab = null;
+        yield return RoomSnapshot.LoadPrefabByNameRoutine(bp.SourceRoom, go => sourcePrefab = go);
         if (sourcePrefab == null)
         {
             Plugin.Log.LogWarning($"MapEditor: source room prefab '{bp.SourceRoom}' not found; " +
                                   $"{missing.Count} authored object(s) stay missing.");
-            return;
+            yield break;
         }
 
         var copied = 0;
@@ -500,7 +513,8 @@ public class BlueprintLoader
             // art - the prefab alone renders only its flat placeholder fill.
             if (prop.IsIslandRef)
             {
-                var prefab = RoomSnapshot.FindIslandPrefabObject(room, prop.Key);
+                GameObject prefab = null;
+                yield return RoomSnapshot.ResolveIslandRoutine(room, prop.Key, go => prefab = go);
                 if (prefab == null)
                 {
                     _propsFailed++;
@@ -616,6 +630,32 @@ public class BlueprintLoader
             Plugin.Log.LogInfo($"MapEditor: rebuilt collision - composite outline has {composite.pathCount} " +
                                $"path(s), {livePieces} island piece(s) registered. More than one path means " +
                                "disconnected floor regions that block movement between them.");
+
+            if (composite.pathCount > 1) ReportStrandedDoors(composite);
+        }
+    }
+
+    // Which door is on the wrong side of a gap. The path count alone says a room is split but
+    // not where, and a door whose floor is cut off from the room cannot be walked through even
+    // though it is present and unlocked.
+    private static void ReportStrandedDoors(CompositeCollider2D composite)
+    {
+        if (AstarPath.active == null) return;
+
+        var centre = AstarPath.active.GetNearest(composite.bounds.center).node;
+        if (centre == null) return;
+
+        foreach (var door in Door.Doors)
+        {
+            if (!DoorTool.IsDoorPresent(door)) continue;
+
+            var inside = door.transform.position + door.GetDoorDirection() * 3f;
+            var node = AstarPath.active.GetNearest(inside).node;
+            if (node == null) continue;
+
+            if (!PathUtilities.IsPathPossible(node, centre))
+                Plugin.Log.LogWarning($"MapEditor: the {door.direction} doorway is cut off from the room's floor - " +
+                                      "walking through it will strand the player. Extend the terrain to meet it.");
         }
     }
 

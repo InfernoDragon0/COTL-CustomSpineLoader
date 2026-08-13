@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using CustomSpineLoader.MapEditor.Tools;
@@ -262,25 +263,9 @@ public static class RoomSnapshot
             }
         }
 
-        // Tier 2: the addressables catalog - islands are addressable assets, so every room's
-        // set is reachable regardless of which room is loaded.
-        var catalog = CatalogByName();
-        if (catalog.TryGetValue(prefabName, out var key) && key != null)
-        {
-            try
-            {
-                var result = Addressables.LoadAssetAsync<GameObject>(key).WaitForCompletion();
-                if (result != null && result.GetComponent<IslandPiece>() != null)
-                {
-                    Plugin.Log.LogInfo($"MapEditor: island '{prefabName}' resolved from the addressables catalog.");
-                    return CacheIsland(prefabName, result);
-                }
-            }
-            catch (System.Exception e)
-            {
-                Plugin.Log.LogWarning($"MapEditor: island '{prefabName}' failed to load from '{key}': {e.Message}");
-            }
-        }
+        // Tier 2 (the addressables catalog, for islands this room's lists do not carry) is not
+        // reachable synchronously - blocking on Addressables mid-rebuild crashes the game - so
+        // it lives in ResolveIslandRoutine. Callers inside a coroutine should use that.
 
         // Tier 3: any island prefab still held in memory from an earlier room.
         foreach (var piece in Resources.FindObjectsOfTypeAll<IslandPiece>())
@@ -310,24 +295,111 @@ public static class RoomSnapshot
         return name;
     }
 
-    // Any prefab in the addressables catalog, by filename. Used to reach a room prefab that is
-    // not the one currently loaded.
-    public static GameObject FindPrefabByName(string prefabName)
+    private static readonly Dictionary<string, GameObject> _prefabCache = [];
+
+    // Any prefab in the addressables catalog, by filename - used to reach assets the current
+    // room does not hold, like the room prefab a blueprint was authored in.
+    //
+    // Deliberately a coroutine: the synchronous WaitForCompletion this used to call blocks the
+    // main thread until Addressables settles, and doing that from inside the room rebuild -
+    // with the pool, the scene and other loads all in flight - hard-crashed the game on the
+    // third room. Polling IsDone costs a few frames behind an already-black screen.
+    public static IEnumerator LoadPrefabByNameRoutine(string prefabName, System.Action<GameObject> onDone)
     {
-        if (string.IsNullOrEmpty(prefabName)) return null;
+        if (string.IsNullOrEmpty(prefabName))
+        {
+            onDone?.Invoke(null);
+            yield break;
+        }
+
+        if (_prefabCache.TryGetValue(prefabName, out var cached) && cached != null)
+        {
+            onDone?.Invoke(cached);
+            yield break;
+        }
 
         var catalog = CatalogByName();
-        if (!catalog.TryGetValue(prefabName, out var key) || key == null) return null;
+        if (!catalog.TryGetValue(prefabName, out var key) || key == null)
+        {
+            onDone?.Invoke(null);
+            yield break;
+        }
 
+        yield return LoadPrefabByKeyRoutine(key, onDone);
+    }
+
+    // Same load, addressed by catalog key rather than filename - for callers that already hold
+    // the key and must not be tripped up by two prefabs sharing a name.
+    public static IEnumerator LoadPrefabByKeyRoutine(string key, System.Action<GameObject> onDone)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            onDone?.Invoke(null);
+            yield break;
+        }
+
+        var prefabName = Path.GetFileNameWithoutExtension(key);
+        if (_prefabCache.TryGetValue(prefabName, out var cached) && cached != null)
+        {
+            onDone?.Invoke(cached);
+            yield break;
+        }
+
+        AsyncOperationHandle<GameObject> handle;
         try
         {
-            return Addressables.LoadAssetAsync<GameObject>(key).WaitForCompletion();
+            handle = Addressables.LoadAssetAsync<GameObject>(key);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: prefab '{prefabName}' could not be requested from '{key}': {e.Message}");
+            onDone?.Invoke(null);
+            yield break;
+        }
+
+        var deadline = Time.unscaledTime + 10f;
+        while (!handle.IsDone && Time.unscaledTime < deadline) yield return null;
+
+        GameObject result = null;
+        try
+        {
+            if (handle.IsDone && handle.Status == AsyncOperationStatus.Succeeded) result = handle.Result;
         }
         catch (System.Exception e)
         {
             Plugin.Log.LogWarning($"MapEditor: prefab '{prefabName}' failed to load from '{key}': {e.Message}");
-            return null;
         }
+
+        // Cached for the session: the same room prefab is wanted by every room of a level, and
+        // one load is both faster and safer than repeating it.
+        if (result != null) _prefabCache[prefabName] = result;
+        onDone?.Invoke(result);
+    }
+
+    // Islands, resolved without blocking. Tiers 1 and 3 are synchronous; the catalog tier goes
+    // through the coroutine above.
+    public static IEnumerator ResolveIslandRoutine(GenerateRoom room, string prefabName,
+        System.Action<GameObject> onDone)
+    {
+        var immediate = FindIslandPrefabObject(room, prefabName);
+        if (immediate != null)
+        {
+            onDone?.Invoke(immediate);
+            yield break;
+        }
+
+        GameObject loaded = null;
+        yield return LoadPrefabByNameRoutine(prefabName, go => loaded = go);
+
+        if (loaded != null && loaded.GetComponent<IslandPiece>() != null)
+        {
+            Plugin.Log.LogInfo($"MapEditor: island '{prefabName}' resolved from the addressables catalog.");
+            CacheIsland(prefabName, loaded);
+            onDone?.Invoke(loaded);
+            yield break;
+        }
+
+        onDone?.Invoke(null);
     }
 
     // Depth-first search for a named descendant, used to locate an authored object inside a

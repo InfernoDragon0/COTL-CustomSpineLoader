@@ -82,10 +82,12 @@ public class RuntimeMapEditor : MonoBehaviour
     {
         _tools.Add(new SelectTool(this));
         _tools.Add(new ShapeTool(this));
+        _tools.Add(new IslandTool(this));
         _tools.Add(new StructureTool(this));
         _tools.Add(new EnemyTool(this));
         _tools.Add(new PodiumTool(this));
         _tools.Add(new DoorTool(this));
+        _tools.Add(new LightingTool(this));
         _tools.Add(new MusicTool(this));
         _tools.Add(new ClearTool(this));
         _tools.Add(new LoadTool(this));
@@ -655,6 +657,21 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private void SaveMap()
     {
+        // Four-door rule: a level drops this room into whatever slot the generated walk hands
+        // it, and the walk decides which sides need a door. A blueprint missing one has no door
+        // where the level needs it, and the run dead-ends - so it cannot be saved incomplete.
+        var doorTool = GetTool<DoorTool>();
+        var missing = doorTool?.MissingDirections();
+        if (missing != null && missing.Count > 0)
+        {
+            _saveArmed = false;
+            SetStatus($"Cannot save: missing {string.Join(", ", missing)} door(s). " +
+                      "Use the Door tool's 'Add All Missing Doors'.");
+            Plugin.Log.LogWarning($"MapEditor: save blocked - '{Map.MapName}' is missing " +
+                                  $"{string.Join(", ", missing)} door(s). All four are required.");
+            return;
+        }
+
         // Overwrite guard: a name that already exists on disk takes a second press to confirm.
         if (!_saveArmed && MapEditorSerialization.Exists(Map.MapName))
         {

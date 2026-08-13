@@ -72,13 +72,22 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
         ui.CreateLabel(panel, "Door Tool", 20, TMPro.TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Drag a door to reposition it.\nRoom links are unaffected.", 14, TMPro.TextAlignmentOptions.Center);
+        ui.CreateLabel(panel, "Drag a door to reposition it.\nAll four are required to save.",
+            14, TMPro.TextAlignmentOptions.Center);
 
         _selectedLabel = ui.CreateLabel(panel, "No door selected", 15, TMPro.TextAlignmentOptions.Center)
             .GetComponent<TMPro.TMP_Text>();
 
+        ui.CreateButton(panel, "Add All Missing Doors", () =>
+        {
+            var added = AddAllDoors();
+            _editor.SetStatus(added > 0
+                ? $"Added {added} door(s). Drag them into position."
+                : "All four doors are already present.");
+        });
+
         ui.CreateLabel(panel, "— Add / Remove —", 14, TMPro.TextAlignmentOptions.Center);
-        foreach (var direction in new[] { "North", "East", "South", "West" })
+        foreach (var direction in AllDirections)
         {
             var captured = direction;
             ui.CreateButton(panel, "Toggle " + captured + " Door", () => ToggleDoor(captured));
@@ -119,6 +128,58 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
 
     public static bool IsDoorPresent(Door door) =>
         door != null && door.gameObject.activeInHierarchy;
+
+    public static readonly string[] AllDirections = ["North", "East", "South", "West"];
+
+    // Doors carry PlayerDistanceMovement, the component that slides the doorway as the player
+    // walks up to it. It caches StartPos - a WORLD position - in Start(), which runs during
+    // generation, long before a door is repositioned. Once the player came close enough, its
+    // Update lerped the door back towards that stale anchor: the door "randomly" drifting away
+    // from where the blueprint put it, taking its walkable floor with it. Vanilla hits the same
+    // problem and solves it only for the entrance door (ForceReset + disable in
+    // PlayerFinishedEnteringDoor); every door we move needs the anchor re-cached instead.
+    public static void RefreshMovementAnchors(Door door)
+    {
+        if (door == null) return;
+
+        var island = door.GetComponentInParent<IslandPiece>(true);
+        var root = island != null ? island.transform : door.transform;
+
+        foreach (var mover in root.GetComponentsInChildren<PlayerDistanceMovement>(true))
+        {
+            if (mover == null) continue;
+            mover.StartPos = mover.objectToMove != null
+                ? mover.objectToMove.transform.position
+                : mover.transform.position;
+        }
+    }
+
+    // A node blueprint is dropped into whatever slot the generated walk gives it, and the walk
+    // decides which sides connect to a neighbour - so a blueprint missing a side simply has no
+    // door there when the room needs one, and the level dead-ends. Every blueprint therefore
+    // has to carry all four; the ones the graph does not use are barriered off at load.
+    public List<string> MissingDirections()
+    {
+        var missing = new List<string>();
+        foreach (var direction in AllDirections)
+            if (!IsDoorPresent(FindByDirection(direction))) missing.Add(direction);
+        return missing;
+    }
+
+    // Adds every door the room does not have yet, so the four-door rule is one click away.
+    public int AddAllDoors()
+    {
+        var added = 0;
+        foreach (var direction in AllDirections)
+        {
+            if (IsDoorPresent(FindByDirection(direction))) continue;
+            if (EnsureDoor(direction, deferCollision: true) != null) added++;
+        }
+
+        if (added > 0) SceneRefs.RegenerateRoomCollision();
+        BuildGizmos();
+        return added;
+    }
 
     private void ToggleDoor(string direction)
     {
@@ -205,23 +266,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
             pad = shapeTool?.CreateUntrackedShape(composite.transform, PadName + "_" + door.direction);
             if (pad == null) return;
 
-            var dir = door.GetDoorDirection();
-            var perp = new Vector3(-dir.y, dir.x, 0f);
-            var spline = pad.spline;
-            var corners = new[]
-            {
-                -dir * (PadLength * 0.5f) - perp * (PadWidth * 0.5f),
-                dir * (PadLength * 0.5f) - perp * (PadWidth * 0.5f),
-                dir * (PadLength * 0.5f) + perp * (PadWidth * 0.5f),
-                -dir * (PadLength * 0.5f) + perp * (PadWidth * 0.5f)
-            };
-            for (var i = 0; i < corners.Length; i++)
-            {
-                spline.InsertPointAt(i, corners[i]);
-                spline.SetTangentMode(i, ShapeTangentMode.Linear);
-            }
-            spline.isOpenEnded = false;
-
             pad.autoUpdateCollider = true;
             pad.colliderDetail = 16;
             ShapeTool.EnsureShapeCollider(pad);
@@ -229,15 +273,58 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
             _pads[door] = pad;
         }
 
-        PositionPad(pad, door);
+        // The spline is rebuilt rather than just moved: the pad has to be long enough to reach
+        // the room's floor from wherever this door ended up, and that distance is different in
+        // every room. A fixed-length strip left the doorway as its own island of walkable
+        // ground - the extra composite paths, and doors that could not be walked through.
+        var length = PadLengthFor(door);
+        BuildPadSpline(pad, door, length);
+        PositionPad(pad, door, length);
+
         pad.RefreshSpriteShape();
         _editor.StartCoroutine(FinalizePad(pad, deferCollision));
     }
 
-    private static void PositionPad(SpriteShapeController pad, Door door)
+    // How far the pad must run inward to overlap the room's floor: the door-to-centre distance
+    // measured along the door's own inward direction, plus a margin so it overlaps rather than
+    // merely touches.
+    private static float PadLengthFor(Door door)
+    {
+        var composite = SceneRefs.RoomComposite;
+        if (composite == null) return PadLength;
+
+        var inward = door.GetDoorDirection();
+        var toCentre = composite.bounds.center - door.transform.position;
+        return Mathf.Clamp(Vector3.Dot(toCentre, inward) + 3f, PadLength, 60f);
+    }
+
+    private static void BuildPadSpline(SpriteShapeController pad, Door door, float length)
     {
         var dir = door.GetDoorDirection();
-        var center = door.transform.position + dir * (PadLength * 0.5f - 1.5f);
+        var perp = new Vector3(-dir.y, dir.x, 0f);
+
+        var spline = pad.spline;
+        spline.Clear();
+
+        var corners = new[]
+        {
+            -dir * (length * 0.5f) - perp * (PadWidth * 0.5f),
+            dir * (length * 0.5f) - perp * (PadWidth * 0.5f),
+            dir * (length * 0.5f) + perp * (PadWidth * 0.5f),
+            -dir * (length * 0.5f) + perp * (PadWidth * 0.5f)
+        };
+        for (var i = 0; i < corners.Length; i++)
+        {
+            spline.InsertPointAt(i, corners[i]);
+            spline.SetTangentMode(i, ShapeTangentMode.Linear);
+        }
+        spline.isOpenEnded = false;
+    }
+
+    private static void PositionPad(SpriteShapeController pad, Door door, float length)
+    {
+        var dir = door.GetDoorDirection();
+        var center = door.transform.position + dir * (length * 0.5f - 1.5f);
         pad.transform.position = new Vector3(center.x, center.y, door.transform.position.z);
     }
 
@@ -249,6 +336,19 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
 
         _editor.GetTool<ShapeTool>()?.FinalizeLoadedShape(pad);
         if (!deferCollision) SceneRefs.RegenerateRoomCollision();
+    }
+
+    // Bakes and joins every pad right now. RefreshPad defers this by a frame because sprite
+    // shape meshes only generate at end of frame - which means a load that regenerates the
+    // room's collision immediately builds the union WITHOUT the pads in it, leaving each
+    // doorway as its own cut-off region.
+    public void FinalizeAllPads()
+    {
+        var shapeTool = _editor.GetTool<ShapeTool>();
+        if (shapeTool == null) return;
+
+        foreach (var pad in _pads.Values)
+            if (pad != null) shapeTool.FinalizeLoadedShape(pad);
     }
 
     private void DestroyPad(Door door)
@@ -574,6 +674,9 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
 
         // The pad follows the door so the doorway stays walkable wherever it was dropped.
         RefreshPad(_dragging, deferCollision: false);
+        // ...and the door's own slide effect re-anchors, or it would drift back towards where
+        // the room generated it the next time the player walks up to it.
+        RefreshMovementAnchors(_dragging);
 
         _dragging = null;
         SceneRefs.RescanNavigation();
