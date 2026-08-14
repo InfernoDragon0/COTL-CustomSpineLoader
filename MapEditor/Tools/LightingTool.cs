@@ -30,10 +30,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateLabel(panel, "Lighting & Fog", 20, TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Values, not objects: the game drives\nthese from the biome's lighting asset.",
-            14, TextAlignmentOptions.Center);
-
         _stateLabel = ui.CreateLabel(panel, "Following the biome", 15, TextAlignmentOptions.Center)
             .GetComponent<TMP_Text>();
 
@@ -42,7 +38,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             CaptureCurrent();
             Data.Enabled = true;
             Apply();
-            _editor.SetStatus("Captured the biome's lighting - edits now override it.");
+            _editor.SetStatus("Biome lighting captured.");
         });
 
         ui.CreateButton(panel, "Reset To Biome", () =>
@@ -50,13 +46,13 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             Data.Enabled = false;
             ClearOverride();
             UpdateStateLabel();
-            _editor.SetStatus("Lighting follows the biome again.");
+            _editor.SetStatus("Lighting reset to biome.");
         });
 
-        ui.CreateLabel(panel, "— Ambient —", 14, TextAlignmentOptions.Center);
+        ui.CreateHeader(panel, "Ambient");
         ColourSliders(ui, panel, "Ambient", () => Data.Ambient);
 
-        ui.CreateLabel(panel, "— Sun —", 14, TextAlignmentOptions.Center);
+        ui.CreateHeader(panel, "Sun");
         ColourSliders(ui, panel, "Sun", () => Data.DirectionalLight);
         ui.CreateSlider(panel, "Sun Intensity", 0f, 4f, Data.DirectionalIntensity,
             v => { Data.DirectionalIntensity = v; Touch(); });
@@ -65,7 +61,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         ui.CreateSlider(panel, "Exposure", 0f, 3f, Data.Exposure,
             v => { Data.Exposure = v; Touch(); });
 
-        ui.CreateLabel(panel, "— Fog —", 14, TextAlignmentOptions.Center);
+        ui.CreateHeader(panel, "Fog");
         ColourSliders(ui, panel, "Fog", () => Data.Fog);
         // Near/far are the distances the fog fades between; height and spread shape how far up
         // it climbs and how soft its edge is.
@@ -92,7 +88,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         // like, so the first slider drag is a nudge rather than a jump to black.
         if (!Data.Enabled) CaptureCurrent();
         UpdateStateLabel();
-        _editor.SetStatus("Lighting: capture the biome's values, then edit them.");
+        _editor.SetStatus("Capture the biome, then edit.");
     }
 
     public void OnExit() { }

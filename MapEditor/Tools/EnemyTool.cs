@@ -22,7 +22,7 @@ namespace CustomSpineLoader.MapEditor.Tools;
 //
 // Placed enemies are LIVE: frozen only while the editor holds timeScale at 0, acting the moment
 // it closes. They join Health.team2, so room-lock doors may close until they are dealt with.
-public class EnemyTool : IMapEditorTool, IMapDataContributor
+public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Enemies";
 
@@ -35,10 +35,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
     // Group name -> list of (label, addressable key). Custom enemies use a synthetic group.
     private static SortedDictionary<string, List<(string label, string key)>> _catalog;
 
-    private readonly List<GameObject> _listButtons = [];
-    private RectTransform _panel;
-    private MapEditorUI _ui;
-    private TMP_Text _selectionLabel;
 
     private string _pendingKey;
     private bool _pendingIsCustom;
@@ -61,41 +57,64 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        _panel = panel;
-        _ui = ui;
+        // The group picker leads: nothing below it means anything until a group is chosen.
+        _groupKeys.Clear();
+        var options = new List<string>();
+        foreach (var group in Catalog().Keys)
+        {
+            _groupKeys.Add(group);
+            options.Add($"{group} ({Catalog()[group].Count})");
+        }
 
-        ui.CreateLabel(panel, "Enemy Tool", 20, TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Placed enemies are live and\nact once the editor closes.", 14, TextAlignmentOptions.Center);
+        // Not part of the cached vanilla catalog: mods register enemies at their own pace, so
+        // this group is read live every time it is picked.
+        _groupKeys.Add(null);
+        options.Add("Custom (mods)");
 
-        _selectionLabel = ui.CreateLabel(panel, "Nothing selected", 15, TextAlignmentOptions.Center)
-            .GetComponent<TMP_Text>();
+        _groupDropdown = ui.CreateDropdown(panel, "Choose a group", options, (index, _) => ShowGroupAt(index));
+
+        _grid = ui.CreateIconGrid(panel, "EnemyGrid");
 
         ui.CreateButton(panel, "Clear Selection", () =>
         {
             _pendingKey = null;
             DestroyPreview();
-            _editor.SetStatus("Enemy selection cleared.");
-            UpdateSelectionLabel();
+            _grid?.SetSelected(null);
+            _editor.SetStatus("Selection cleared.");
         });
-        ui.CreateButton(panel, "Undo Last Enemy", UndoLast);
-
-        ui.CreateLabel(panel, "— Groups —", 14, TextAlignmentOptions.Center);
-        foreach (var group in Catalog().Keys)
-        {
-            var captured = group;
-            ui.CreateButton(panel, $"{captured} ({Catalog()[captured].Count})", () => ShowGroup(captured));
-        }
-
-        // Not part of the cached vanilla catalog: mods register enemies at their own pace, so
-        // this group is read live on every click.
-        ui.CreateButton(panel, "Custom (mods)", ShowCustomGroup);
     }
+
+    private MapEditorDropdown _groupDropdown;
+
+    private void ShowGroupAt(int index)
+    {
+        if (index < 0 || index >= _groupKeys.Count) return;
+
+        var group = _groupKeys[index];
+        if (group == null) ShowCustomGroup();
+        else ShowGroup(group);
+    }
+
+    private readonly List<string> _groupKeys = [];
+    private MapEditorGrid _grid;
 
     public void OnEnter()
     {
-        _editor.SetStatus("Enemy tool: pick a group, pick an enemy, click the world to place it.");
-        UpdateSelectionLabel();
+        // Open on the first group rather than an empty grid: an empty panel says nothing about
+        // what the tool does.
+        if (_grid != null && _groupDropdown != null && _groupDropdown.SelectedIndex < 0)
+        {
+            _groupDropdown.SetSelected(0);
+            ShowGroupAt(0);
+        }
+
+        _editor.SetStatus("Pick a group, then an enemy.");
     }
+
+    public IEnumerable<(string Key, string Action)> Shortcuts =>
+    [
+        ("LMB", "Place selected enemy")
+    ];
 
     public void OnExit() => DestroyPreview();
 
@@ -120,6 +139,21 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
     }
 
     public void ResetTracking() => _placed.Clear();
+
+    // Everything this tool put in the room, for the clear tool.
+    public int ClearPlaced()
+    {
+        var removed = 0;
+        foreach (var placed in _placed)
+        {
+            if (placed.Instance == null) continue;
+            Object.Destroy(placed.Instance);
+            removed++;
+        }
+
+        _placed.Clear();
+        return removed;
+    }
 
     // Also the loader's entry point: self-registers so load then save round-trips. withVfx runs
     // the game's teleport-in effect (and EnemyRoundsBase registration); it is skipped for editor
@@ -169,8 +203,10 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
         }
 
         go.AddComponent<EnemyContainment>();
-        _placed.Add(new PlacedEnemy { Key = key, IsCustom = false, Instance = go });
-        _editor.SetStatus($"Placed {Path.GetFileNameWithoutExtension(key)} at {position}.");
+        var placed = new PlacedEnemy { Key = key, IsCustom = false, Instance = go };
+        _placed.Add(placed);
+        PushUndo(placed, Path.GetFileNameWithoutExtension(key));
+        _editor.SetStatus($"Placed {Path.GetFileNameWithoutExtension(key)}.");
     }
 
     private void SpawnCustom(string internalName, Vector3 position)
@@ -187,84 +223,87 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
             }
 
             unit.gameObject.AddComponent<EnemyContainment>();
-            _placed.Add(new PlacedEnemy { Key = internalName, IsCustom = true, Instance = unit.gameObject });
-            _editor.SetStatus($"Placed custom enemy {internalName} at {position}.");
+            var placed = new PlacedEnemy { Key = internalName, IsCustom = true, Instance = unit.gameObject };
+            _placed.Add(placed);
+            PushUndo(placed, internalName);
+            _editor.SetStatus($"Placed {internalName}.");
             return;
         }
 
         Plugin.Log.LogWarning($"MapEditor: custom enemy '{internalName}' is not registered (mod missing?), skipped.");
     }
 
-    private void UndoLast()
+    private void PushUndo(PlacedEnemy placed, string label)
     {
-        if (_placed.Count == 0)
+        _editor.History.Push($"place {label}", () =>
         {
-            _editor.SetStatus("No enemies placed yet.");
-            return;
-        }
-
-        var last = _placed[_placed.Count - 1];
-        _placed.RemoveAt(_placed.Count - 1);
-        if (last.Instance != null) Object.Destroy(last.Instance);
-        _editor.SetStatus("Removed the last enemy.");
+            if (!_placed.Remove(placed) || placed.Instance == null) return false;
+            Object.Destroy(placed.Instance);
+            return true;
+        });
     }
 
     // ---- picker -----------------------------------------------------------------------------
 
-    // One group's entries are materialised as buttons on demand; building all ~180 at once
-    // stutters and most are never scrolled to.
+    // Only the chosen group's cells exist at a time, and their thumbnails are rendered a few
+    // frames apart afterwards - a group of 150 enemies would otherwise be 150 Spine
+    // instantiations in one frame.
     private void ShowGroup(string group)
     {
-        foreach (var b in _listButtons)
-            if (b != null) Object.Destroy(b);
-        _listButtons.Clear();
+        if (_grid == null || !Catalog().TryGetValue(group, out var entries)) return;
 
-        if (_panel == null || _ui == null || !Catalog().TryGetValue(group, out var entries)) return;
-
-        _listButtons.Add(_ui.CreateLabel(_panel, $"— {group} —", 14, TextAlignmentOptions.Center));
-        foreach (var entry in entries)
-            AddEnemyButton(entry.label, entry.key, isCustom: false);
+        var list = new List<MapEditorGrid.Entry>(entries.Count);
+        foreach (var entry in entries) list.Add(CellFor(entry.label, entry.key, isCustom: false));
+        Populate(list);
     }
 
     private void ShowCustomGroup()
     {
-        foreach (var b in _listButtons)
-            if (b != null) Object.Destroy(b);
-        _listButtons.Clear();
+        if (_grid == null) return;
 
-        if (_panel == null || _ui == null) return;
-
-        _listButtons.Add(_ui.CreateLabel(_panel, "— Custom (mods) —", 14, TextAlignmentOptions.Center));
-
-        var any = false;
+        var list = new List<MapEditorGrid.Entry>();
         foreach (var pair in CustomEnemies())
         {
             if (pair.Value == null) continue;
-            AddEnemyButton(pair.Value.InternalName, pair.Value.InternalName, isCustom: true);
-            any = true;
+            list.Add(CellFor(pair.Value.InternalName, pair.Value.InternalName, isCustom: true));
         }
 
-        if (!any)
-            _listButtons.Add(_ui.CreateLabel(_panel, "No custom enemies registered.", 14, TextAlignmentOptions.Center));
+        Populate(list);
+        if (list.Count == 0) _editor.SetStatus("No custom enemies registered.", StatusSeverity.Warning);
     }
 
-    private void AddEnemyButton(string label, string key, bool isCustom)
+    // Cells go in a few per frame and their thumbnails are rendered a few frames apart after
+    // that: a group of 150 enemies is 150 Spine instantiations, and doing any of it in one frame
+    // is a visible stall.
+    private void Populate(IList<MapEditorGrid.Entry> entries)
     {
-        _listButtons.Add(_ui.CreateButton(_panel, label, () =>
+        EnemyThumbnails.CancelPending();
+        _grid.Populate(_editor, entries, id =>
         {
-            _pendingKey = key;
-            _pendingIsCustom = isCustom;
-            _pendingLabel = label;
-            DestroyPreview();
-            UpdateSelectionLabel();
-            _editor.SetStatus($"Selected {label}. Left-click in the world to place it.");
-        }));
+            var isCustom = _customIds.Contains(id);
+            EnemyThumbnails.Request(_editor, id, isCustom, sprite => _grid?.SetCellIcon(id, sprite));
+        });
     }
 
-    private void UpdateSelectionLabel()
+    private readonly HashSet<string> _customIds = [];
+
+    private MapEditorGrid.Entry CellFor(string label, string key, bool isCustom)
     {
-        if (_selectionLabel != null)
-            _selectionLabel.text = string.IsNullOrEmpty(_pendingKey) ? "Nothing selected" : "Placing: " + _pendingLabel;
+        if (isCustom) _customIds.Add(key);
+
+        return new MapEditorGrid.Entry
+        {
+            Id = key,
+            Display = label,
+            OnClick = () =>
+            {
+                _pendingKey = key;
+                _pendingIsCustom = isCustom;
+                _pendingLabel = label;
+                DestroyPreview();
+                _editor.SetStatus($"Selected {label}.");
+            }
+        };
     }
 
     private static SortedDictionary<string, List<(string label, string key)>> Catalog()
@@ -334,32 +373,90 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
         _editor.StartCoroutine(BuildPreview(_pendingKey, _pendingIsCustom));
     }
 
-    private IEnumerator BuildPreview(string key, bool isCustom)
+    // Resolves an enemy key to its prefab. Shared with the thumbnail renderer, which needs the
+    // same two lookups (addressable for vanilla, COTL_API's prefab list for custom).
+    internal static IEnumerator ResolvePrefabRoutine(string key, bool isCustom, System.Action<GameObject> done)
     {
-        GameObject prefab = null;
-
         if (isCustom)
         {
+            GameObject found = null;
             foreach (var pair in CustomEnemies())
                 if (pair.Value != null && pair.Value.InternalName == key &&
                     CustomEnemyManager.CustomEnemyPrefabList.TryGetValue(pair.Key, out var p))
-                    prefab = p;
+                    found = p;
+            done(found);
+            yield break;
         }
-        else
+
+        AsyncOperationHandle<GameObject> handle;
+        try
         {
-            AsyncOperationHandle<GameObject> handle;
-            try
-            {
-                handle = Addressables.LoadAssetAsync<GameObject>(key);
-            }
-            catch (System.Exception e)
-            {
-                Plugin.Log.LogWarning($"MapEditor: preview load failed for '{key}': {e.Message}");
-                yield break;
-            }
-            while (!handle.IsDone) yield return null;
-            if (handle.Status == AsyncOperationStatus.Succeeded) prefab = handle.Result;
+            handle = Addressables.LoadAssetAsync<GameObject>(key);
         }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: enemy prefab load failed for '{key}': {e.Message}");
+            done(null);
+            yield break;
+        }
+
+        while (!handle.IsDone) yield return null;
+        done(handle.Status == AsyncOperationStatus.Succeeded ? handle.Result : null);
+    }
+
+    // A custom enemy's skeleton override, without needing an instance to apply it to. The
+    // thumbnail renderer drives a bare skeleton straight from this rather than building the
+    // mimic prefab just to re-skin it.
+    internal static bool TryGetCustomSkin(string key, out SkeletonDataAsset asset, out string skin)
+    {
+        asset = null;
+        skin = null;
+
+        foreach (var pair in CustomEnemies())
+        {
+            if (pair.Value == null || pair.Value.InternalName != key) continue;
+            if (pair.Value.SpineOverride == null) return false;
+
+            asset = pair.Value.SpineOverride;
+            skin = pair.Value.SpineSkinName;
+            return true;
+        }
+
+        return false;
+    }
+
+    // Custom enemies re-skin their mimic prefab at spawn; this mirrors CustomEnemyManager.Spawn.
+    // SetToSetupPose + Update(0) are what actually push the new skin into the mesh - the normal
+    // skeleton update never runs while the editor holds timeScale 0.
+    internal static void ApplyCustomSkin(SkeletonAnimation spine, string key)
+    {
+        if (spine == null) return;
+
+        try
+        {
+            foreach (var pair in CustomEnemies())
+            {
+                if (pair.Value == null || pair.Value.InternalName != key) continue;
+                if (pair.Value.SpineOverride == null) continue;
+
+                spine.skeletonDataAsset = pair.Value.SpineOverride;
+                spine.initialSkinName = pair.Value.SpineSkinName;
+                spine.Initialize(true);
+                spine.Skeleton.SetToSetupPose();
+                spine.Update(0f);
+                break;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: could not apply custom skin to '{key}': {e.Message}");
+        }
+    }
+
+    private IEnumerator BuildPreview(string key, bool isCustom)
+    {
+        GameObject prefab = null;
+        yield return ResolvePrefabRoutine(key, isCustom, p => prefab = p);
 
         // Selection changed while loading.
         if (_previewKey != key || prefab == null) yield break;
@@ -382,32 +479,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
                 if (mesh != null) mesh.enabled = false;
             }
 
-            // Custom enemies re-skin their mimic prefab at spawn; mirror CustomEnemyManager.Spawn
-            // exactly on the ghost. SetToSetupPose + Update(0) are what actually push the new
-            // skin into the mesh - the normal skeleton update never runs while the editor holds
-            // timeScale 0.
-            if (isCustom)
-            {
-                try
-                {
-                    foreach (var pair in CustomEnemies())
-                    {
-                        if (pair.Value == null || pair.Value.InternalName != key) continue;
-                        if (pair.Value.SpineOverride == null) continue;
-
-                        spine.skeletonDataAsset = pair.Value.SpineOverride;
-                        spine.initialSkinName = pair.Value.SpineSkinName;
-                        spine.Initialize(true);
-                        spine.Skeleton.SetToSetupPose();
-                        spine.Update(0f);
-                        break;
-                    }
-                }
-                catch (System.Exception e)
-                {
-                    Plugin.Log.LogWarning($"MapEditor: could not apply custom skin to preview of '{key}': {e.Message}");
-                }
-            }
+            if (isCustom) ApplyCustomSkin(spine, key);
 
             if (spine.Skeleton != null) spine.Skeleton.A = 0.6f;
         }
@@ -427,7 +499,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor
 
     // The enemy controller's serialized Spine field, read generically since the concrete
     // controller type varies per enemy; first skeleton in the hierarchy as fallback.
-    private static SkeletonAnimation MainSkeleton(GameObject ghost)
+    internal static SkeletonAnimation MainSkeleton(GameObject ghost)
     {
         var unit = ghost.GetComponentInChildren<UnitObject>(true);
         if (unit != null)

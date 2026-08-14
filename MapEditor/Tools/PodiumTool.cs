@@ -70,7 +70,7 @@ public class CTPodiumBehavior : MonoBehaviour
 // fields are fixed up: OnEnableInteraction destroys any podium whose RemoveIfNotFirstLayer flag
 // is still set once the run has left its first room, and the inactive window is what lets us
 // clear that flag before the check runs.
-public class PodiumTool : IMapEditorTool, IMapDataContributor
+public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Podiums";
 
@@ -82,7 +82,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
     private GameObject _preview;
     private bool _placing;
     private string _type = "Random";
-    private TMP_Text _typeLabel;
 
     private class PlacedPodium
     {
@@ -145,33 +144,16 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateLabel(panel, "Podium Tool", 20, TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Weapon podiums like the ones\nin each dungeon's first room.", 14, TextAlignmentOptions.Center);
-
-        _typeLabel = ui.CreateLabel(panel, "Nothing selected", 15, TextAlignmentOptions.Center)
-            .GetComponent<TMP_Text>();
-
-        // Same flow as the enemy tool: picking a type arms placement and shows the cursor
-        // ghost; clicking the world places one.
-        foreach (var type in new[] { "Random", "Weapon", "Curse", "Relic" })
+        // Four types, always armed: a podium type is never "nothing", so a dropdown that starts
+        // on Random says more than four buttons plus a Clear that only turned placement off.
+        _typeDropdown = ui.CreateDropdown(panel, "Podium type", Types, (index, type) =>
         {
-            var captured = type;
-            ui.CreateButton(panel, captured, () =>
-            {
-                _type = captured;
-                _placing = true;
-                DestroyPreview();
-                UpdateSelectionLabel();
-                _editor.SetStatus($"{captured} podium selected - click the world to place it.");
-            });
-        }
+            if (index < 0 || index >= Types.Length) return;
 
-        ui.CreateButton(panel, "Clear Selection", () =>
-        {
-            _placing = false;
+            _type = type;
+            _placing = true;
             DestroyPreview();
-            UpdateSelectionLabel();
-            _editor.SetStatus("Podium selection cleared.");
+            _editor.SetStatus($"Selected {type} podium.");
         });
 
         ui.CreateToggle(panel, "Equip clears all", _clearAllOnEquip, v =>
@@ -179,27 +161,37 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
             _clearAllOnEquip = v;
             var count = ApplyBehaviorToRoom(v);
             _editor.SetStatus(v
-                ? $"Vanilla behavior: equipping disables the room's other podiums ({count} updated)."
-                : $"Equipping consumes only that podium ({count} updated).");
+                ? $"Equip clears all podiums ({count} updated)."
+                : $"Equip clears one podium only ({count} updated).");
         });
 
-        ui.CreateButton(panel, "Undo Last Podium", UndoLast);
     }
+
+    private static readonly string[] Types = ["Random", "Weapon", "Curse", "Relic"];
+
+    private MapEditorDropdown _typeDropdown;
 
     public void OnEnter()
     {
         // Re-assert on entry: a blueprint load (or a fresh room) brings in podiums that never
         // saw the toggle, and its value should describe the whole room while the tool is open.
         ApplyBehaviorToRoom(_clearAllOnEquip, onlyUnmarked: true);
-        UpdateSelectionLabel();
-        _editor.SetStatus("Podium tool: pick a type, then click the world to place it.");
+
+        if (_typeDropdown != null && _typeDropdown.SelectedIndex < 0)
+        {
+            _typeDropdown.SetSelected(0);
+            _type = Types[0];
+            _placing = true;
+        }
+
+        _editor.SetStatus("Click the world to place a podium.");
     }
 
-    private void UpdateSelectionLabel()
-    {
-        if (_typeLabel != null)
-            _typeLabel.text = _placing ? "Placing: " + _type : "Nothing selected";
-    }
+    public IEnumerable<(string Key, string Action)> Shortcuts =>
+    [
+        ("LMB", "Place selected podium")
+    ];
+
     public void OnExit() => DestroyPreview();
 
     public void OnUpdate()
@@ -328,7 +320,14 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
         go.transform.position = position;
         go.SetActive(true);
 
-        _placed.Add(new PlacedPodium { Instance = go, SavedType = typeName, ClearAllOnEquip = clearAllOnEquip });
+        var placed = new PlacedPodium { Instance = go, SavedType = typeName, ClearAllOnEquip = clearAllOnEquip };
+        _placed.Add(placed);
+        _editor.History.Push($"place {typeName} podium", () =>
+        {
+            if (!_placed.Remove(placed) || placed.Instance == null) return false;
+            Object.Destroy(placed.Instance);
+            return true;
+        });
         _editor.SetStatus($"Placed {typeName} podium at {position}.");
         return go;
     }
@@ -397,20 +396,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor
         _holder.SetActive(false);
         _holder.transform.SetParent(_editor.transform, false);
         return _holder;
-    }
-
-    private void UndoLast()
-    {
-        if (_placed.Count == 0)
-        {
-            _editor.SetStatus("No podiums placed yet.");
-            return;
-        }
-
-        var last = _placed[_placed.Count - 1];
-        _placed.RemoveAt(_placed.Count - 1);
-        if (last.Instance != null) Object.Destroy(last.Instance);
-        _editor.SetStatus("Removed the last podium.");
     }
 
     public void ContributeTo(CTNodeBlueprint map)

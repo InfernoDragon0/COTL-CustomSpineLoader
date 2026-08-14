@@ -52,7 +52,7 @@ public static class MapEditorGhost
         UnityEngine.Object.Destroy(holder);
 
         if (!disableBehaviours)
-            StripInteractions(ghost);
+            StripGlobalRegistrars(ghost);
 
         foreach (var collider in ghost.GetComponentsInChildren<Collider2D>(true))
             collider.enabled = false;
@@ -66,7 +66,10 @@ public static class MapEditorGhost
         return ghost;
     }
 
-    private static void StripInteractions(GameObject ghost)
+    // Components that publish themselves to a global on wake. The ghost has already built its
+    // visuals by the time we get here, so they can go - and they must, because every one of them
+    // makes some part of the game believe a real, interactive object exists.
+    private static void StripGlobalRegistrars(GameObject ghost)
     {
         var hadPodium = false;
 
@@ -84,5 +87,10 @@ public static class MapEditorGhost
         // that list, and a dead entry breaks the doors-open check real podiums run.
         if (hadPodium)
             Interaction_WeaponSelectionPodium.Podiums.RemoveAll(p => p == null);
+
+        // Note: PlacementObject is deliberately not touched here. Nothing the editor clones
+        // carries one any more - structure previews are built from the structure's own prefab -
+        // and if that ever changes, stripping it would break the clone rather than fix it: its
+        // Start() is what instantiates the visual it wraps.
     }
 }

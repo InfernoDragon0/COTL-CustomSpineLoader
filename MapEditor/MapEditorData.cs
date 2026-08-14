@@ -79,6 +79,10 @@ public class MapKeptData
     public string Name = "";
     public SerializableVector3 Position;
     public float RotationZ;
+
+    // Turning a prop to face the other way is a Y rotation in this game's fixed view; Z only
+    // ever tips it over. Both are stored so vanilla scenery (which uses Z) still round-trips.
+    public float RotationY;
     public SerializableVector3 Scale;
 }
 
@@ -94,6 +98,10 @@ public class MapPropData
     public string Parent = "Scenery"; // Scenery | Heavy | Room | Custom | Island
     public SerializableVector3 Position;
     public float RotationZ;
+
+    // Turning a prop to face the other way is a Y rotation in this game's fixed view; Z only
+    // ever tips it over. Both are stored so vanilla scenery (which uses Z) still round-trips.
+    public float RotationY;
     public SerializableVector3 Scale;
 }
 
@@ -115,6 +123,10 @@ public class MapDoorData
     public string Direction = "North";
     public SerializableVector3 Position;
     public float RotationZ;
+
+    // Turning a prop to face the other way is a Y rotation in this game's fixed view; Z only
+    // ever tips it over. Both are stored so vanilla scenery (which uses Z) still round-trips.
+    public float RotationY;
 }
 
 [Serializable]
@@ -192,6 +204,54 @@ public static class MapEditorSerialization
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
 
     // Returns the path written, or null on failure.
+    // Same as Save, but the file write happens on a thread pool thread. Serialisation stays on
+    // the caller's thread because the blueprint is live scene-derived data; only the I/O moves.
+    public static System.Threading.Tasks.Task<string> SaveAsync(CTNodeBlueprint map)
+    {
+        if (map == null) return System.Threading.Tasks.Task.FromResult<string>(null);
+
+        map.MapName = Sanitize(map.MapName);
+
+        string json;
+        string path;
+        try
+        {
+            json = JsonConvert.SerializeObject(map, Formatting.Indented);
+            path = PathFor(map.MapName);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogError("MapEditor: failed to serialise blueprint: " + e);
+            return System.Threading.Tasks.Task.FromResult<string>(null);
+        }
+
+        var shapes = map.Shapes.Count;
+        var props = map.Props.Count;
+        var structures = map.Structures.Count;
+        var doors = map.Doors.Count;
+        var enemies = map.Enemies.Count;
+        var podiums = map.Podiums.Count;
+        var name = map.MapName;
+
+        return System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                if (!Directory.Exists(RootPath)) Directory.CreateDirectory(RootPath);
+                File.WriteAllText(path, json);
+                Plugin.Log.LogInfo($"MapEditor: saved blueprint '{name}' with {shapes} shape(s), " +
+                                   $"{props} prop(s), {structures} structure(s), {doors} door(s), " +
+                                   $"{enemies} enemy(ies), {podiums} podium(s) to {path}");
+                return path;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError("MapEditor: failed to save blueprint: " + e);
+                return null;
+            }
+        });
+    }
+
     public static string Save(CTNodeBlueprint map)
     {
         if (map == null) return null;

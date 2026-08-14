@@ -15,7 +15,7 @@ namespace CustomSpineLoader.MapEditor.Tools;
 // working shape needs a matching profile, fill material, sorting layer and renderer settings,
 // and only the profile is reachable through GenerateRoom.DecorationList. Cloning inherits all
 // of it, so authored terrain matches the biome automatically.
-public class ShapeTool : IMapEditorTool, IMapDataContributor
+public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Shape";
 
@@ -40,12 +40,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
     private GameObject _centerHandle;
 
     private GameObject _collisionToggleRow;
-    private bool _suppressCollisionToggle;
 
     private const float ZStep = 0.1f;
 
-    private TMP_Text _profileLabel;
-    private TMP_Text _shapeLabel;
 
     // Spline.InsertPointAt throws if a new point lands on an existing one.
     private const float MinPointSpacing = 0.25f;
@@ -57,25 +54,20 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateLabel(panel, "Shape Tool", 20, TextAlignmentOptions.Center);
-
         ui.CreateButton(panel, "New Shape (screen centre)", SpawnShape);
 
-        _shapeLabel = ui.CreateLabel(panel, "No shape selected", 15, TextAlignmentOptions.Center)
-            .GetComponent<TMP_Text>();
-        ui.CreateButton(panel, "< Prev Shape", () => CycleShape(-1));
-        ui.CreateButton(panel, "Next Shape >", () => CycleShape(1));
-        ui.CreateButton(panel, "Delete Shape", DeleteActiveShape);
+        // Picking a shape from a list beats stepping through them one at a time, and the list
+        // doubles as the readout of which one is active.
+        _shapeDropdown = ui.CreateDropdown(panel, "Select a shape", [], (index, _) => SelectShapeAt(index));
+        ui.CreateButton(panel, "Delete Shape (Del)", DeleteActiveShape);
 
-        _profileLabel = ui.CreateLabel(panel, "Profile: -", 15, TextAlignmentOptions.Center)
-            .GetComponent<TMP_Text>();
-        ui.CreateButton(panel, "Cycle Profile", CycleProfile);
+        _profileDropdown = ui.CreateDropdown(panel, "Select a profile", [], (index, _) => SelectProfileAt(index));
 
         // Off by default: having every stray click drop a point made the tool hard to use.
         ui.CreateToggle(panel, "Click adds points", _clickAddsPoints, v =>
         {
             _clickAddsPoints = v;
-            _editor.SetStatus(v ? "Left-click in the world adds a point." : "Click-to-add disabled.");
+            _editor.SetStatus(v ? "Click-to-add enabled." : "Click-to-add disabled.");
         });
 
         ui.CreateToggle(panel, "Show Collision", _showCollision, v =>
@@ -84,11 +76,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
             RefreshCollisionOverlay();
         });
 
-        _collisionToggleRow = ui.CreateToggle(panel, "Shape Has Collision", true, v =>
-        {
-            if (_suppressCollisionToggle) return;
-            SetActiveShapeCollision(v);
-        });
+        _collisionToggleRow = ui.CreateToggle(panel, "Shape Has Collision", true, SetActiveShapeCollision);
 
         ui.CreateToggle(panel, "Vanilla Floor Collision", _useVanillaFloor, SetVanillaFloorCollision);
 
@@ -165,12 +153,24 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         RebuildHandles();
         UpdateLabels();
 
+        // Open on a shape rather than on nothing: every other control here acts on the active
+        // one, so an empty selection makes the whole panel look inert.
+        if (_active == null && _allShapes.Count > 0) SelectShapeAt(0);
+
         // OnExit tears the overlay down, so it has to be rebuilt on re-entry or the toggle stays
         // on with nothing drawn after switching tools.
         RefreshCollisionOverlay();
 
-        _editor.SetStatus("Shape tool: drag handles to edit, right-click a handle to delete it.");
+        _editor.SetStatus("Drag handles to edit the shape.");
     }
+
+    public IEnumerable<(string Key, string Action)> Shortcuts =>
+    [
+        ("LMB", "Drag a handle"),
+        ("RMB", "Delete a handle"),
+        ("LMB", "Add point (if enabled)"),
+        ("Del", "Delete selected shape")
+    ];
 
     public void OnExit()
     {
@@ -183,6 +183,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
     public void OnUpdate()
     {
         SyncHandlePositions();
+
+        if (Input.GetKeyDown(KeyCode.Delete))
+        {
+            DeleteActiveShape();
+            return;
+        }
 
         if (!_clickAddsPoints) return;
         if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
@@ -275,14 +281,14 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         var root = composite != null ? composite.transform : SceneRefs.ContentRoot;
         if (root == null)
         {
-            _editor.SetStatus("No room content root; cannot spawn a shape here.");
+            _editor.SetStatus("No room content root.", StatusSeverity.Error);
             return;
         }
 
         CaptureTemplate();
         if (_template == null)
         {
-            _editor.SetStatus("No sprite shape in this room to base a new one on.");
+            _editor.SetStatus("No sprite shape to copy from.", StatusSeverity.Error);
             return;
         }
 
@@ -331,34 +337,51 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         CommitShape(ctrl);
         RebuildHandles();
         UpdateLabels();
-        _editor.SetStatus("Spawned shape at screen centre.");
+        _editor.SetStatus("Shape created.");
     }
 
-    private void CycleShape(int direction)
+    private MapEditorDropdown _shapeDropdown;
+    private MapEditorDropdown _profileDropdown;
+
+    // Every shape in the room, ours and the biome's, in a stable order the dropdown indexes into.
+    private readonly List<SpriteShapeController> _allShapes = [];
+
+    private void CollectShapes()
     {
-        var all = new List<SpriteShapeController>();
+        _allShapes.Clear();
         foreach (var s in _shapes)
-            if (s != null) all.Add(s);
+            if (s != null) _allShapes.Add(s);
         foreach (var s in Object.FindObjectsOfType<SpriteShapeController>())
-            if (s != null && s != _template && !all.Contains(s)) all.Add(s);
+            if (s != null && s != _template && !_allShapes.Contains(s)) _allShapes.Add(s);
+    }
 
-        if (all.Count == 0)
-        {
-            _editor.SetStatus("No shapes in this room.");
-            return;
-        }
+    // Rebuilt whenever the set of shapes changes; the dropdown is the only shape readout now.
+    private void RefreshShapeDropdown()
+    {
+        if (_shapeDropdown == null) return;
 
-        var index = _active != null ? all.IndexOf(_active) : -1;
-        index = ((index + direction) % all.Count + all.Count) % all.Count;
+        CollectShapes();
 
-        _active = all[index];
+        var labels = new List<string>(_allShapes.Count);
+        for (var i = 0; i < _allShapes.Count; i++)
+            labels.Add($"{i + 1}. {_allShapes[i].name} ({_allShapes[i].spline.GetPointCount()} pts)");
+
+        _shapeDropdown.SetOptions(labels);
+        if (_active != null) _shapeDropdown.SetSelected(_allShapes.IndexOf(_active));
+    }
+
+    private void SelectShapeAt(int index)
+    {
+        if (index < 0 || index >= _allShapes.Count) return;
+
+        _active = _allShapes[index];
         _openEnded = _active.spline.isOpenEnded;
 
         RebuildHandles();
         UpdateLabels();
         RefreshCollisionOverlay();
         CenterOnShape();
-        _editor.SetStatus($"Editing shape {index + 1} of {all.Count}: {_active.name}");
+        _editor.SetStatus($"Editing {_active.name}.");
     }
 
     private void DeleteActiveShape()
@@ -385,16 +408,24 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         _editor.SetStatus("Deleted shape.");
     }
 
-    private void CycleProfile()
+    private void RefreshProfileDropdown()
     {
+        if (_profileDropdown == null) return;
         if (_profiles.Count == 0) CollectProfiles();
-        if (_profiles.Count == 0)
-        {
-            _editor.SetStatus("No sprite shape profiles available in this biome.");
-            return;
-        }
 
-        _profileIndex = (_profileIndex + 1) % _profiles.Count;
+        var labels = new List<string>(_profiles.Count);
+        foreach (var profile in _profiles) labels.Add(profile != null ? profile.name : "(none)");
+
+        _profileDropdown.SetOptions(labels);
+        if (_profileIndex >= 0 && _profileIndex < _profiles.Count)
+            _profileDropdown.SetSelected(_profileIndex);
+    }
+
+    private void SelectProfileAt(int index)
+    {
+        if (index < 0 || index >= _profiles.Count) return;
+
+        _profileIndex = index;
 
         if (_active != null)
         {
@@ -402,7 +433,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
             CommitShape(_active);
         }
 
-        UpdateLabels();
         _editor.SetStatus("Profile: " + _profiles[_profileIndex].name);
     }
 
@@ -412,33 +442,18 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
     {
         if (_collisionToggleRow == null) return;
 
-        var toggle = _collisionToggleRow.GetComponentInChildren<Lamb.UI.MMToggle>();
+        var toggle = _collisionToggleRow.GetComponent<MapEditorToggle>();
         if (toggle == null) return;
 
-        _suppressCollisionToggle = true;
-        try
-        {
-            toggle.Value = ShapeHasCollision(_active);
-        }
-        finally
-        {
-            _suppressCollisionToggle = false;
-        }
+        toggle.SetValue(ShapeHasCollision(_active), notify: false);
     }
 
     private void UpdateLabels()
     {
         SyncCollisionToggle();
         SyncProfileIndex();
-        if (_profileLabel != null)
-            _profileLabel.text = _profiles.Count > 0 && _profileIndex < _profiles.Count
-                ? "Profile: " + _profiles[_profileIndex].name
-                : "Profile: -";
-
-        if (_shapeLabel != null)
-            _shapeLabel.text = _active != null
-                ? $"Editing: {_active.name}\n{_active.spline.GetPointCount()} pts, Z {_active.transform.position.z:0.###}"
-                : "No shape selected";
+        RefreshShapeDropdown();
+        RefreshProfileDropdown();
     }
 
     private void AddPointAt(Vector3 worldPos)
@@ -456,7 +471,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         {
             if (Vector3.Distance(spline.GetPosition(i), local) < MinPointSpacing)
             {
-                _editor.SetStatus("Too close to an existing point.");
+                _editor.SetStatus("Too close to an existing point.", StatusSeverity.Warning);
                 return;
             }
         }
@@ -471,7 +486,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         }
         catch (System.Exception e)
         {
-            _editor.SetStatus("Could not add point: " + e.Message);
+            _editor.SetStatus("Could not add point: " + e.Message, StatusSeverity.Error);
             return;
         }
 
@@ -517,7 +532,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
         // A sprite shape needs at least a triangle to generate geometry.
         if (spline.GetPointCount() <= 3)
         {
-            _editor.SetStatus("A shape needs at least 3 points.");
+            _editor.SetStatus("A shape needs at least 3 points.", StatusSeverity.Warning);
             return;
         }
 
@@ -666,7 +681,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
             _active.colliderDetail = _colliderDetail;
             _active.colliderOffset = _colliderOffset;
             CommitShape(_active);
-            _editor.SetStatus("Collision enabled for this shape.");
+            _editor.SetStatus("Shape collision on.");
             return;
         }
 
@@ -676,7 +691,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor
 
         SceneRefs.RegenerateRoomCollision();
         RefreshCollisionOverlay();
-        _editor.SetStatus("Collision removed; this shape is now visual only.");
+        _editor.SetStatus("Shape collision off - visual only.");
     }
 
     // Mesh generation is deferred to the end of the frame, so baking collision immediately after

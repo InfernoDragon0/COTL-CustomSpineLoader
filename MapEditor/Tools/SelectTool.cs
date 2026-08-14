@@ -12,7 +12,7 @@ namespace CustomSpineLoader.MapEditor.Tools;
 //
 // Deleting needs no bookkeeping: the blueprint is a full snapshot of what exists at save time,
 // so a deleted object is simply absent from it.
-public class SelectTool : IMapEditorTool
+public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 {
     public string Name => "Select";
 
@@ -34,19 +34,24 @@ public class SelectTool : IMapEditorTool
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateLabel(panel, "Select Tool", 20, TMPro.TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Left-click an object to select.\nDelete key or button removes it.\nCtrl-click-drag clones it.", 14, TMPro.TextAlignmentOptions.Center);
         ui.CreateButton(panel, "Delete Selected", DeleteSelected);
         ui.CreateButton(panel, "Deselect", () => Select(null));
 
         ui.CreateButton(panel, "Send Back (Z+)", () => NudgeZ(ZStep));
         ui.CreateButton(panel, "Bring Front (Z-)", () => NudgeZ(-ZStep));
-        ui.CreateButton(panel, "Rotate 180°", () => Rotate(180f));
+        ui.CreateButton(panel, "Flip Horizontal", FlipHorizontal);
     }
 
     private const float ZStep = 0.1f;
 
-    public void OnEnter() => _editor.SetStatus("Select tool: click an object to select it.");
+    public void OnEnter() => _editor.SetStatus("Click an object to select it.");
+
+    public IEnumerable<(string Key, string Action)> Shortcuts =>
+    [
+        ("LMB", "Select object"),
+        ("Ctrl", "+ drag to clone"),
+        ("Del", "Delete selected")
+    ];
 
     public void OnExit() => Select(null);
 
@@ -359,10 +364,16 @@ public class SelectTool : IMapEditorTool
         _editor.SetStatus($"{_selected.name} Z: {_selected.transform.position.z:0.###}");
     }
 
-    // Spins the selection about its own Z axis. Doors are refused: their walkable pad, barrier
-    // and lock visuals are all built from the direction they face, so a rotated door would keep
-    // its doorway pointing the old way.
-    private void Rotate(float degrees)
+    // Mirrors the selection horizontally by negating its X scale.
+    //
+    // Not a rotation: the view is 2.5D and the art is flat, so turning a prop about any axis
+    // either tips it over (Z) or swings it edge-on and through its own sorting plane (Y). What
+    // "face the other way" actually means here is a mirror, which is also how the game's own
+    // build placement offers it - and it is already what MapStructureData.FlipX stores.
+    //
+    // Doors are refused: their walkable pad, barrier and lock visuals are all built from the
+    // direction they face, so a mirrored door would keep its doorway pointing the old way.
+    private void FlipHorizontal()
     {
         if (_selected == null)
         {
@@ -373,18 +384,20 @@ public class SelectTool : IMapEditorTool
         if (_selected.GetComponentInChildren<Door>(true) != null ||
             _selected.GetComponentInParent<Door>(true) != null)
         {
-            _editor.SetStatus("Doors cannot be rotated - their doorway and barrier follow their direction.");
+            _editor.SetStatus("Doors cannot be flipped.", StatusSeverity.Warning);
             return;
         }
 
-        _selected.transform.Rotate(0f, 0f, degrees);
+        var scale = _selected.transform.localScale;
+        _selected.transform.localScale = new Vector3(-scale.x, scale.y, scale.z);
 
-        // Structures serialise their own rotation rather than reading it back off the transform,
-        // so the tracked value has to follow or the turn would be lost on save.
-        _editor.GetTool<StructureTool>()?.TryRotate(_selected, degrees);
+        // Structures serialise their own mirror flag rather than reading it back off the
+        // transform, so the tracked value has to follow or the flip would be lost on save.
+        // Props need nothing: the room snapshot records their scale, sign included.
+        _editor.GetTool<StructureTool>()?.TryFlip(_selected);
 
         _editor.KeepCullingSuspended = true;
-        _editor.SetStatus($"{_selected.name} rotated to {_selected.transform.eulerAngles.z:0}°.");
+        _editor.SetStatus("Flipped horizontally.");
     }
 
     private void ClearHighlight()
@@ -408,13 +421,13 @@ public class SelectTool : IMapEditorTool
     {
         if (_selected == null)
         {
-            _editor.SetStatus("Nothing selected to delete.");
+            _editor.SetStatus("Nothing selected.");
             return;
         }
 
         if (MapEditorProtection.IsProtected(_selected))
         {
-            _editor.SetStatus($"'{_selected.name}' is protected and cannot be deleted.");
+            _editor.SetStatus($"'{_selected.name}' is protected.", StatusSeverity.Warning);
             return;
         }
 

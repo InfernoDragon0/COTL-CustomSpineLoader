@@ -134,8 +134,17 @@ namespace CustomSpineLoader
             }
             if (Input.GetKeyDown(KeyCode.F5))
             {
-                Log.LogInfo("F5 Pressed - Test Custom Dungeon");
-                CustomDungeonManager.CustomDungeonList.Values.ElementAt(0).EnterDungeon();
+                // Inside the map editor F5 resets the room; the test-dungeon shortcut would
+                // otherwise throw away the room being edited without so much as a warning.
+                if (runtimeMapEditor != null && runtimeMapEditor.IsEditing)
+                {
+                    runtimeMapEditor.RequestResetRoom();
+                }
+                else
+                {
+                    Log.LogInfo("F5 Pressed - Test Custom Dungeon");
+                    CustomDungeonManager.CustomDungeonList.Values.ElementAt(0).EnterDungeon();
+                }
             }
 
             if (Input.GetKeyDown(KeyCode.F4) && runtimeMapEditor != null)

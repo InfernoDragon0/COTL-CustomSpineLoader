@@ -50,7 +50,7 @@ public class BlueprintLoader
         var room = SceneRefs.Room;
         if (room == null)
         {
-            _editor.SetStatus("No room to load into.");
+            _editor.SetStatus("No room to load into.", StatusSeverity.Error);
             IsLoading = false;
             yield break;
         }
@@ -87,6 +87,9 @@ public class BlueprintLoader
         structureTool?.ResetTracking();
         enemyTool?.ResetTracking();
         podiumTool?.ResetTracking();
+
+        // Everything the undo stack referred to has just been destroyed.
+        _editor.History.Clear();
 
         // Destroy is deferred to end of frame; rebuilding alongside doomed objects corrupts the
         // composite bake and every FindObjectsOfType sweep.
@@ -375,7 +378,7 @@ public class BlueprintLoader
             // A previous load may have parked it deactivated.
             k.Transform.gameObject.SetActive(true);
             k.Transform.position = MapEditorSerialization.ToVector3(k.Data.Position);
-            k.Transform.eulerAngles = new Vector3(0f, 0f, k.Data.RotationZ);
+            k.Transform.eulerAngles = new Vector3(0f, k.Data.RotationY, k.Data.RotationZ);
             if (k.Data.Scale != null && k.Data.Scale.X != 0f)
                 k.Transform.localScale = MapEditorSerialization.ToVector3(k.Data.Scale);
         }
@@ -432,7 +435,7 @@ public class BlueprintLoader
             // runtime spawn instead of the authored object it stands in for.
             copy.name = data.Name;
             copy.transform.position = MapEditorSerialization.ToVector3(data.Position);
-            copy.transform.eulerAngles = new Vector3(0f, 0f, data.RotationZ);
+            copy.transform.eulerAngles = new Vector3(0f, data.RotationY, data.RotationZ);
             if (data.Scale != null && data.Scale.X != 0f)
                 copy.transform.localScale = MapEditorSerialization.ToVector3(data.Scale);
             copied++;
@@ -586,7 +589,7 @@ public class BlueprintLoader
     {
         // ObjectPool positions relative to the parent; the blueprint stores world coordinates.
         go.transform.position = MapEditorSerialization.ToVector3(prop.Position);
-        go.transform.eulerAngles = new Vector3(0f, 0f, prop.RotationZ);
+        go.transform.eulerAngles = new Vector3(0f, prop.RotationY, prop.RotationZ);
         if (prop.Scale != null && prop.Scale.X != 0f)
             go.transform.localScale = MapEditorSerialization.ToVector3(prop.Scale);
 

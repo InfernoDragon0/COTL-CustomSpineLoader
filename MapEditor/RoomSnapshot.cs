@@ -61,6 +61,7 @@ public static class RoomSnapshot
                         Parent = "Island",
                         Position = MapEditorSerialization.V3(child.position),
                         RotationZ = child.eulerAngles.z,
+                        RotationY = child.eulerAngles.y,
                         Scale = MapEditorSerialization.V3(child.lossyScale)
                     });
                     resolved++;
@@ -81,6 +82,7 @@ public static class RoomSnapshot
                         ParentIslandIndex = parentIslandIndex,
                         Position = MapEditorSerialization.V3(child.position),
                         RotationZ = child.eulerAngles.z,
+                        RotationY = child.eulerAngles.y,
                         Scale = MapEditorSerialization.V3(child.lossyScale)
                     });
                     resolved++;
@@ -101,6 +103,7 @@ public static class RoomSnapshot
                         Name = child.name,
                         Position = MapEditorSerialization.V3(child.position),
                         RotationZ = child.eulerAngles.z,
+                        RotationY = child.eulerAngles.y,
                         Scale = MapEditorSerialization.V3(child.lossyScale)
                     });
                     kept++;
@@ -151,6 +154,7 @@ public static class RoomSnapshot
                     Parent = "Room",
                     Position = MapEditorSerialization.V3(child.position),
                     RotationZ = child.eulerAngles.z,
+                        RotationY = child.eulerAngles.y,
                     Scale = MapEditorSerialization.V3(child.lossyScale)
                 });
                 resolved++;
@@ -163,6 +167,7 @@ public static class RoomSnapshot
                     Name = child.name,
                     Position = MapEditorSerialization.V3(child.position),
                     RotationZ = child.eulerAngles.z,
+                        RotationY = child.eulerAngles.y,
                     Scale = MapEditorSerialization.V3(child.lossyScale)
                 });
                 kept++;

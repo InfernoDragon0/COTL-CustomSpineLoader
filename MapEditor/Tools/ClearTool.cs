@@ -21,13 +21,28 @@ public class ClearTool : IMapEditorTool
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateLabel(panel, "Clear Tool", 20, TMPro.TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Player, camera and doors\nare always preserved.", 14, TMPro.TextAlignmentOptions.Center);
         ui.CreateButton(panel, "Clear Scenery", ClearScenery);
-        ui.CreateButton(panel, "Clear Terrain Too", ClearTerrain);
+        ui.CreateButton(panel, "Clear Terrain", ClearTerrain);
+        ui.CreateButton(panel, "Clear Placed Structures & Enemies", () => ClearPlaced());
     }
 
-    public void OnEnter() => _editor.SetStatus("Clear tool: scenery removes props, terrain also removes sprite shapes.");
+    public void OnEnter() => _editor.SetStatus("Scenery removes props; terrain also removes shapes.");
+
+    // What the editor itself put in the room, as opposed to what the biome generated. Kept
+    // separate because wiping your own work is a different intention from wiping the backdrop.
+    public int ClearPlaced()
+    {
+        var removed = 0;
+        removed += _editor.GetTool<StructureTool>()?.ClearPlaced() ?? 0;
+        removed += _editor.GetTool<EnemyTool>()?.ClearPlaced() ?? 0;
+
+        // Everything the undo stack referred to has just been destroyed.
+        _editor.History.Clear();
+
+        SceneRefs.RescanNavigation();
+        _editor.SetStatus($"Removed {removed} placed object(s).");
+        return removed;
+    }
     public void OnExit() { }
     public void OnUpdate() { }
 
@@ -37,7 +52,7 @@ public class ClearTool : IMapEditorTool
         var room = SceneRefs.Room;
         if (room == null)
         {
-            _editor.SetStatus("No room to clear.");
+            _editor.SetStatus("No room to clear.", StatusSeverity.Error);
             return;
         }
 
@@ -58,7 +73,7 @@ public class ClearTool : IMapEditorTool
         var room = SceneRefs.Room;
         if (room == null)
         {
-            _editor.SetStatus("No room to clear.");
+            _editor.SetStatus("No room to clear.", StatusSeverity.Error);
             return;
         }
 
@@ -98,7 +113,7 @@ public class ClearTool : IMapEditorTool
         destroyed += ClearRoomRoot(room, includeTerrain: true);
 
         SceneRefs.RescanNavigation();
-        _editor.SetStatus($"Cleared terrain: {destroyed} object(s) removed. Doors preserved.");
+        _editor.SetStatus($"Cleared {destroyed} terrain object(s). Doors kept.");
     }
 
     // Sweeps the room root itself. The structural containers are skipped: CustomTransform holds

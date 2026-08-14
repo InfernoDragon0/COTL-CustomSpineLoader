@@ -38,9 +38,6 @@ public class LevelTool : IMapEditorTool
         _panel = panel;
         _ui = ui;
 
-        ui.CreateLabel(panel, "Level Blueprint", 20, TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "A level is a chain of rooms, each\ngenerated from a node blueprint pool.",
-            14, TextAlignmentOptions.Center);
     }
 
     public void OnEnter()
@@ -75,7 +72,7 @@ public class LevelTool : IMapEditorTool
     private void BuildChooser()
     {
         _dynamic.Add(_ui.CreateButton(_panel, "New Level Blueprint", CreateNew));
-        _dynamic.Add(_ui.CreateLabel(_panel, "— Open Existing —", 14, TextAlignmentOptions.Center));
+        _dynamic.Add(_ui.CreateHeader(_panel, "Open Existing"));
 
         var levels = CTLevelSerialization.LoadAll();
         if (levels.Count == 0)
@@ -126,7 +123,7 @@ public class LevelTool : IMapEditorTool
         _dynamic.Add(_ui.CreateButton(_panel, "Add Room", AddRoom));
         _dynamic.Add(_ui.CreateButton(_panel, "Remove Room", RemoveRoom));
 
-        _dynamic.Add(_ui.CreateLabel(_panel, "— Rooms —", 14, TextAlignmentOptions.Center));
+        _dynamic.Add(_ui.CreateHeader(_panel, "Rooms"));
         for (var i = 0; i < _level.Rooms.Count; i++)
         {
             var index = i;
@@ -198,7 +195,7 @@ public class LevelTool : IMapEditorTool
         var error = LevelPlayback.Start(_level, _editor);
         if (error != null)
         {
-            _editor.SetStatus(error);
+            _editor.SetStatus(error, StatusSeverity.Error);
             return;
         }
         _editor.SetStatus($"Playing level {LevelPlayback.Describe()} - re-entering dungeon.");
@@ -241,7 +238,7 @@ public class LevelTool : IMapEditorTool
     {
         if (_level.Rooms.Count <= 2)
         {
-            _editor.SetStatus("A level always keeps its entrance and exit rooms.");
+            _editor.SetStatus("A level always keeps its entrance and exit rooms.", StatusSeverity.Warning);
             return;
         }
 
@@ -278,13 +275,15 @@ public class LevelTool : IMapEditorTool
         {
             _saveArmed = true;
             _saveArmedAt = Time.unscaledTime;
-            _editor.SetStatus($"'{_level.LevelName}.json' already exists - press Save Level again to overwrite.");
+            _editor.SetStatus($"'{_level.LevelName}.json' already exists - press Save Level again to overwrite.",
+                StatusSeverity.Warning);
             return;
         }
         _saveArmed = false;
 
         EnsureEndRooms(_level);
         var path = CTLevelSerialization.Save(_level);
-        _editor.SetStatus(path != null ? "Level saved to " + path : "Level save failed, see log.");
+        _editor.SetStatus(path != null ? "Level saved to " + path : "Level save failed, see log.",
+            path != null ? StatusSeverity.Success : StatusSeverity.Error);
     }
 }

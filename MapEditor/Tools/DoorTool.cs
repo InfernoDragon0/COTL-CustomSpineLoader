@@ -18,7 +18,7 @@ namespace CustomSpineLoader.MapEditor.Tools;
 // Add/remove operates on the door ISLAND (the IslandPiece the Door lives in): the island bundles
 // the door, its lock controller AND the rectangular floor patch the player walks through, so
 // spawning one makes the doorway walkable and hiding one hides the ground shape with it.
-public class DoorTool : IMapEditorTool, IMapDataContributor
+public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Doors";
 
@@ -48,7 +48,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
     // Solid blockers for removed doors whose walkway floor is carved into the main island's
     // authored shape and therefore cannot be hidden with the door.
     private readonly Dictionary<Door, GameObject> _plugs = [];
-    private TMPro.TMP_Text _selectedLabel;
 
     private readonly List<DoorGizmo> _gizmos = [];
 
@@ -71,36 +70,51 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateLabel(panel, "Door Tool", 20, TMPro.TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Drag a door to reposition it.\nAll four are required to save.",
-            14, TMPro.TextAlignmentOptions.Center);
+        ui.CreateLabel(panel, "All four doors are required to save.",
+            16, TMPro.TextAlignmentOptions.Center);
 
-        _selectedLabel = ui.CreateLabel(panel, "No door selected", 15, TMPro.TextAlignmentOptions.Center)
-            .GetComponent<TMPro.TMP_Text>();
-
-        ui.CreateButton(panel, "Add All Missing Doors", () =>
+        ui.CreateButton(panel, "Enable All Doors", () =>
         {
             var added = AddAllDoors();
+            SyncDoorToggles();
             _editor.SetStatus(added > 0
-                ? $"Added {added} door(s). Drag them into position."
-                : "All four doors are already present.");
+                ? $"Enabled {added} door(s)."
+                : "All four doors present.");
         });
 
-        ui.CreateLabel(panel, "— Add / Remove —", 14, TMPro.TextAlignmentOptions.Center);
+        // A door is present or it is not, and the save rule wants all four - so these read as
+        // state rather than as an action. They were buttons labelled "Toggle North Door", which
+        // said nothing about whether that door existed right now.
         foreach (var direction in AllDirections)
         {
             var captured = direction;
-            ui.CreateButton(panel, "Toggle " + captured + " Door", () => ToggleDoor(captured));
-        }
+            var row = ui.CreateToggle(panel, captured + " Door",
+                IsDoorPresent(FindByDirection(captured)), v => SetDoor(captured, v));
 
-        ui.CreateButton(panel, "List Doors", ListDoors);
+            var toggle = row.GetComponent<MapEditorToggle>();
+            if (toggle != null) _doorToggles[captured] = toggle;
+        }
+    }
+
+    private readonly Dictionary<string, MapEditorToggle> _doorToggles = [];
+
+    // The doors can change behind the panel's back - a blueprint load, the loader's
+    // reconciliation, or Enable All - so the boxes are re-read rather than assumed.
+    private void SyncDoorToggles()
+    {
+        foreach (var pair in _doorToggles)
+        {
+            if (pair.Value == null) continue;
+            pair.Value.SetValue(IsDoorPresent(FindByDirection(pair.Key)), notify: false);
+        }
     }
 
     public void OnEnter()
     {
         RememberDoors();
         BuildGizmos();
-        _editor.SetStatus($"Door tool: {_knownDoors.Count} door(s) in this room. Drag to move.");
+        SyncDoorToggles();
+        _editor.SetStatus($"{_knownDoors.Count} door(s) in this room.");
     }
 
     // Door.OnDisable removes the door from Door.Doors, so a door that gets deactivated for any
@@ -181,22 +195,28 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
         return added;
     }
 
-    private void ToggleDoor(string direction)
+    private void SetDoor(string direction, bool present)
     {
         var existing = FindByDirection(direction);
-        if (IsDoorPresent(existing))
+
+        if (!present)
         {
-            RemoveDoor(existing, deferCollision: false);
-            _editor.SetStatus($"{direction} door removed; its ground shape is hidden with it.");
+            if (IsDoorPresent(existing))
+            {
+                RemoveDoor(existing, deferCollision: false);
+                _editor.SetStatus($"{direction} door removed.");
+            }
         }
-        else
+        else if (!IsDoorPresent(existing))
         {
             var door = EnsureDoor(direction, deferCollision: false);
             _editor.SetStatus(door != null
                 ? $"{direction} door added. Drag it into position."
                 : $"Could not add a {direction} door, see log.");
         }
+
         BuildGizmos();
+        SyncDoorToggles();
     }
 
     // Reactivates a previously removed door, or spawns a fresh door island for the direction.
@@ -245,7 +265,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
 
         _removedByTool.Add(door);
         if (ReferenceEquals(door, _selected)) _selected = null;
-        UpdateSelectedLabel();
 
         if (!deferCollision) SceneRefs.RegenerateRoomCollision();
     }
@@ -622,13 +641,11 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
         }
     }
 
-    private void UpdateSelectedLabel()
-    {
-        if (_selectedLabel == null) return;
-        _selectedLabel.text = _selected != null
-            ? $"Selected: {_selected.direction} door"
-            : "No door selected";
-    }
+    public IEnumerable<(string Key, string Action)> Shortcuts =>
+    [
+        ("LMB", "Drag a door"),
+        ("LMB", "Click to select")
+    ];
 
     public void OnExit()
     {
@@ -746,7 +763,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
         _selected = door;
         _dragOffset = door.transform.position - pointerWorld;
 
-        UpdateSelectedLabel();
         _editor.SetStatus($"Dragging {door.direction} door ({door.ConnectionType}).");
     }
 
@@ -764,7 +780,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
     {
         if (_dragging == null) return;
 
-        _editor.SetStatus($"Moved {_dragging.direction} door to {_dragging.transform.position}.");
+        _editor.SetStatus($"Moved {_dragging.direction} door.");
 
         // The pad follows the door so the doorway stays walkable wherever it was dropped.
         RefreshPad(_dragging, deferCollision: false);
@@ -779,26 +795,10 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
     public void SelectDoor(Door door)
     {
         _selected = door;
-        UpdateSelectedLabel();
         if (door != null)
             _editor.SetStatus($"Selected {door.direction} door ({door.ConnectionType}).");
     }
 
-    private void ListDoors()
-    {
-        if (_knownDoors.Count == 0)
-        {
-            _editor.SetStatus("No doors in this room.");
-            return;
-        }
-
-        foreach (var door in _knownDoors)
-        {
-            if (door == null) continue;
-            Plugin.Log.LogInfo($"MapEditor door: {door.direction} type={door.ConnectionType} pos={door.transform.position}");
-        }
-        _editor.SetStatus($"Logged {_knownDoors.Count} door(s) to the console.");
-    }
 
     public bool IsSelected(Door door) => ReferenceEquals(door, _selected);
 

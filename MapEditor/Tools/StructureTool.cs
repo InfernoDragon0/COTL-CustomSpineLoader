@@ -19,7 +19,7 @@ namespace CustomSpineLoader.MapEditor.Tools;
 // going through StructureManager.BuildStructure: dungeon locations have no cult placement grid,
 // and a map builder wants a positioned prop, not a functioning cult building with a StructureBrain
 // and a save entry.
-public class StructureTool : IMapEditorTool, IMapDataContributor
+public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Structures";
 
@@ -27,8 +27,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
     private readonly List<PlacedStructure> _placed = [];
 
     private StructureBrain.TYPES _pending = StructureBrain.TYPES.NONE;
-    private UIBuildMenuController _menu;
-    private UIBuildMenuController _hookedMenu;
 
     private GameObject _preview;
     private StructureBrain.TYPES _previewType = StructureBrain.TYPES.NONE;
@@ -47,75 +45,117 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         _editor = editor;
     }
 
+    // Build-menu structures are just one more group in the same browser as the vanilla props.
+    // They used to be a separate grid with its own undo and a button that reopened the real
+    // build menu, which showed the same icons this grid already draws.
+    private const string StructureGroup = "Build Menu Structures";
+
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        _panel = panel;
-        _ui = ui;
+        _groupKeys.Clear();
+        var options = new List<string>();
 
-        ui.CreateLabel(panel, "Structure Tool", 20, TMPro.TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Pick a structure, then\nleft-click to place it.", 14, TMPro.TextAlignmentOptions.Center);
-        ui.CreateButton(panel, "Open Picker", OpenPicker);
+        _groupKeys.Add(StructureGroup);
+        options.Add(StructureGroup);
+
+        // Everything a room is actually dressed with - grass tufts, background pieces, rocks,
+        // props from every dungeon and the DLC - is an ordinary prefab in the catalog.
+        foreach (var group in PropGroups().Keys)
+        {
+            _groupKeys.Add(group);
+            options.Add($"{group} ({PropGroups()[group].Count})");
+        }
+
+        _groupDropdown = ui.CreateDropdown(panel, "Choose a group", options, (index, _) =>
+        {
+            if (index < 0 || index >= _groupKeys.Count) return;
+            if (_groupKeys[index] == StructureGroup) ShowStructureGroup();
+            else ShowPropGroup(_groupKeys[index]);
+        });
+
+        _grid = ui.CreateIconGrid(panel, "PlacementGrid");
+
         ui.CreateButton(panel, "Clear Selection", () =>
         {
             _pending = StructureBrain.TYPES.NONE;
             _propPath = null;
             DestroyPreview();
             DestroyPropPreview();
-            UpdatePropLabel();
+                _grid?.SetSelected(null);
             _editor.SetStatus("Selection cleared.");
         });
-        ui.CreateButton(panel, "Undo Last Placement", UndoLast);
-
-        // The build menu only knows about cult structures. Everything a room is actually
-        // dressed with - grass tufts, background pieces, rocks, props from every dungeon and
-        // the DLC - is an ordinary prefab in the catalog, browsable here the way enemies are.
-        ui.CreateLabel(panel, "— Vanilla Props —", 14, TMPro.TextAlignmentOptions.Center);
-
-        _propLabel = ui.CreateLabel(panel, "No prop selected", 15, TMPro.TextAlignmentOptions.Center)
-            .GetComponent<TMPro.TMP_Text>();
-
-        ui.CreateButton(panel, "Undo Last Prop", UndoLastProp);
-
-        ui.CreateLabel(panel, "— Groups —", 14, TMPro.TextAlignmentOptions.Center);
-        foreach (var group in PropGroups().Keys)
-        {
-            var captured = group;
-            ui.CreateButton(panel, $"{captured} ({PropGroups()[captured].Count})", () => ShowPropGroup(captured));
-        }
     }
 
-    private TMPro.TMP_Text _propLabel;
+    private MapEditorGrid _grid;
+    private MapEditorDropdown _groupDropdown;
+    private readonly List<string> _groupKeys = [];
+
+    // Cult structures, drawn from the same TypeAndPlacementObjects list (and the same icons) the
+    // vanilla build menu uses, plus anything other mods registered through COTL_API.
+    private void ShowStructureGroup()
+    {
+        if (_grid == null) return;
+
+        var entries = new List<MapEditorGrid.Entry>();
+        var seen = new HashSet<StructureBrain.TYPES>();
+
+        var host = Object.FindObjectOfType<TypeAndPlacementObjects>();
+        if (host?.TypeAndPlacementObject != null)
+        {
+            foreach (var entry in host.TypeAndPlacementObject)
+            {
+                if (entry == null || entry.Type == StructureBrain.TYPES.NONE) continue;
+                if (entry.Type == StructureBrain.TYPES.EDIT_BUILDINGS) continue;
+                if (!seen.Add(entry.Type)) continue;
+
+                // The icon is taken straight off the entry we are already holding. Going back
+                // through TypeAndPlacementObjects.GetByType for it is what other mods hook to
+                // lazily build menu entries, and doing that once per structure was both slow
+                // and the trigger for a stream of errors from that machinery.
+                MapEditorIcons.GetStructureIcon(entry.Type, entry.IconImage);
+                entries.Add(StructureEntry(entry.Type, entry.Type.ToString()));
+            }
+        }
+
+        // Modded structures may not have made it into the scene's placement list; they are the
+        // reason the build-menu button existed, so they are folded in here explicitly.
+        foreach (var pair in CustomStructureManager.CustomStructureList)
+        {
+            if (pair.Value == null || !seen.Add(pair.Key)) continue;
+            entries.Add(StructureEntry(pair.Key, pair.Value.InternalName));
+        }
+
+        MapEditorIcons.CancelPendingPropIcons();
+        _grid.Populate(_editor, entries, id =>
+        {
+            if (_typesById.TryGetValue(id, out var type))
+                _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
+        });
+    }
+
+    private readonly Dictionary<string, StructureBrain.TYPES> _typesById = [];
+
+    private MapEditorGrid.Entry StructureEntry(StructureBrain.TYPES type, string label)
+    {
+        var id = "type:" + type;
+        _typesById[id] = type;
+
+        return new MapEditorGrid.Entry
+        {
+            Id = id,
+            Display = label,
+            OnClick = () =>
+            {
+                _pending = type;
+                _propPath = null;
+                DestroyPropPreview();
+                        _editor.SetStatus($"Selected {label}.");
+            }
+        };
+    }
+
     private readonly List<GameObject> _placedProps = [];
 
-    private void UpdatePropLabel()
-    {
-        if (_propLabel == null) return;
-        _propLabel.text = string.IsNullOrEmpty(_propPath)
-            ? "No prop selected"
-            : "Placing: " + System.IO.Path.GetFileNameWithoutExtension(_propPath);
-    }
-
-    private void UndoLastProp()
-    {
-        // Trailing nulls: a prop can be destroyed by a clear or a load between placements.
-        while (_placedProps.Count > 0 && _placedProps[_placedProps.Count - 1] == null)
-            _placedProps.RemoveAt(_placedProps.Count - 1);
-
-        if (_placedProps.Count == 0)
-        {
-            _editor.SetStatus("No props placed yet.");
-            return;
-        }
-
-        var last = _placedProps[_placedProps.Count - 1];
-        _placedProps.RemoveAt(_placedProps.Count - 1);
-        Object.Destroy(last);
-        _editor.SetStatus("Removed the last prop.");
-    }
-
-    private RectTransform _panel;
-    private MapEditorUI _ui;
-    private readonly List<GameObject> _propButtons = [];
 
     private string _propPath;
     private GameObject _propPreview;
@@ -220,33 +260,37 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
     private void ShowPropGroup(string group)
     {
-        ClearPropButtons();
-        if (_panel == null || _ui == null) return;
-        if (!PropGroups().TryGetValue(group, out var paths)) return;
+        if (_grid == null || !PropGroups().TryGetValue(group, out var paths)) return;
 
-        _propButtons.Add(_ui.CreateLabel(_panel, $"— {group} —", 14, TMPro.TextAlignmentOptions.Center));
+        // The previous group's icons are still loading and would fill cells that no longer exist.
+        MapEditorIcons.CancelPendingPropIcons();
 
+        var entries = new List<MapEditorGrid.Entry>(paths.Count);
         foreach (var path in paths)
         {
             var captured = path;
             var label = System.IO.Path.GetFileNameWithoutExtension(path);
-            _propButtons.Add(_ui.CreateButton(_panel, label, () =>
-            {
-                _propPath = captured;
-                _pending = StructureBrain.TYPES.NONE;
-                DestroyPreview();
-                DestroyPropPreview();
-                UpdatePropLabel();
-                _editor.SetStatus($"Selected {label}. Left-click in the world to place it.");
-            }));
-        }
-    }
 
-    private void ClearPropButtons()
-    {
-        foreach (var go in _propButtons)
-            if (go != null) Object.Destroy(go);
-        _propButtons.Clear();
+            entries.Add(new MapEditorGrid.Entry
+            {
+                Id = captured,
+                Display = label,
+                OnClick = () =>
+                {
+                    _propPath = captured;
+                    _pending = StructureBrain.TYPES.NONE;
+                    DestroyPreview();
+                    DestroyPropPreview();
+                                _editor.SetStatus($"Selected {label}.");
+                }
+            });
+        }
+
+        // Built a few cells per frame, and each icon - the prefab's own first sprite, since props
+        // carry no authored icon - is loaded in the background after that. A group of several
+        // hundred props was otherwise a full-second stall on the click that opened it.
+        _grid.Populate(_editor, entries, id =>
+            MapEditorIcons.GetPropIcon(_editor, id, sprite => _grid?.SetCellIcon(id, sprite)));
     }
 
     // Props are pooled spawns, so the room snapshot resolves them back to their path on save
@@ -295,6 +339,13 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
                 if (!isPreview)
                 {
                     _placedProps.Add(go);
+                    var label = System.IO.Path.GetFileNameWithoutExtension(path);
+                    _editor.History.Push($"place {label}", () =>
+                    {
+                        if (!_placedProps.Remove(go) || go == null) return false;
+                        Object.Destroy(go);
+                        return true;
+                    });
                     return;
                 }
 
@@ -309,7 +360,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         {
             if (isPreview) _propPreviewPending = false;
             Plugin.Log.LogWarning($"MapEditor: prop '{path}' failed to spawn: {e.Message}");
-            _editor.SetStatus("That prop could not be spawned, see log.");
+            _editor.SetStatus("Prop failed to spawn - see log.", StatusSeverity.Error);
         }
     }
 
@@ -337,10 +388,23 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
     public void OnEnter()
     {
-        _editor.SetStatus(_pending == StructureBrain.TYPES.NONE
-            ? "Structure tool: open the picker to choose something."
-            : $"Placing {_pending}. Left-click in the world.");
+        // The structure group is only browsable once TypeAndPlacementObjects exists in the
+        // scene, which it does not when the panels are built in Awake.
+        if (_grid != null && _groupDropdown != null && _groupDropdown.SelectedIndex < 0)
+        {
+            _groupDropdown.SetSelected(0);
+            ShowStructureGroup();
+        }
+
+        _editor.SetStatus(_pending == StructureBrain.TYPES.NONE && string.IsNullOrEmpty(_propPath)
+            ? "Pick a group, then an item."
+            : "Ready to place.");
     }
+
+    public IEnumerable<(string Key, string Action)> Shortcuts =>
+    [
+        ("LMB", "Place selected item")
+    ];
 
     public void OnExit()
     {
@@ -352,6 +416,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
     public void ResetTracking()
     {
         _placed.Clear();
+        _placedProps.Clear();
         _pending = StructureBrain.TYPES.NONE;
         _propPath = null;
         DestroyPreview();
@@ -370,14 +435,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         return false;
     }
 
-    // Keeps a tracked structure's serialised rotation in step with a turn applied to its
-    // transform (the select tool's rotate button), so it survives save and load.
-    public bool TryRotate(GameObject go, float degrees)
+    // Keeps a tracked structure's serialised mirror flag in step with a flip applied to its
+    // transform (the select tool's flip button), so it survives save and load.
+    public bool TryFlip(GameObject go)
     {
         foreach (var placed in _placed)
         {
             if (placed.Instance != go) continue;
-            placed.Rotation = Mathf.Repeat(placed.Rotation + degrees, 360f);
+            placed.FlipX = !placed.FlipX;
             return true;
         }
         return false;
@@ -404,14 +469,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
     public void OnUpdate()
     {
-        // The unlock/affordability window is held open for the whole picker session and released
-        // the moment the menu is gone, so nothing leaks into normal gameplay.
-        if (MapAssetsTab.ForceUnlockAll && (_menu == null || !_menu.isActiveAndEnabled))
-            MapAssetsTab.ForceUnlockAll = false;
-
-        // Do not place while the picker is still on screen.
-        if (_menu != null && _menu.isActiveAndEnabled) return;
-
         if (!string.IsNullOrEmpty(_propPath))
         {
             UpdatePropPlacement();
@@ -437,9 +494,16 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
 
     // Ghost of the chosen structure following the cursor.
     //
-    // Built from TypeAndPlacementObject.PlacementObject, which is the prefab the game itself
-    // uses for build previews. The menu's IconImage is a flat UI icon and looks nothing like the
-    // placed object, which is why the first attempt previewed the wrong thing.
+    // Built from the structure's OWN prefab - the same asset placement uses - exactly as the
+    // prop groups build theirs. It used to come from TypeAndPlacementObject.PlacementObject,
+    // the build menu's preview wrapper, which turned out to be the wrong dependency: that
+    // wrapper only draws anything once its Start() has asynchronously instantiated the real
+    // asset underneath it, and it publishes itself to the static PlacementObject.Instance while
+    // it does, which sends Interactor.Update down a build-placement branch that dungeons cannot
+    // satisfy. Loading the asset ourselves gets the same picture with neither problem.
+    //
+    // The wrapper's recipe for making that asset inert is copied though: every script off except
+    // the renderers, colliders disabled - which is what disableBehaviours: true does here.
     private void UpdatePreview()
     {
         if (_preview != null && _previewType == _pending)
@@ -448,39 +512,76 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
             return;
         }
 
+        if (_previewPending) return;
+
         DestroyPreview();
         _previewType = _pending;
+        _previewPending = true;
+        _editor.StartCoroutine(BuildPreview(_pending));
+    }
 
-        var entry = TypeAndPlacementObjects.GetByType(_pending);
+    private bool _previewPending;
+
+    private IEnumerator BuildPreview(StructureBrain.TYPES type)
+    {
+        var isCustom = CustomStructureManager.CustomStructureList.ContainsKey(type);
+        var prefabPath = ResolvePrefabPath(type, isCustom);
+
         GameObject prefab = null;
-        try
+        if (!string.IsNullOrEmpty(prefabPath))
         {
-            prefab = entry?.PlacementObject;
-        }
-        catch (System.Exception e)
-        {
-            Plugin.Log.LogWarning($"MapEditor: no placement prefab for {_pending}: {e.Message}");
+            AsyncOperationHandle<GameObject> handle = default;
+            var started = true;
+            try
+            {
+                handle = Addressables.LoadAssetAsync<GameObject>(prefabPath);
+            }
+            catch (System.Exception e)
+            {
+                started = false;
+                Plugin.Log.LogWarning($"MapEditor: preview load failed for {type} ({prefabPath}): {e.Message}");
+            }
+
+            if (started)
+            {
+                while (!handle.IsDone) yield return null;
+                if (handle.Status == AsyncOperationStatus.Succeeded) prefab = handle.Result;
+            }
         }
 
+        _previewPending = false;
+
+        // The selection moved on while the asset was loading.
+        if (_previewType != type) yield break;
+
+        GameObject ghost = null;
         if (prefab != null)
+            ghost = MapEditorGhost.Create(prefab, _editor.transform, "CultTweaker_PlacementPreview",
+                disableBehaviours: true);
+
+        if (ghost == null)
         {
-            // Via the ghost helper, never a plain Instantiate: the placement prefabs carry
-            // Interaction components that would register with Interactor half-initialized and
-            // make Interactor.Update throw every frame. Scripts stay on - they build the visuals.
-            _preview = MapEditorGhost.Create(prefab, _editor.transform, "CultTweaker_PlacementPreview",
-                disableBehaviours: false);
-        }
-        else
-        {
-            // Custom structures have no registered placement object; fall back to their icon.
-            _preview = new GameObject("CultTweaker_PlacementPreview");
-            var renderer = _preview.AddComponent<SpriteRenderer>();
-            renderer.sprite = entry?.IconImage;
+            // Nothing loadable (a custom structure with no prefab, usually); the flat icon at
+            // least shows what is armed.
+            ghost = new GameObject("CultTweaker_PlacementPreview");
+            var renderer = ghost.AddComponent<SpriteRenderer>();
+            renderer.sprite = MapEditorIcons.GetStructureIcon(type);
             renderer.sortingOrder = 9999;
             renderer.color = new Color(1f, 1f, 1f, 0.6f);
         }
 
-        if (_preview != null) _preview.transform.position = _editor.MouseWorld();
+        // Two of these can overlap when the selection changes mid-load; only the one still
+        // matching may install its ghost, and anything already installed is destroyed rather
+        // than orphaned in the room.
+        if (_previewType != type)
+        {
+            Object.Destroy(ghost);
+            yield break;
+        }
+
+        if (_preview != null) Object.Destroy(_preview);
+        _preview = ghost;
+        _preview.transform.position = _editor.MouseWorld();
     }
 
     private void DestroyPreview()
@@ -488,62 +589,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         if (_preview != null) Object.Destroy(_preview);
         _preview = null;
         _previewType = StructureBrain.TYPES.NONE;
-    }
-
-    private void OpenPicker()
-    {
-        var uiManager = MonoSingleton<UIManager>.Instance;
-        if (uiManager == null)
-        {
-            _editor.SetStatus("UIManager unavailable; cannot open the picker.");
-            return;
-        }
-
-        // Held for the whole picker session (released in OnUpdate when the menu closes): the
-        // vanilla tabs populate outside MapAssetsTab's transient window, so without this their
-        // items stay greyed out by unlock state and material costs.
-        MapAssetsTab.ForceUnlockAll = true;
-
-        try
-        {
-            _menu = uiManager.ShowBuildMenu(StructureBrain.TYPES.NONE);
-        }
-        catch (System.Exception e)
-        {
-            Plugin.Log.LogWarning("MapEditor: build menu failed to open: " + e.Message);
-            _editor.SetStatus("Build menu would not open in this scene.");
-            return;
-        }
-
-        if (_menu == null)
-        {
-            _editor.SetStatus("Build menu unavailable in this scene.");
-            return;
-        }
-
-        MapAssetsTab.Inject(_menu);
-
-        // ShowBuildMenu can hand back a fresh controller each time. Tracking the instance we
-        // hooked (rather than a bool) means reopening the picker re-subscribes to the new one;
-        // otherwise only the very first structure chosen ever reached us.
-        if (!ReferenceEquals(_hookedMenu, _menu))
-        {
-            _menu.OnBuildingChosen += OnBuildingChosen;
-            _hookedMenu = _menu;
-        }
-    }
-
-    private void OnBuildingChosen(StructureBrain.TYPES type)
-    {
-        // The menu's edit-buildings shortcut fires this with a sentinel type; base-only feature.
-        if (type == StructureBrain.TYPES.EDIT_BUILDINGS || type == StructureBrain.TYPES.NONE)
-        {
-            _editor.SetStatus("Edit buildings is not available in the map editor.");
-            return;
-        }
-
-        _pending = type;
-        _editor.SetStatus($"Selected {type}. Left-click in the world to place it.");
     }
 
     private void Place(StructureBrain.TYPES type, Vector3 position)
@@ -580,14 +625,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         var root = SceneRefs.ContentRoot;
         if (root == null)
         {
-            _editor.SetStatus("No room content root; cannot place here.");
+            _editor.SetStatus("No room content root.", StatusSeverity.Error);
             yield break;
         }
 
         var prefabPath = ResolvePrefabPath(type, isCustom);
         if (string.IsNullOrEmpty(prefabPath))
         {
-            _editor.SetStatus($"{type} has no prefab path; cannot place it.");
+            _editor.SetStatus($"{type} has no prefab path.", StatusSeverity.Error);
             yield break;
         }
 
@@ -599,7 +644,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         catch (System.Exception e)
         {
             Plugin.Log.LogWarning($"MapEditor: could not instantiate {type} ({prefabPath}): {e.Message}");
-            _editor.SetStatus($"Failed to place {type}.");
+            _editor.SetStatus($"Failed to place {type}.", StatusSeverity.Error);
             yield break;
         }
 
@@ -609,7 +654,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         if (handle.Status != AsyncOperationStatus.Succeeded || handle.Result == null)
         {
             Plugin.Log.LogWarning($"MapEditor: addressable load failed for {type} ({prefabPath}).");
-            _editor.SetStatus($"Failed to load {type}.");
+            _editor.SetStatus($"Failed to load {type}.", StatusSeverity.Error);
             yield break;
         }
 
@@ -618,40 +663,56 @@ public class StructureTool : IMapEditorTool, IMapDataContributor
         go.name = $"CultTweaker_Placed_{type}";
 
         if (Mathf.Abs(rotation) > 0.001f)
-            go.transform.eulerAngles = new Vector3(0f, 0f, rotation);
+            go.transform.eulerAngles = new Vector3(0f, rotation, 0f);
         if (flipX)
         {
             var s = go.transform.localScale;
             go.transform.localScale = new Vector3(-s.x, s.y, s.z);
         }
 
-        _placed.Add(new PlacedStructure
+        var placed = new PlacedStructure
         {
             Type = type,
             IsCustom = isCustom,
             Instance = go,
             Rotation = rotation,
             FlipX = flipX
+        };
+        _placed.Add(placed);
+        _editor.History.Push($"place {type}", () =>
+        {
+            if (!_placed.Remove(placed) || placed.Instance == null) return false;
+            Object.Destroy(placed.Instance);
+            SceneRefs.RescanNavigation();
+            return true;
         });
 
         if (!deferNav) SceneRefs.RescanNavigation();
-        _editor.SetStatus($"Placed {type} at {position}.");
+        _editor.SetStatus($"Placed {type}.");
     }
 
-    private void UndoLast()
+    // Everything this tool put in the room, for the clear tool.
+    public int ClearPlaced()
     {
-        if (_placed.Count == 0)
+        var removed = 0;
+
+        foreach (var placed in _placed)
         {
-            _editor.SetStatus("Nothing placed yet.");
-            return;
+            if (placed.Instance == null) continue;
+            Object.Destroy(placed.Instance);
+            removed++;
         }
 
-        var last = _placed[_placed.Count - 1];
-        _placed.RemoveAt(_placed.Count - 1);
-        if (last.Instance != null) Object.Destroy(last.Instance);
+        foreach (var prop in _placedProps)
+        {
+            if (prop == null) continue;
+            Object.Destroy(prop);
+            removed++;
+        }
 
-        SceneRefs.RescanNavigation();
-        _editor.SetStatus($"Removed the last {last.Type}.");
+        _placed.Clear();
+        _placedProps.Clear();
+        return removed;
     }
 
     public void ContributeTo(CTNodeBlueprint map)

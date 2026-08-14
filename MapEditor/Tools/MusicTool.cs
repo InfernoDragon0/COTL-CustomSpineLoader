@@ -14,13 +14,9 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
     private const string MusicPrefix = "event:/music";
 
     private readonly RuntimeMapEditor _editor;
-    private readonly List<GameObject> _entries = [];
 
     private static List<string> _musicEvents;
 
-    private RectTransform _panel;
-    private MapEditorUI _ui;
-    private TMP_Text _currentLabel;
 
     public MusicTool(RuntimeMapEditor editor)
     {
@@ -29,76 +25,72 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        _panel = panel;
-        _ui = ui;
-
-        ui.CreateLabel(panel, "Music", 20, TextAlignmentOptions.Center);
-        ui.CreateLabel(panel, "Selecting a track previews it and\nsaves it into this blueprint.",
-            14, TextAlignmentOptions.Center);
-
-        _currentLabel = ui.CreateLabel(panel, "Current: vanilla", 14, TextAlignmentOptions.Center)
-            .GetComponent<TMP_Text>();
-
-        ui.CreateButton(panel, "Clear (vanilla music)", () =>
+        // Tracks have nothing to show as an icon, so this stays a list - just one that opens
+        // over the panel instead of appending several hundred buttons below it. "Vanilla" is
+        // the first entry rather than a separate Clear button: no music IS a choice of music,
+        // and the dropdown showing it removes the need for a label saying which is current.
+        _dropdown = ui.CreateDropdown(panel, VanillaOption, [], (index, _) =>
         {
-            _editor.Map.MusicEvent = "";
-            UpdateCurrentLabel();
-            _editor.SetStatus("Blueprint music cleared; vanilla music resumes on the next room change.");
+            if (index <= 0)
+            {
+                _editor.Map.MusicEvent = "";
+                _editor.SetStatus("Music set to vanilla.");
+                return;
+            }
+
+            var events = MusicEvents();
+            if (index - 1 < events.Count) Select(events[index - 1]);
         });
 
         ui.CreateToggle(panel, "Loop music", _editor.Map.MusicLoop, v =>
         {
             _editor.Map.MusicLoop = v;
             _editor.SetStatus(v
-                ? "Track restarts whenever it finishes."
-                : "Track plays as authored (one-shots end and stay silent).");
+                ? "Music loop enabled."
+                : "Music loop disabled.");
         });
     }
 
+    private const string VanillaOption = "Vanilla (no override)";
+
+    private MapEditorDropdown _dropdown;
+
     public void OnEnter()
     {
-        BuildList();
-        UpdateCurrentLabel();
-        _editor.SetStatus("Music: pick a track to preview and assign it to this blueprint.");
+        RefreshOptions();
+        _editor.SetStatus("Pick a track to preview and assign it.");
+    }
+
+    // Filled on entry, not when the panel is built: the FMOD banks are not guaranteed to be
+    // loaded at that point.
+    private void RefreshOptions()
+    {
+        if (_dropdown == null) return;
+
+        var events = MusicEvents();
+        if (events.Count == 0)
+        {
+            _editor.SetStatus("No music events found.", StatusSeverity.Warning);
+            return;
+        }
+
+        var labels = new List<string>(events.Count + 1) { VanillaOption };
+        foreach (var path in events) labels.Add(ShortName(path));
+
+        _dropdown.SetOptions(labels);
+
+        // Index 0 is vanilla, so a blueprint with no music override starts there.
+        var current = _editor.Map.MusicEvent;
+        var index = string.IsNullOrEmpty(current) ? 0 : events.IndexOf(current) + 1;
+        _dropdown.SetSelected(Mathf.Max(index, 0));
     }
 
     public void OnExit() { }
     public void OnUpdate() { }
 
-    private void UpdateCurrentLabel()
-    {
-        if (_currentLabel == null) return;
-        var current = _editor.Map.MusicEvent;
-        _currentLabel.text = "Current: " + (string.IsNullOrEmpty(current) ? "vanilla" : ShortName(current));
-    }
-
-    private void BuildList()
-    {
-        foreach (var go in _entries)
-            if (go != null) Object.Destroy(go);
-        _entries.Clear();
-
-        if (_panel == null || _ui == null) return;
-
-        var events = MusicEvents();
-        if (events.Count == 0)
-        {
-            _entries.Add(_ui.CreateLabel(_panel, "No music events found in the\nloaded FMOD banks.",
-                14, TextAlignmentOptions.Center));
-            return;
-        }
-
-        foreach (var path in events)
-        {
-            var captured = path;
-            _entries.Add(_ui.CreateButton(_panel, ShortName(captured), () => Select(captured)));
-        }
-    }
-
     private void Select(string eventPath)
     {
         _editor.Map.MusicEvent = eventPath;
-        UpdateCurrentLabel();
 
         try
         {
@@ -109,7 +101,7 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
             Plugin.Log.LogWarning($"MapEditor: music preview failed for '{eventPath}': {e.Message}");
         }
 
-        _editor.SetStatus($"Blueprint music set to {ShortName(eventPath)}.");
+        _editor.SetStatus($"Music: {ShortName(eventPath)}.");
     }
 
     private static string ShortName(string eventPath) =>
