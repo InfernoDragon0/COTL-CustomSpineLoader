@@ -196,6 +196,16 @@ public class BlueprintLoader
 
         yield return RebuildCollisionAndWait(room);
 
+        // A doorway can still fall short of the terrain the blueprint drew. Grow only the pads
+        // that are actually cut off, a step at a time, rather than making every pad long enough
+        // for the worst case - that is what put a walkway across the whole room.
+        yield return ConnectStrandedDoors(doorTool, room);
+
+        // Doors the generated walk gave no room behind are made inert here, once the room is
+        // fully built: the blueprint always carries all four, but only some of them lead
+        // anywhere in this particular slot.
+        doorTool?.SealDoorsWithoutNeighbours();
+
         // The room now holds blueprint content: stop vanilla re-entry code from re-rolling
         // decorations/backdrops over it (see CustomRoomPatches).
         CustomRoomPatches.Mark(room);
@@ -631,8 +641,125 @@ public class BlueprintLoader
                                $"path(s), {livePieces} island piece(s) registered. More than one path means " +
                                "disconnected floor regions that block movement between them.");
 
+            AuditRoomColliders(composite);
+
             if (composite.pathCount > 1) ReportStrandedDoors(composite);
         }
+    }
+
+    // In Outlines mode the composite turns its members into a single walkable boundary. A
+    // collider sitting under it that is NOT flagged usedByComposite is not part of that union -
+    // it stays a filled, solid body, so the player is blocked by the very floor they should be
+    // standing on. That is invisible in-game and looks like "the ground collision is wrong"
+    // rather than like a missing flag, so it is repaired here and anything unrepairable is
+    // named outright.
+    private static void AuditRoomColliders(CompositeCollider2D composite)
+    {
+        var repaired = 0;
+        var strays = new List<string>();
+
+        foreach (var collider in composite.transform.GetComponentsInChildren<Collider2D>(true))
+        {
+            if (collider == null || collider is CompositeCollider2D) continue;
+            if (!collider.enabled || collider.isTrigger || collider.usedByComposite) continue;
+
+            // Floor geometry: shapes and island slabs belong in the union.
+            var isFloor = collider.GetComponent<SpriteShapeController>() != null ||
+                          collider.GetComponentInParent<IslandPiece>() != null;
+            if (isFloor)
+            {
+                // Edge colliders cannot be composited at all ("not capable of being
+                // composited"), so flagging one only logs an error and leaves it solid.
+                // Disabling it is the repair: the shape's art stays, its stray wall does not.
+                if (collider is EdgeCollider2D)
+                {
+                    collider.enabled = false;
+                    repaired++;
+                    continue;
+                }
+
+                collider.usedByComposite = true;
+                repaired++;
+                continue;
+            }
+
+            if (strays.Count < 15)
+                strays.Add($"{collider.name} ({collider.GetType().Name}, " +
+                           $"layer {LayerMask.LayerToName(collider.gameObject.layer)}, " +
+                           $"at {collider.transform.position})");
+        }
+
+        if (repaired > 0)
+        {
+            Plugin.Log.LogWarning($"MapEditor: {repaired} floor collider(s) were solid instead of merged into the " +
+                                  "room outline - repaired and rebuilding the union.");
+            composite.GenerateGeometry();
+            SceneRefs.RescanNavigation();
+            Plugin.Log.LogInfo($"MapEditor: union now has {composite.pathCount} path(s).");
+        }
+
+        if (strays.Count > 0)
+            Plugin.Log.LogWarning("MapEditor: solid colliders inside the room that are not part of the floor " +
+                                  "outline (these will block the player): " + string.Join("; ", strays));
+    }
+
+    // Grows the pad of any doorway that cannot reach the room's floor, rechecking after each
+    // step, until every door connects or the pads stop growing. Only the doors that need it
+    // change, so a room whose terrain already meets its doors keeps short doorway aprons.
+    private IEnumerator ConnectStrandedDoors(DoorTool doorTool, GenerateRoom room)
+    {
+        if (doorTool == null || AstarPath.active == null) yield break;
+
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            var composite = SceneRefs.RoomComposite;
+            if (composite == null) yield break;
+
+            var stranded = StrandedDoors(composite);
+            if (stranded.Count == 0)
+            {
+                if (attempt > 0) Plugin.Log.LogInfo("MapEditor: every doorway now connects to the room's floor.");
+                yield break;
+            }
+
+            var grew = false;
+            foreach (var door in stranded)
+                if (doorTool.ExtendPad(door, deferCollision: true)) grew = true;
+
+            if (!grew)
+            {
+                foreach (var door in stranded)
+                    Plugin.Log.LogWarning($"MapEditor: the {door.direction} doorway is still cut off from the " +
+                                          "room's floor even at full pad length - extend the terrain to meet it.");
+                yield break;
+            }
+
+            // Pads redraw their art next frame; their collision is ready immediately.
+            yield return null;
+            doorTool.FinalizeAllPads();
+            yield return RebuildCollisionAndWait(room);
+        }
+    }
+
+    private static List<Door> StrandedDoors(CompositeCollider2D composite)
+    {
+        var result = new List<Door>();
+        if (AstarPath.active == null) return result;
+
+        var centre = AstarPath.active.GetNearest(composite.bounds.center).node;
+        if (centre == null) return result;
+
+        foreach (var door in Door.Doors)
+        {
+            if (!DoorTool.IsDoorPresent(door)) continue;
+
+            var inside = door.transform.position + door.GetDoorDirection() * 3f;
+            var node = AstarPath.active.GetNearest(inside).node;
+            if (node == null) continue;
+
+            if (!PathUtilities.IsPathPossible(node, centre)) result.Add(door);
+        }
+        return result;
     }
 
     // Which door is on the wrong side of a gap. The path count alone says a room is split but

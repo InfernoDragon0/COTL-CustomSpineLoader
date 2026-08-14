@@ -30,6 +30,13 @@ namespace CustomSpineLoader.Patches
             if (entering != FollowerLocation.None && entering != levelLocation)
                 MapEditor.LevelPlayback.Stop();
 
+            // Any biome coming up starts on its own lighting: the map editor's override is
+            // global state and would otherwise follow the player into the next room or scene.
+            // A blueprint carrying lighting re-applies it when it loads. The snapshot of "what
+            // the biome looked like" is dropped first - the new biome's values are its own.
+            MapEditor.Tools.LightingTool.ClearOverride();
+            MapEditor.Tools.LightingTool.ForgetBiomeSnapshot();
+
             if (CustomDungeonManager.CustomDungeonList.ContainsKey(CustomDungeonManager.EnteringCustomDungeon))
             {
                 Plugin.Log.LogInfo("Entering Custom Dungeon ONENABLE " + CustomDungeonManager.EnteringCustomDungeon);
@@ -137,6 +144,12 @@ namespace CustomSpineLoader.Patches
             if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return;
 
             GenCheck = true;
+
+            // Each new room starts on the biome's lighting. Walking from a room whose blueprint
+            // set its own mood into an ordinary generated room would otherwise keep that mood:
+            // the override lives on LightingManager, not on the room. A blueprint that carries
+            // lighting re-applies it further down, when it loads.
+            MapEditor.Tools.LightingTool.ClearOverride();
 
             // Harmony's enumerator patch supplies a null __instance in some invocations (seen
             // on the boot-time entrance room). GenerateRoom.Instance is the same object -

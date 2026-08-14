@@ -266,9 +266,15 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
             pad = shapeTool?.CreateUntrackedShape(composite.transform, PadName + "_" + door.direction);
             if (pad == null) return;
 
-            pad.autoUpdateCollider = true;
-            pad.colliderDetail = 16;
-            ShapeTool.EnsureShapeCollider(pad);
+            // The sprite shape's own collider is an EdgeCollider2D, which a CompositeCollider2D
+            // cannot merge ("not capable of being composited"). Left like that the pad stayed a
+            // standalone solid body running its whole length - a wall across the room rather
+            // than floor. A pad is a rectangle, so it gets a box collider instead: boxes do
+            // composite, and the shape keeps drawing the ground art.
+            pad.autoUpdateCollider = false;
+
+            var edge = pad.GetComponent<EdgeCollider2D>();
+            if (edge != null) Object.DestroyImmediate(edge);
 
             _pads[door] = pad;
         }
@@ -280,22 +286,51 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
         var length = PadLengthFor(door);
         BuildPadSpline(pad, door, length);
         PositionPad(pad, door, length);
+        BuildPadCollider(pad, door, length);
 
         pad.RefreshSpriteShape();
         _editor.StartCoroutine(FinalizePad(pad, deferCollision));
     }
 
-    // How far the pad must run inward to overlap the room's floor: the door-to-centre distance
-    // measured along the door's own inward direction, plus a margin so it overlaps rather than
-    // merely touches.
-    private static float PadLengthFor(Door door)
-    {
-        var composite = SceneRefs.RoomComposite;
-        if (composite == null) return PadLength;
+    // Pads stay short by default - a doorway apron, not a runway. Only a doorway the loader
+    // finds cut off from the floor grows, one step at a time, via ExtendPad.
+    private readonly Dictionary<Door, float> _padLengths = [];
+    private const float PadMaxLength = 60f;
+    private const float PadGrowStep = 8f;
 
-        var inward = door.GetDoorDirection();
-        var toCentre = composite.bounds.center - door.transform.position;
-        return Mathf.Clamp(Vector3.Dot(toCentre, inward) + 3f, PadLength, 60f);
+    private float PadLengthFor(Door door) =>
+        _padLengths.TryGetValue(door, out var length) ? length : PadLength;
+
+    // Grows one door's pad so it can reach terrain that does not meet the doorway. Returns
+    // false once it is already as long as it is allowed to get.
+    public bool ExtendPad(Door door, bool deferCollision)
+    {
+        if (door == null) return false;
+
+        var current = PadLengthFor(door);
+        if (current >= PadMaxLength) return false;
+
+        _padLengths[door] = Mathf.Min(current + PadGrowStep, PadMaxLength);
+        RefreshPad(door, deferCollision);
+        return true;
+    }
+
+    // A rectangle the composite can actually merge. Splines are built in world-axis directions
+    // on an unrotated transform, so the box is simply the spline's extents.
+    private static void BuildPadCollider(SpriteShapeController pad, Door door, float length)
+    {
+        var dir = door.GetDoorDirection();
+        var perp = new Vector3(-dir.y, dir.x, 0f);
+
+        var box = pad.GetComponent<BoxCollider2D>();
+        if (box == null) box = pad.gameObject.AddComponent<BoxCollider2D>();
+
+        box.offset = Vector2.zero;
+        box.size = new Vector2(
+            Mathf.Abs(dir.x) * length + Mathf.Abs(perp.x) * PadWidth,
+            Mathf.Abs(dir.y) * length + Mathf.Abs(perp.y) * PadWidth);
+        box.enabled = true;
+        box.usedByComposite = true;
     }
 
     private static void BuildPadSpline(SpriteShapeController pad, Door door, float length)
@@ -330,25 +365,30 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
 
     private IEnumerator FinalizePad(SpriteShapeController pad, bool deferCollision)
     {
-        // Mesh generation is end-of-frame; baking earlier captures a stale outline.
+        // Only the art needs the frame: the pad's collision is the box built in RefreshPad,
+        // which is ready immediately. Baking the sprite shape's own collider here is what put
+        // an uncompositable EdgeCollider2D back on the pad.
         yield return null;
         if (pad == null) yield break;
 
-        _editor.GetTool<ShapeTool>()?.FinalizeLoadedShape(pad);
+        pad.RefreshSpriteShape();
         if (!deferCollision) SceneRefs.RegenerateRoomCollision();
     }
 
-    // Bakes and joins every pad right now. RefreshPad defers this by a frame because sprite
-    // shape meshes only generate at end of frame - which means a load that regenerates the
-    // room's collision immediately builds the union WITHOUT the pads in it, leaving each
-    // doorway as its own cut-off region.
+    // Guarantees every pad's box is present and merged before a load rebuilds the union.
     public void FinalizeAllPads()
     {
-        var shapeTool = _editor.GetTool<ShapeTool>();
-        if (shapeTool == null) return;
+        foreach (var pair in _pads)
+        {
+            var pad = pair.Value;
+            if (pad == null) continue;
 
-        foreach (var pad in _pads.Values)
-            if (pad != null) shapeTool.FinalizeLoadedShape(pad);
+            var box = pad.GetComponent<BoxCollider2D>();
+            if (box == null) continue;
+
+            box.enabled = true;
+            box.usedByComposite = true;
+        }
     }
 
     private void DestroyPad(Door door)
@@ -487,6 +527,60 @@ public class DoorTool : IMapEditorTool, IMapDataContributor
             IslandConnector.Direction.South => new Vector3(bounds.center.x, bounds.min.y, 0f),
             _ => new Vector3(bounds.min.x, bounds.center.y, 0f)
         };
+    }
+
+    // Every blueprint carries all four doors, but the generated walk only connects some of them.
+    // Raising the barrier hides a dead end visually, yet the door's trigger keeps firing and
+    // sends the player to a room that does not exist - the error on walking into a door the
+    // room has no neighbour for. ConnectionTypes.False is vanilla's own inert setting:
+    // Door.OnTriggerEnter2D returns immediately on it, so the doorway simply does nothing.
+    //
+    // Only True/False doors are managed. Entrance, Exit and NextLayer doors mean something to
+    // the dungeon's own flow (leaving the level, descending a layer) and are left alone.
+    public int SealDoorsWithoutNeighbours()
+    {
+        // Before the biome knows which room the player is in, "no neighbour" is meaningless and
+        // sealing on it would brick every door in the room.
+        if (BiomeGenerator.Instance == null || BiomeGenerator.Instance.CurrentRoom == null) return 0;
+
+        RememberDoors();
+
+        var sealed_ = 0;
+        foreach (var door in _knownDoors)
+        {
+            if (!IsDoorPresent(door)) continue;
+
+            var type = door.ConnectionType;
+            if (type != GenerateRoom.ConnectionTypes.True && type != GenerateRoom.ConnectionTypes.False)
+                continue;
+
+            var direction = door.direction.ToString();
+            if (HasGraphNeighbor(direction))
+            {
+                // A door the walk does connect must be usable, even if a previous room sealed it.
+                if (type == GenerateRoom.ConnectionTypes.False)
+                    door.ConnectionType = GenerateRoom.ConnectionTypes.True;
+                continue;
+            }
+
+            door.ConnectionType = GenerateRoom.ConnectionTypes.False;
+            sealed_++;
+
+            if (door.RoomLockController == null) continue;
+            try
+            {
+                door.RoomLockController.gameObject.SetActive(true);
+                door.RoomLockController.DoorUp();
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning($"MapEditor: could not raise the {direction} barrier: {e.Message}");
+            }
+        }
+
+        if (sealed_ > 0)
+            Plugin.Log.LogInfo($"MapEditor: sealed {sealed_} door(s) with no room behind them.");
+        return sealed_;
     }
 
     private static bool HasGraphNeighbor(string direction)

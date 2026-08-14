@@ -82,7 +82,6 @@ public class RuntimeMapEditor : MonoBehaviour
     {
         _tools.Add(new SelectTool(this));
         _tools.Add(new ShapeTool(this));
-        _tools.Add(new IslandTool(this));
         _tools.Add(new StructureTool(this));
         _tools.Add(new EnemyTool(this));
         _tools.Add(new PodiumTool(this));

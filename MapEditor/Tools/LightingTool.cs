@@ -131,6 +131,39 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         data.FogSpread = current.FogSpread;
     }
 
+    // What the biome looked like before this session's first override. Restoring these values
+    // is how the override is undone: clearing inOverride asks LightingManager to transition
+    // back to its time-of-day target, which is not the same thing as the biome's own dungeon
+    // lighting and left the room wearing the custom mood. Re-applying the captured values goes
+    // through the exact path that visibly works.
+    private static MapLightingData _biomeSnapshot;
+
+    private static void SnapshotBiome(LightingManager manager)
+    {
+        if (_biomeSnapshot != null || manager.currentSettings == null) return;
+
+        var current = manager.currentSettings;
+        _biomeSnapshot = new MapLightingData
+        {
+            Enabled = true,
+            Ambient = SerializableColor.From(current.AmbientColour),
+            DirectionalLight = SerializableColor.From(current.DirectionalLightColour),
+            DirectionalIntensity = current.DirectionalLightIntensity,
+            ShadowStrength = current.ShadowStrength,
+            Exposure = current.Exposure,
+            Fog = SerializableColor.From(current.FogColor),
+            FogNear = current.FogDist.x,
+            FogFar = current.FogDist.y,
+            FogHeight = current.FogHeight,
+            FogSpread = current.FogSpread
+        };
+        Plugin.Log.LogInfo("MapEditor: captured the biome's own lighting before overriding it.");
+    }
+
+    // A scene or biome change makes the snapshot meaningless - the next override captures the
+    // new biome's values instead.
+    public static void ForgetBiomeSnapshot() => _biomeSnapshot = null;
+
     // Public: the blueprint loader applies a loaded room's lighting the same way.
     public static void Apply(MapLightingData data)
     {
@@ -141,6 +174,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
         try
         {
+            SnapshotBiome(manager);
             PrepareManager(manager);
 
             var settings = ScriptableObject.CreateInstance<BiomeLightingSettings>();
@@ -211,6 +245,23 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     {
         var manager = LightingManager.Instance;
         if (manager == null) return;
+
+        // Nothing was ever overridden, so there is nothing to undo - and no snapshot to
+        // restore from either.
+        if (_biomeSnapshot == null && !manager.inOverride) return;
+
+        // Restore the values the biome had before the first override. Dropping inOverride on
+        // its own transitions to LightingManager's time-of-day target, which in a dungeon is
+        // not the biome's lighting - the room kept the custom mood.
+        if (_biomeSnapshot != null)
+        {
+            var snapshot = _biomeSnapshot;
+            // Apply() must not treat this restore as the first override and re-snapshot the
+            // custom values as if they were the biome's.
+            Apply(snapshot);
+            Plugin.Log.LogInfo("MapEditor: lighting restored to the biome's own values.");
+            return;
+        }
 
         try
         {

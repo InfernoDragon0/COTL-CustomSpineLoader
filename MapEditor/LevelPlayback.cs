@@ -373,6 +373,9 @@ public static class LevelPlayback
             try
             {
                 RoomLockController.RoomCompleted();
+                // RoomCompleted opens every lock in the room, including the barriers standing in
+                // for doors that lead nowhere - so those have to be sealed again after it.
+                _editor.GetTool<Tools.DoorTool>()?.SealDoorsWithoutNeighbours();
                 Plugin.Log.LogInfo("MapEditor: no enemies in this room; doors unlocked.");
             }
             catch (System.Exception e)
@@ -439,6 +442,11 @@ public static class LevelPlayback
         {
             if (Active && __instance is not CTLevelDungeon) Stop();
             ForceTransitionIdle();
+
+            // The lighting override is global and outlives the room that set it. Entering a
+            // dungeon by any route - F5, Reset Room, Play Level, the exit door - starts from
+            // the biome's own lighting; a blueprint that wants its own re-applies it on load.
+            Tools.LightingTool.ClearOverride();
         }
     }
 
