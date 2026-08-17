@@ -61,6 +61,8 @@ namespace CustomSpineLoader
             CustomStructureLoader.LoadAllCustomStructures();
             Log.LogInfo("Loading Custom Follower Overrides...");
             FollowerSpineLoader.LoadAllNonSpineSkins();
+            Log.LogInfo("Loading Custom NPCs...");
+            CustomNpcLoader.LoadAllCustomNpcs(this);
 
             CurrentFleeceIndexP1 = Config.Bind("Fleece", "CurrentFleeceIndexP1", -1, "Current Fleece Index for Player 1");
             CurrentFleeceIndexP2 = Config.Bind("Fleece", "CurrentFleeceIndexP2", -1, "Current Fleece Index for Player 2");

@@ -60,16 +60,20 @@ public static class EnemyThumbnails
         public string Key;
         public bool IsCustom;
         public Action<Sprite> OnReady;
+        public Func<string, Action<GameObject>, IEnumerator> Resolver;
     }
 
-    public static void Request(MonoBehaviour host, string key, bool isCustom, Action<Sprite> onReady)
+    // resolver: how to turn this key into a prefab, for callers whose keys are not plain
+    // addressable paths (the NPC tool addresses characters living inside a room prefab).
+    public static void Request(MonoBehaviour host, string key, bool isCustom, Action<Sprite> onReady,
+        Func<string, Action<GameObject>, IEnumerator> resolver = null)
     {
         if (onReady == null || string.IsNullOrEmpty(key)) return;
 
         if (_cache.TryGetValue(key, out var cached)) { onReady(cached); return; }
         if (_failed.Contains(key)) { onReady(null); return; }
 
-        _queue.Enqueue(new ThumbRequest { Key = key, IsCustom = isCustom, OnReady = onReady });
+        _queue.Enqueue(new ThumbRequest { Key = key, IsCustom = isCustom, OnReady = onReady, Resolver = resolver });
         if (host != null && !_draining) host.StartCoroutine(Drain(host));
     }
 
@@ -201,7 +205,9 @@ public static class EnemyThumbnails
     private static IEnumerator Render(ThumbRequest request)
     {
         GameObject prefab = null;
-        yield return EnemyTool.ResolvePrefabRoutine(request.Key, request.IsCustom, p => prefab = p);
+        yield return request.Resolver != null
+            ? request.Resolver(request.Key, p => prefab = p)
+            : EnemyTool.ResolvePrefabRoutine(request.Key, request.IsCustom, p => prefab = p);
 
         if (prefab == null)
         {
@@ -213,6 +219,7 @@ public static class EnemyThumbnails
         EnsureRig();
 
         GameObject subject = null;
+        var borrowed = new List<Material>();
         try
         {
             subject = BuildSubject(prefab, request.Key, request.IsCustom);
@@ -222,6 +229,8 @@ public static class EnemyThumbnails
                 Deliver(request, null);
                 yield break;
             }
+
+            MakeUnlit(subject, borrowed);
 
             // Barely any headroom: the subject should fill its tile.
             _camera.orthographicSize = Mathf.Max(bounds.extents.x, bounds.extents.y) * 1.02f + 0.01f;
@@ -236,6 +245,77 @@ public static class EnemyThumbnails
         finally
         {
             if (subject != null) UnityEngine.Object.Destroy(subject);
+            foreach (var material in borrowed)
+                if (material != null) UnityEngine.Object.Destroy(material);
+        }
+    }
+
+    // ---- unlit subject ----------------------------------------------------------------------
+    //
+    // The room's lighting is not a light shining on the subject - it is a set of GLOBAL shader
+    // values (_GlobalHCol, _GlobalSCol, _GlobalExposure, the fog pair and the screen-space
+    // lighting texture) that LightingManager rewrites whenever the biome, the time of day or the
+    // editor's own lighting tool changes. Every material the game draws sprites and skeletons
+    // with reads them, so a thumbnail rendered with those materials wore whatever mood the room
+    // happened to be in, and re-rendered thumbnails did not match the ones already in the grid.
+    //
+    // The subject is therefore photographed through the plain unlit shaders instead: the atlas
+    // texture and vertex colours come across unchanged, and nothing the lighting system sets is
+    // ever sampled. The copies are per-render and destroyed with the subject - the game's own
+    // shared materials are never touched.
+    private static Shader _spineUnlit;
+    private static Shader _spriteUnlit;
+    private static bool _shadersResolved;
+
+    private static void ResolveShaders()
+    {
+        if (_shadersResolved) return;
+        _shadersResolved = true;
+
+        // Both are known to be in this build: the mod already builds materials from
+        // Spine/Skeleton for custom skins, and from Sprites/Default for its gizmo lines.
+        _spineUnlit = Shader.Find("Spine/Skeleton");
+        _spriteUnlit = Shader.Find("Sprites/Default");
+
+        if (_spineUnlit == null && _spriteUnlit == null)
+            Plugin.Log.LogInfo("MapEditor: no unlit shader available; thumbnails follow the room's lighting.");
+    }
+
+    private static void MakeUnlit(GameObject subject, List<Material> borrowed)
+    {
+        ResolveShaders();
+        if (_spineUnlit == null && _spriteUnlit == null) return;
+
+        foreach (var renderer in subject.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer == null) continue;
+
+            // A skeleton's mesh wants the Spine shader's blending; anything else is a sprite.
+            var isSkeleton = renderer.GetComponent<SkeletonRenderer>() != null;
+            var shader = (isSkeleton ? _spineUnlit : _spriteUnlit) ?? _spineUnlit ?? _spriteUnlit;
+
+            var sources = renderer.sharedMaterials;
+            var copies = new Material[sources.Length];
+
+            for (var i = 0; i < sources.Length; i++)
+            {
+                if (sources[i] == null) continue;
+                try
+                {
+                    // Copy first, then swap the shader: every property the unlit shader shares
+                    // with the original (_MainTex above all) carries over by name.
+                    var copy = new Material(sources[i]) { shader = shader, hideFlags = HideFlags.HideAndDontSave };
+                    copies[i] = copy;
+                    borrowed.Add(copy);
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning("MapEditor: thumbnail material swap failed: " + e.Message);
+                    copies[i] = sources[i];
+                }
+            }
+
+            renderer.sharedMaterials = copies;
         }
     }
 

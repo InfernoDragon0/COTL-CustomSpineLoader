@@ -23,7 +23,7 @@ public class ClearTool : IMapEditorTool
     {
         ui.CreateButton(panel, "Clear Scenery", ClearScenery);
         ui.CreateButton(panel, "Clear Terrain", ClearTerrain);
-        ui.CreateButton(panel, "Clear Placed Structures & Enemies", () => ClearPlaced());
+        ui.CreateButton(panel, "Clear Placed Objects", () => ClearPlaced());
     }
 
     public void OnEnter() => _editor.SetStatus("Scenery removes props; terrain also removes shapes.");
@@ -35,6 +35,8 @@ public class ClearTool : IMapEditorTool
         var removed = 0;
         removed += _editor.GetTool<StructureTool>()?.ClearPlaced() ?? 0;
         removed += _editor.GetTool<EnemyTool>()?.ClearPlaced() ?? 0;
+        removed += _editor.GetTool<NpcTool>()?.ClearPlaced() ?? 0;
+        removed += _editor.GetTool<TriggerTool>()?.ClearPlaced() ?? 0;
 
         // Everything the undo stack referred to has just been destroyed.
         _editor.History.Clear();

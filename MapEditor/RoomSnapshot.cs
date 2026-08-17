@@ -203,11 +203,16 @@ public static class RoomSnapshot
         // with enemy children (encounters) stay eligible.
         if (go.GetComponent<UnitObject>() != null) return true;
 
+        // Trigger volumes are authoring objects with no prefab behind them; they round-trip
+        // through bp.Triggers. Checked without the editor, because the loader spawns them too.
+        if (go.GetComponentInChildren<CTMapTrigger>(true) != null) return true;
+
         // Objects the placement tools already serialize under their own sections.
         if (editor != null)
         {
             if (editor.GetTool<StructureTool>()?.IsTracked(go) == true) return true;
             if (editor.GetTool<EnemyTool>()?.IsTracked(go) == true) return true;
+            if (editor.GetTool<NpcTool>()?.IsTracked(go) == true) return true;
             if (editor.GetTool<PodiumTool>()?.IsTracked(go) == true) return true;
         }
 

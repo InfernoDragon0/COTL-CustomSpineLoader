@@ -114,7 +114,9 @@ public class RuntimeMapEditor : MonoBehaviour
         _tools.Add(new ShapeTool(this));
         _tools.Add(new StructureTool(this));
         _tools.Add(new EnemyTool(this));
+        _tools.Add(new NpcTool(this));
         _tools.Add(new PodiumTool(this));
+        _tools.Add(new TriggerTool(this));
         _tools.Add(new DoorTool(this));
         _tools.Add(new LightingTool(this));
         _tools.Add(new MusicTool(this));
@@ -262,6 +264,14 @@ public class RuntimeMapEditor : MonoBehaviour
     {
         if (!_editing) return;
 
+        // The naming dialog is driving; nothing here should also respond to the same input - and
+        // in particular the pause below must not be re-asserted underneath it. UIMenuBase.DoShow
+        // waits on an Animator clip, Animators advance on SCALED time, and the menu only selects
+        // its input field and sets its own pause once that clip finishes. Holding timeScale at 0
+        // therefore froze the dialog half-open: visible, clickable, and permanently unable to
+        // take a keystroke. The menu pauses the game itself (OnShowCompleted) a moment later.
+        if (ModalOpen) return;
+
         // Game menus opened from a tool (the build menu in particular) restore timeScale when
         // they close, which would silently un-pause the world under the open editor.
         if (Time.timeScale != 0f) Time.timeScale = 0f;
@@ -275,9 +285,6 @@ public class RuntimeMapEditor : MonoBehaviour
             HandleRenameInput();
             return;
         }
-
-        // The naming dialog is driving; nothing here should also respond to the same input.
-        if (ModalOpen) return;
 
         // Safety net: nothing should leave the EventSystem suppressed once text entry is over.
         RestoreEventSystem();
@@ -754,16 +761,24 @@ public class RuntimeMapEditor : MonoBehaviour
     // the map's own actions at its right end. It replaces the tall left-hand column, which ate a
     // quarter of the screen and had to scroll - and a scrolled-away button sat outside every
     // registered blocker rect, so clicking it placed an object in the world instead.
-    private const float DockHeight = 112f;
-    private const float DockWidth = 1100f;
     private const float ToolIconSize = 72f;
+    private const int DockPadding = 8;
+
+    // The plate is exactly its icons plus the padding: nothing is centred inside dead space, and
+    // the bar stops claiming screen (and blocker rect - a click on empty dock still counts as UI)
+    // that no button occupies. A fixed 1260x112 had to be guessed wide enough for whatever tool
+    // came next, so it was always too wide for the tools that existed.
+    private const float DockHeight = ToolIconSize + DockPadding * 2;
+
+    // Resolved once the fitter has run; the status bar sits on top of the dock and matches it.
+    private float _dockWidth = 600f;
 
     private void CreateDock()
     {
-        var dock = CreatePanel("Dock", new Vector2(0.5f, 0f), new Vector2(DockWidth, DockHeight), new Vector2(0f, 12f));
+        var dock = CreatePanel("Dock", new Vector2(0.5f, 0f), new Vector2(0f, DockHeight), new Vector2(0f, 12f));
 
         var layout = dock.gameObject.AddComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(10, 10, 10, 10);
+        layout.padding = new RectOffset(DockPadding, DockPadding, DockPadding, DockPadding);
         layout.spacing = 6f;
         layout.childAlignment = TextAnchor.MiddleLeft;
         layout.childControlWidth = false;
@@ -783,15 +798,26 @@ public class RuntimeMapEditor : MonoBehaviour
             // is mood, housekeeping and blueprints. The gap is the whole grouping story - a
             // Photoshop-style flyout would have hidden tools behind a press-and-hold.
             if (tool is DoorTool) CreateDockSeparator(dock);
+
+            // Save sits immediately after Load Map: they are the two halves of the same job, and
+            // one of them being a tool and the other an action off at the end of the dock made
+            // that pair harder to find than it should be. It is an icon like the tools; Rename
+            // went with the naming dialog (Save asks for the name now), and Close and Reset are
+            // keys the shortcut list already spells out.
+            if (tool is LoadTool)
+                _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
+                    out _, ToolIconSize, hoverText: "Save map");
         }
 
-        CreateDockSeparator(dock);
+        // Horizontal only: the height is already exact, and letting the fitter own it as well
+        // would make the plate collapse for a frame before the icons report their sizes.
+        var fitter = dock.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Save is the only map-level action left on the dock, and it is an icon like the tools.
-        // Rename went with the naming dialog (Save asks for the name now), and Close and Reset
-        // are keys, which the shortcut list already spells out.
-        _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
-            out _, ToolIconSize, hoverText: "Save map");
+        // Resolved now rather than next frame, because the status bar is built immediately after
+        // and sizes itself off the result.
+        LayoutRebuilder.ForceRebuildLayoutImmediate(dock);
+        _dockWidth = dock.rect.width;
     }
 
     private void CreateDockSeparator(Transform parent)
@@ -905,7 +931,7 @@ public class RuntimeMapEditor : MonoBehaviour
     private void CreateStatusBar()
     {
         // Sits directly above the dock: the two together are the editor's only bottom chrome.
-        var bar = CreatePanel("StatusBar", new Vector2(0.5f, 0f), new Vector2(DockWidth, 46f),
+        var bar = CreatePanel("StatusBar", new Vector2(0.5f, 0f), new Vector2(_dockWidth, 46f),
             new Vector2(0f, DockHeight + 20f));
         _statusPanel = bar.GetComponent<Image>();
 
@@ -986,6 +1012,17 @@ public class RuntimeMapEditor : MonoBehaviour
         RegisterUiBlocker(_shortcutPanel);
     }
 
+    // Collapsed, the panel is just its own title bar in the bottom-left corner - the same deal
+    // the tool options panel offers on the right. The hints are a reference, not a control
+    // surface, and a tool with several of its own shortcuts stacked them halfway up the screen.
+    private bool _shortcutsCollapsed;
+
+    private void ToggleShortcutsCollapsed()
+    {
+        _shortcutsCollapsed = !_shortcutsCollapsed;
+        RefreshShortcuts();
+    }
+
     private void RefreshShortcuts()
     {
         if (_shortcutPanel == null) return;
@@ -993,19 +1030,31 @@ public class RuntimeMapEditor : MonoBehaviour
         foreach (Transform child in _shortcutPanel)
             Destroy(child.gameObject);
 
-        if (_activeTool is IMapEditorShortcuts source)
+        if (!_shortcutsCollapsed)
         {
-            foreach (var (key, action) in source.Shortcuts)
-                _ui.CreateKeyHint(_shortcutPanel, key, action);
+            if (_activeTool is IMapEditorShortcuts source)
+            {
+                foreach (var (key, action) in source.Shortcuts)
+                    _ui.CreateKeyHint(_shortcutPanel, key, action);
+            }
+
+            // Always last: these work in every tool.
+            _ui.CreateKeyHint(_shortcutPanel, "WASD", "Pan camera");
+            _ui.CreateKeyHint(_shortcutPanel, "Z / X", "Zoom in / out");
+            _ui.CreateKeyHint(_shortcutPanel, "Wheel", "Switch tool");
+            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last placement");
+            _ui.CreateKeyHint(_shortcutPanel, "F5", "Reset room");
+            _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
         }
 
-        // Always last: these work in every tool.
-        _ui.CreateKeyHint(_shortcutPanel, "WASD", "Pan camera");
-        _ui.CreateKeyHint(_shortcutPanel, "Z / X", "Zoom in / out");
-        _ui.CreateKeyHint(_shortcutPanel, "Wheel", "Switch tool");
-        _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last placement");
-        _ui.CreateKeyHint(_shortcutPanel, "F5", "Reset room");
-        _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
+        // The bar goes at the BOTTOM of the stack, unlike the options panel's header: this panel
+        // is pivoted to the bottom-left corner and grows upward, so the last row is the one that
+        // holds still. A title bar on top would slide up and down the screen with the hint count
+        // and the collapse toggle would never be twice in the same place.
+        // Rebuilt with the rows rather than kept aside, because the whole stack is torn down on
+        // every tool change.
+        _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   –",
+            ToggleShortcutsCollapsed, 30f);
     }
 
     private RectTransform CreatePanel(string name, Vector2 anchor, Vector2 size, Vector2 offset)
@@ -1145,12 +1194,41 @@ public class RuntimeMapEditor : MonoBehaviour
             return;
         }
 
-        MapNamePrompt.Show(this, Map.MapName, "Save Map", name =>
-        {
-            Map.MapName = string.IsNullOrWhiteSpace(name) ? "UntitledMap" : name.Trim();
-            UpdateNameLabel();
-            WriteMap();
-        });
+        // The editor closes for the duration rather than sitting behind the dialog.
+        //
+        // Every previous attempt to run the two side by side lost to something: the editor canvas
+        // sorted above the dialog, then its raycaster won the clicks, then the editor's pause
+        // froze the dialog's Animator half-open so it could never finish showing - and a menu
+        // that never finishes showing never hands its input field the keyboard. Standing the
+        // editor down entirely leaves the dialog in an ordinary game, which is the one situation
+        // it is built for. The view and the active tool are restored on the way back, so the only
+        // visible difference is the chrome disappearing while the dialog is up.
+        var previousTool = _activeTool;
+        var previousCamera = _cameraAnchor != null ? _cameraAnchor.transform.position : (Vector3?)null;
+        var previousZoom = _zoom;
+        string chosen = null;
+
+        ExitEditorMode();
+
+        MapNamePrompt.Show(this, Map.MapName, "Save Map",
+            name => chosen = name,
+            () =>
+            {
+                EnterEditorMode();
+                if (previousCamera.HasValue) MoveCameraTo(previousCamera.Value);
+                _zoom = previousZoom;
+                if (previousTool != null) SelectTool(previousTool);
+
+                if (string.IsNullOrWhiteSpace(chosen))
+                {
+                    SetStatus("Save cancelled.");
+                    return;
+                }
+
+                Map.MapName = chosen.Trim();
+                UpdateNameLabel();
+                WriteMap();
+            });
     }
 
     private void WriteMap() => StartCoroutine(WriteMapRoutine());

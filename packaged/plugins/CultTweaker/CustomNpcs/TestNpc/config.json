@@ -1,0 +1,76 @@
+{
+  "NpcName": "Test Npc",
+  "DisplayName": "Wandering Scamp",
+  "SkinName": "SF_Occultist_Scamp",
+  "IdleAnimation": "idle",
+  "TalkAnimation": "_idles/talk1",
+  "Dialogue": {
+    "Start": "greet",
+    "Nodes": [
+      {
+        "Id": "greet",
+        "Lines": [
+          { "Text": "Hello Stormflake Team! <wiggle>Spoiler alert,</wiggle> I am a <rainb>CUSTOM NPC</rainb>.", "Animation": "notice-player", "Loop": false },
+          { "Text": "Is there something you <wave>wanted to ask</wave>?", "Animation": "_idles/talk1", "Loop": true }
+        ],
+        "Choices": [
+          { "Id": "who", "Text": "Who are you?", "Next": "who" },
+          { "Id": "more", "Text": "Anything else?", "Next": "more" }
+        ]
+      },
+      {
+        "Id": "who",
+        "Lines": [
+          { "Text": "<shake>Nobody important.</shake> I mind the dungeon while the <rainb>crowns</rainb> squabble.", "Animation": "jeer", "Loop": false },
+          { "Text": "Anything <bounce>else</bounce>?", "Animation": "_idles/talk1", "Loop": true }
+        ],
+        "Next": "greet"
+      },
+      {
+        "Id": "more",
+        "Lines": [
+          { "Text": "I know a few <rainb>word tricks</rainb>, if you care to see them.", "Animation": "_idles/talk1", "Loop": true }
+        ],
+        "Choices": [
+          { "Id": "tricks", "Text": "Show me the tricks.", "Next": "tricks1" },
+          { "Id": "bye", "Text": "Just passing through.", "Next": "farewell" }
+        ]
+      },
+      {
+        "Id": "tricks1",
+        "Lines": [
+          { "Text": "Watch closely. This one <wave>waves like the endless sea</wave>.", "Animation": "cheer1", "Loop": false },
+          { "Text": "This one <wiggle>wiggles like a worm in the dirt</wiggle>.", "Animation": "_idles/talk1", "Loop": true },
+          { "Text": "This one <shake>shakes with mortal terror</shake>.", "Animation": "scared", "Loop": false },
+          { "Text": "And this one <bounce>bounces with unearned joy</bounce>.", "Animation": "cheer2", "Loop": false }
+        ],
+        "Next": "tricks2"
+      },
+      {
+        "Id": "tricks2",
+        "Lines": [
+          { "Text": "This one sits <rot>slightly askew</rot>, like a crooked shrine.", "Animation": "_idles/talk1", "Loop": true },
+          { "Text": "This one <swing>swings to and fro</swing> like a censer.", "Animation": "dance", "Loop": true },
+          { "Text": "This one gleams in <rainb>every colour the Old Faith forbids</rainb>.", "Animation": "dance", "Loop": true },
+          { "Text": "And this one goes <speed=0.2>slowly... so... slowly...<speed=1> then quick as a knife!", "Animation": "alarm-quick", "Loop": false }
+        ],
+        "Next": "tricks3"
+      },
+      {
+        "Id": "tricks3",
+        "Lines": [
+          { "Text": "Plain words can still be <b>bold</b>, or <i>subtle</i>.", "Animation": "_idles/talk1", "Loop": true },
+          { "Text": "Spoken <size=120%>LOUDLY</size>, or in <color=#B02E2E>crimson whispers</color>.", "Animation": "pray", "Loop": false },
+          { "Text": "Mix them if you dare: <shake><color=#B02E2E>doom</color></shake> pairs well with <wave><rainb>wonder</rainb></wave>.", "Animation": "cheer1", "Loop": false }
+        ],
+        "Next": "greet"
+      },
+      {
+        "Id": "farewell",
+        "Lines": [
+          { "Text": "Then walk safely, little lamb. <speed=0.3>The dark<speed=1> <shake>bites</shake>.", "Animation": "cheer1", "Loop": false }
+        ]
+      }
+    ]
+  }
+}

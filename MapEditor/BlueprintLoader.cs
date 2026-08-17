@@ -57,13 +57,16 @@ public class BlueprintLoader
 
         Plugin.Log.LogInfo($"MapEditor: loading blueprint '{bp.MapName}' " +
                            $"({bp.Shapes.Count} shapes, {bp.Props.Count} props, {bp.Structures.Count} structures, " +
-                           $"{bp.Enemies.Count} enemies, {bp.Podiums.Count} podiums).");
+                           $"{bp.Enemies.Count} enemies, {bp.Npcs.Count} npcs, {bp.Podiums.Count} podiums, " +
+                           $"{bp.Triggers.Count} triggers).");
         _editor.SetStatus($"Loading '{bp.MapName}'...");
 
         var shapeTool = _editor.GetTool<ShapeTool>();
         var structureTool = _editor.GetTool<StructureTool>();
         var doorTool = _editor.GetTool<DoorTool>();
         var enemyTool = _editor.GetTool<EnemyTool>();
+        var npcTool = _editor.GetTool<NpcTool>();
+        var triggerTool = _editor.GetTool<TriggerTool>();
         var podiumTool = _editor.GetTool<PodiumTool>();
         var clearTool = _editor.GetTool<ClearTool>();
 
@@ -86,6 +89,8 @@ public class BlueprintLoader
         shapeTool?.ResetTracking();
         structureTool?.ResetTracking();
         enemyTool?.ResetTracking();
+        npcTool?.ResetTracking();
+        triggerTool?.ResetTracking();
         podiumTool?.ResetTracking();
 
         // Everything the undo stack referred to has just been destroyed.
@@ -184,11 +189,29 @@ public class BlueprintLoader
                     MapEditorSerialization.ToVector3(e.Position), withVfx: true);
         }
 
+        // ---- Phase 6b: NPCs ----------------------------------------------------------------
+        if (npcTool != null)
+        {
+            foreach (var n in bp.Npcs)
+                yield return npcTool.SpawnNpcRoutine(n.Key, MapEditorSerialization.ToVector3(n.Position),
+                    n.IsCustom);
+        }
+
         // ---- Phase 7: podiums --------------------------------------------------------------
         if (podiumTool != null)
         {
             foreach (var p in bp.Podiums)
                 podiumTool.SpawnPodium(MapEditorSerialization.ToVector3(p.Position), p.Type, p.ClearAllOnEquip);
+        }
+
+        // ---- Phase 7b: trigger volumes -----------------------------------------------------
+        // Last of the placement phases on purpose: a trigger's actions address NPCs and objects
+        // by name, so everything they can point at is already in the room by the time they exist.
+        if (triggerTool != null)
+        {
+            foreach (var t in bp.Triggers)
+                triggerTool.CreateTrigger(MapEditorSerialization.ToVector3(t.Position),
+                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl);
         }
 
         // ---- Phase 8: one batched collision + pathfinding rebuild --------------------------

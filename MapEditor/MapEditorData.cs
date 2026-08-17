@@ -40,6 +40,8 @@ public class CTNodeBlueprint
     public List<MapStructureData> Structures = [];
     public List<MapDoorData> Doors = [];
     public List<MapEnemyData> Enemies = [];
+    public List<MapNpcData> Npcs = [];
+    public List<MapTriggerData> Triggers = [];
     public List<MapPodiumData> Podiums = [];
 }
 
@@ -135,6 +137,68 @@ public class MapEnemyData
     public string Key = "";          // vanilla: addressable prefab path; custom: CustomEnemy.InternalName
     public bool IsCustom;
     public SerializableVector3 Position;
+}
+
+// A non-combat character placed in the room. Same shape as MapEnemyData on purpose - NPCs are
+// addressable prefabs under Assets/Prefabs/NPC/** with no factory of their own either. IsCustom
+// is written for the mod-registered NPCs that do not exist yet; nothing sets it today.
+[Serializable]
+public class MapNpcData
+{
+    public string Key = "";          // vanilla: addressable prefab path; custom: InternalName
+    public bool IsCustom;
+    public SerializableVector3 Position;
+}
+
+// A box the player can step into, and the sequence of actions entering it plays. Id is how a
+// level (or another trigger) refers to this one - a Move action targets a trigger by Id.
+[Serializable]
+public class MapTriggerData
+{
+    public string Id = "";
+
+    // The single free-text action name the first version of the tool stored. Superseded by
+    // Actions; kept so blueprints saved before the sequence existed still load (it is read as a
+    // one-entry sequence when Actions is empty).
+    public string Action = "";
+
+    public SerializableVector3 Position;   // centre
+    public float Width = 4f;
+    public float Height = 3f;
+    // Fire once per room visit, rather than every time the player walks back in.
+    public bool Once = true;
+
+    // Played in order, top to bottom.
+    public List<MapTriggerActionData> Actions = [];
+
+    // Players are frozen for the whole sequence except while an action that needs their input
+    // (a conversation) is running.
+    public bool LockPlayerControl = true;
+}
+
+// One step of a trigger's sequence. One flat shape for every action type rather than a class per
+// type: blueprints are hand-editable JSON, and Newtonsoft type discrimination would put a
+// $type key in every entry.
+[Serializable]
+public class MapTriggerActionData
+{
+    // TriggerActionType name. Unknown values are dropped on load with a warning rather than
+    // throwing, so a blueprint from a newer version still opens.
+    public string Type = "";
+
+    // Trigger id, object path, NPC internal name or animation name, depending on Type.
+    public string Target = "";
+
+    // Where the object stood when the action was authored. Move actions fall back to this when
+    // the object cannot be resolved, so a move still lands somewhere sensible.
+    public SerializableVector3 Position;
+
+    // Radius of the ring players settle into around the target. Ignored for a single player.
+    public float Spread = 1.3f;
+
+    // Animation actions: loop for Duration seconds instead of playing once.
+    public bool Loop;
+    public float Duration;
 }
 
 // Lighting and fog are not objects in the room - they are a BiomeLightingSettings asset the

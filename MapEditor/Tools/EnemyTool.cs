@@ -404,9 +404,11 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         done(handle.Status == AsyncOperationStatus.Succeeded ? handle.Result : null);
     }
 
-    // A custom enemy's skeleton override, without needing an instance to apply it to. The
-    // thumbnail renderer drives a bare skeleton straight from this rather than building the
-    // mimic prefab just to re-skin it.
+    // A custom enemy's or custom NPC's skeleton override, without needing an instance to apply
+    // it to. The thumbnail renderer drives a bare skeleton straight from this rather than
+    // building the mimic prefab just to re-skin it. One lookup for both registries: their keys
+    // are distinct InternalNames, and every consumer (thumbnails, cursor ghosts) wants the same
+    // answer regardless of which kind of custom thing the key names.
     internal static bool TryGetCustomSkin(string key, out SkeletonDataAsset asset, out string skin)
     {
         asset = null;
@@ -422,30 +424,33 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             return true;
         }
 
+        if (CustomSpineLoader.APIHelper.CustomNpcManager.CustomNpcList.TryGetValue(key, out var npc) &&
+            npc?.SpineOverride != null)
+        {
+            asset = npc.SpineOverride;
+            skin = npc.SpineSkinName;
+            return true;
+        }
+
         return false;
     }
 
-    // Custom enemies re-skin their mimic prefab at spawn; this mirrors CustomEnemyManager.Spawn.
-    // SetToSetupPose + Update(0) are what actually push the new skin into the mesh - the normal
-    // skeleton update never runs while the editor holds timeScale 0.
+    // Custom enemies and NPCs re-skin their mimic prefab at spawn; this mirrors that for ghosts
+    // and previews. SetToSetupPose + Update(0) are what actually push the new skin into the
+    // mesh - the normal skeleton update never runs while the editor holds timeScale 0.
     internal static void ApplyCustomSkin(SkeletonAnimation spine, string key)
     {
         if (spine == null) return;
 
         try
         {
-            foreach (var pair in CustomEnemies())
-            {
-                if (pair.Value == null || pair.Value.InternalName != key) continue;
-                if (pair.Value.SpineOverride == null) continue;
+            if (!TryGetCustomSkin(key, out var asset, out var skin) || asset == null) return;
 
-                spine.skeletonDataAsset = pair.Value.SpineOverride;
-                spine.initialSkinName = pair.Value.SpineSkinName;
-                spine.Initialize(true);
-                spine.Skeleton.SetToSetupPose();
-                spine.Update(0f);
-                break;
-            }
+            spine.skeletonDataAsset = asset;
+            spine.initialSkinName = skin;
+            spine.Initialize(true);
+            spine.Skeleton.SetToSetupPose();
+            spine.Update(0f);
         }
         catch (System.Exception e)
         {
