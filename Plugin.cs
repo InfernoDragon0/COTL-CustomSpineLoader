@@ -112,6 +112,10 @@ namespace CustomSpineLoader
     
         public void Update()
         {
+            // Hands finished background skeleton parses back to their assets; does nothing once the
+            // warm-up has drained.
+            SpineLoaderHelper.PlayerSpineLoader.PumpWarmUp();
+
             // if (Input.GetKeyDown(KeyCode.F9))
             // {
             //     Log.LogInfo("Toggling Fleece Cycling to " + !FleeceCyclingEnabled.Value);

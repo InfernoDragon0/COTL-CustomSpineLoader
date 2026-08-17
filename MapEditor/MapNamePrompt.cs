@@ -12,8 +12,11 @@ public static class MapNamePrompt
     // Map names are paths, not cult names - the vanilla 16-character limit is too tight.
     private const int NameLimit = 40;
 
+    // existsCheck/existsNoun drive the overwrite warning; the default is the map store, because
+    // that is what the prompt was built for. The lighting tool passes its own profile store.
     public static void Show(RuntimeMapEditor editor, string prefill, string title,
-        Action<string> onConfirmed, Action onClosed = null)
+        Action<string> onConfirmed, Action onClosed = null,
+        Func<string, bool> existsCheck = null, string existsNoun = "map")
     {
         if (editor == null || onConfirmed == null) return;
 
@@ -33,7 +36,8 @@ public static class MapNamePrompt
         {
             var task = uiManager.LoadCultNameAssets();
             editor.StartCoroutine(UIManager.LoadAssets(task,
-                () => Build(editor, uiManager, prefill, title, onConfirmed, onClosed)));
+                () => Build(editor, uiManager, prefill, title, onConfirmed, onClosed,
+                    existsCheck ?? MapEditorSerialization.Exists, existsNoun)));
         }
         catch (Exception e)
         {
@@ -45,7 +49,7 @@ public static class MapNamePrompt
     }
 
     private static void Build(RuntimeMapEditor editor, UIManager uiManager, string prefill, string title,
-        Action<string> onConfirmed, Action onClosed)
+        Action<string> onConfirmed, Action onClosed, Func<string, bool> existsCheck, string existsNoun)
     {
         UICultNameMenuController menu;
         try
@@ -84,7 +88,7 @@ public static class MapNamePrompt
             // Field layout differs in some build; the vanilla limit still produces a usable name.
         }
 
-        SetUpWarning(menu);
+        SetUpWarning(menu, existsCheck, existsNoun);
 
         menu.OnNameConfirmed += result => onConfirmed(result);
 
@@ -128,7 +132,8 @@ public static class MapNamePrompt
         }
     }
 
-    private static void SetUpWarning(UICultNameMenuController menu)
+    private static void SetUpWarning(UICultNameMenuController menu, Func<string, bool> existsCheck,
+        string existsNoun)
     {
         GameObject holder;
         TMP_Text label;
@@ -148,10 +153,10 @@ public static class MapNamePrompt
 
         void Refresh(string text)
         {
-            var exists = !string.IsNullOrWhiteSpace(text) && MapEditorSerialization.Exists(text);
+            var exists = !string.IsNullOrWhiteSpace(text) && existsCheck(text);
             holder.SetActive(exists);
             if (exists && label != null)
-                label.text = $"A map named '{text.Trim()}' already exists and will be overwritten.";
+                label.text = $"A {existsNoun} named '{text.Trim()}' already exists and will be overwritten.";
         }
 
         if (field != null) field.onValueChanged.AddListener(Refresh);

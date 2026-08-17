@@ -269,7 +269,13 @@ centre to move or its corner to resize. Width/height sliders, *Fire once*, *Lock
 playing*, *Show volumes in play*, Re-arm All, Delete Selected, Clear All. Volumes are drawn while
 the tool is open, and optionally during play.
 
-**Action list.** *Add action* offers the four types; a second dropdown asks that type's follow-up
+**Clear All asks twice.** The first press arms the button — it renames itself to `Delete all N?
+Click again` and warns in the status bar — and a second press within 4 seconds does the wipe. The
+window lapsing, or leaving the tool, puts the label back. Two presses rather than a dialog because
+the panel has no modal of its own, and the wipe is not undoable: it clears the undo stack along
+with the triggers.
+
+**Action list.** *Add action* offers the action types; a second dropdown asks that type's follow-up
 question and hides again once answered. Rows are numbered, reorder with `^` / `v` and delete with
 `X`. Clicking a row outlines its target in the world in green — the object or NPC it moves to, the
 volume it sends the players to, or the players themselves for an animation.
@@ -342,9 +348,19 @@ Repositions, adds and removes the room's four doors.
 
 ### Lighting
 
-Edits the room's lighting and fog, and saves the values on the blueprint.
+Edits the room's lighting and fog, and saves the values on the blueprint. A finished look can also
+be saved as a named **lighting profile** (Save As Profile → name dialog), stored outside any map in
+`LightingProfiles.json`, and applied to any other map from the Profiles dropdown — or at play time
+by a trigger's *Apply lighting* action.
 
 **Notes**
+
+- Applying a profile copies its values onto the map (and the blueprint saves them as its own), so a
+  profile deleted later does not hollow out maps that used it. Only a trigger's *Apply lighting*
+  action references a profile by name at run time — a blueprint shared to a machine without that
+  profile logs a warning and skips the action.
+- Saving a profile while "following the biome" captures what is currently on screen first, so the
+  profile holds a real look rather than defaults.
 
 - Lighting is not an object that can be placed: the game drives it from a `BiomeLightingSettings`
   asset applied by `LightingManager`, so the tool edits a settings instance of its own and pushes
@@ -433,7 +449,7 @@ advance through the chain.
 
 ## Trigger actions
 
-Four action types, each authored through the trigger tool's dropdowns:
+Six action types, each authored through the trigger tool's dropdowns:
 
 | Action | Target | Behaviour |
 | --- | --- | --- |
@@ -441,6 +457,26 @@ Four action types, each authored through the trigger tool's dropdowns:
 | Move players to object | a clicked object | walks them to that object (falls back to the authored position) |
 | Talk to custom NPC | a registered `InternalName` | runs that NPC's dialogue tree and waits for it |
 | Play animation on players | an animation on the player skeleton | plays it once, or loops it for 2 / 5 / 10s |
+| Apply lighting | a saved lighting profile, or "Vanilla lighting" | cross-fades the room's lighting over 1 / 2 / 4s (or instant), then moves on; vanilla restores the biome's own values |
+| Change music | an FMOD music event | starts the track and keeps it looping; does not wait for it |
+
+**Apply lighting asks for a fade length** after the profile, the way the animation action asks for
+a loop length, and stores it in the same `Duration` field. The fade goes through the manager's own
+`transitionDurationMultiplier` (it scales a 5-second `transitionDuration` rather than taking
+seconds, and resets the multiplier after every transition, so it is set per apply) — the game's own
+cross-fade, not a hand-rolled one, so fog, exposure, LUTs and light rotation all move together. The
+sequence does not wait for it: the new light comes up under whatever runs next. A fade starting
+while another transition is still unwinding cancels it, waits for it to land and re-reads the live
+values first, because the manager would otherwise lerp from a `currentSettings` that no longer
+matches the screen and jump before fading. Actions saved before the picker existed have no duration
+and take the 1.5s default; a negative duration is the picker's explicit *Instant*. The tool's own
+sliders and the blueprint loader stay instant, where a fade would read as lag.
+
+**Change music does not block the sequence.** Music plays under whatever happens next — an action
+that waited for a track to finish would freeze the players for the length of the song. Looping goes
+through the same watchdog blueprint music uses (`SetMusicLoop`), which restarts the event when FMOD
+reports it stopped, because FMOD events only loop if they were authored to. Starting a second music
+action replaces the first one's watchdog, so two tracks cannot fight over the channel.
 
 **Everything drives the game's own player API** rather than moving transforms: `GoToAndStop`
 pathfinds and animates the walk, `CustomAnimation` owns the spine track and the state it belongs

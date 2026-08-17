@@ -12,7 +12,13 @@ public enum TriggerActionType
     MovePlayersToTrigger,
     MovePlayersToObject,
     StartConversation,
-    PlayPlayerAnimation
+    PlayPlayerAnimation,
+
+    // Target is a saved lighting profile's name, or empty for "back to the biome's own".
+    ApplyLighting,
+
+    // Target is an FMOD music event path. Plays it and keeps it looping.
+    ChangeMusic
 }
 
 // One step of a trigger's sequence. The runtime twin of MapTriggerActionData - the tool edits
@@ -35,6 +41,14 @@ public class TriggerAction
     // control lock is lifted around it. Everything else runs on rails.
     public bool NeedsPlayerInput => Type == TriggerActionType.StartConversation;
 
+    // How long an Apply-lighting action cross-fades for, reusing the same Duration field the
+    // animation action stores its loop length in. A negative Duration is the picker's explicit
+    // "Instant"; 0 means the action was authored before the picker existed, and gets the default
+    // rather than the hard cut it used to have.
+    public const float DefaultLightingFade = 1.5f;
+
+    public float LightingFade => Duration < 0f ? 0f : Duration > 0f ? Duration : DefaultLightingFade;
+
     public string Describe() => Type switch
     {
         TriggerActionType.MovePlayersToTrigger => $"Move to trigger {Target}",
@@ -42,6 +56,10 @@ public class TriggerAction
         TriggerActionType.StartConversation => $"Talk to {ShortName(Target)}",
         TriggerActionType.PlayPlayerAnimation =>
             $"Play '{Target}'" + (Loop ? $" (loop {Duration:0.#}s)" : ""),
+        TriggerActionType.ApplyLighting =>
+            (string.IsNullOrEmpty(Target) ? "Lighting: vanilla" : $"Lighting: {Target}") +
+            (LightingFade > 0f ? $" ({LightingFade:0.#}s)" : " (instant)"),
+        TriggerActionType.ChangeMusic => $"Music: {MusicTool.ShortName(Target)}",
         _ => Type.ToString()
     };
 
@@ -122,7 +140,68 @@ public static class TriggerActions
             case TriggerActionType.PlayPlayerAnimation:
                 yield return Animate(action.Target, action.Loop, action.Duration, keepLocked);
                 break;
+
+            case TriggerActionType.ApplyLighting:
+                // The fade runs on its own; the sequence moves straight on to the next action so
+                // the new light comes up under whatever happens next.
+                ApplyLighting(action.Target, action.LightingFade);
+                break;
+
+            case TriggerActionType.ChangeMusic:
+                ChangeMusic(action.Target);
+                break;
         }
+    }
+
+    // ---- music ------------------------------------------------------------------------------
+
+    // Starts the track and keeps it going. The sequence does not wait for it: music runs under
+    // whatever happens next, and an action that blocked until a track ended would freeze the
+    // players for the length of the song.
+    private static void ChangeMusic(string eventPath)
+    {
+        if (string.IsNullOrEmpty(eventPath)) return;
+
+        try
+        {
+            AudioManager.Instance?.PlayMusic(eventPath);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: trigger music '{eventPath}' failed to play: {e.Message}");
+            return;
+        }
+
+        // FMOD events only loop if they were authored to, so looping is a watchdog that restarts
+        // the event once it reports stopped - the same one blueprint music uses. Starting a new
+        // one replaces any previous track's watchdog, so two music actions cannot fight.
+        var host = RuntimeMapEditor.Active;
+        if (host != null) host.SetMusicLoop(eventPath);
+        else Plugin.Log.LogWarning("MapEditor: no editor host to keep the trigger's music looping; " +
+                                   "it will play once.");
+    }
+
+    // ---- lighting ---------------------------------------------------------------------------
+
+    private static void ApplyLighting(string profileName, float fadeSeconds)
+    {
+        // An empty target is the "vanilla lighting" choice: back to the biome's own values.
+        if (string.IsNullOrEmpty(profileName))
+        {
+            LightingTool.ClearOverride(fadeSeconds);
+            return;
+        }
+
+        var profile = LightingProfiles.Find(profileName);
+        if (profile == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: trigger action wants lighting profile " +
+                                  $"'{profileName}', which is not saved on this machine.");
+            return;
+        }
+
+        // Save() stores profiles with Enabled forced on, so this applies as-is.
+        LightingTool.Apply(profile.Data, fadeSeconds);
     }
 
     // ---- players ---------------------------------------------------------------------------

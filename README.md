@@ -63,6 +63,41 @@ defaultSkin will be the first skin that is loaded when the game starts
 
 skins is an array of any amount of strings of the Skins that exist in your Spine Skeleton that you want to load into game
 
+#### Optional settings
+
+``` 
+{   
+    "defaultSkin": "A_Tiger",
+    "skins": [ "A_Tiger" ],
+    "disableFleeceCycling": true,
+    "hiddenSlots": [
+        "CROWN",
+        "CROWN_EYE",
+        "images/PonchoLeft",
+        "images/PonchoRight"
+    ]
+}
+```
+
+**disableFleeceCycling** (default `false`) stops fleece transmog from dressing this spine. The fleece
+writes to the body, the poncho, the rope and the bell, so on a skin that draws its own body the
+lamb's artwork replaces yours. The fleece picker keeps working and keeps remembering your choice -
+it simply is not applied while this spine is worn, and comes back when you swap to one that allows
+it.
+
+**hiddenSlots** (default empty) is a list of slot names this spine never draws. Use it for parts of
+the lamb rig your art replaces, such as the crown. Hiding a slot **in the Spine editor does not
+export**, and clearing its setup attachment only lasts until the first animation that keys the slot -
+the lamb skeleton keys `CROWN` in 276 animations and `PonchoLeft` in 181, and the game re-attaches
+the crown by name whenever it flies back or you change room. Listing the slot here replaces its
+artwork with fully transparent copies in the skin that all of those resolve through, so it stays
+hidden however it is re-attached. The attachments are replaced rather than deleted because some are
+required to exist: the game throws `Attachment not found: CROWN` if the crown cannot be resolved by
+name.
+
+Both settings apply per player and only while that spine is worn; other skins in the same file, and
+the vanilla lamb, are untouched.
+
 ## Known Issues
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
 

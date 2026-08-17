@@ -401,11 +401,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         });
 
         ui.CreateButton(panel, "Delete Selected", DeleteSelected);
-        ui.CreateButton(panel, "Clear All Triggers", () =>
-        {
-            var removed = ClearPlaced();
-            _editor.SetStatus($"Removed {removed} trigger(s).");
-        });
+
+        // The label is kept: it is what says the button is armed.
+        _clearAllLabel = ui.CreateButton(panel, ClearAllLabel, ClearAllPressed)
+            .GetComponentInChildren<TMPro.TMP_Text>();
 
         ui.CreateHeader(panel, "- Actions -", 19);
 
@@ -422,6 +421,68 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private MapEditorToggle _onceToggle;
     private MapEditorToggle _lockToggle;
+
+    // ---- clear-all confirmation ---------------------------------------------------------------
+
+    private TMPro.TMP_Text _clearAllLabel;
+    private float _armedUntil;
+
+    private const string ClearAllLabel = "Clear All Triggers";
+    private const float ArmWindow = 4f;
+
+    // Two presses rather than a dialog: the panel has no modal of its own, and one stray click
+    // that deletes every volume in the room is not recoverable - placing a trigger is on the undo
+    // stack, but this wipe clears the stack along with the triggers.
+    private void ClearAllPressed()
+    {
+        var live = LiveCount();
+        if (live == 0)
+        {
+            Disarm();
+            _editor.SetStatus("No triggers to remove.");
+            return;
+        }
+
+        if (!Armed)
+        {
+            _armedUntil = Time.unscaledTime + ArmWindow;
+            if (_clearAllLabel != null) _clearAllLabel.text = $"Delete all {live}? Click again";
+            _editor.SetStatus($"Click again within {ArmWindow:0}s to delete all {live} trigger(s).",
+                StatusSeverity.Warning);
+            return;
+        }
+
+        Disarm();
+        var removed = ClearPlaced();
+        _editor.SetStatus($"Removed {removed} trigger(s).");
+    }
+
+    private bool Armed => _armedUntil > 0f && Time.unscaledTime <= _armedUntil;
+
+    private void Disarm()
+    {
+        _armedUntil = 0f;
+        if (_clearAllLabel != null) _clearAllLabel.text = ClearAllLabel;
+    }
+
+    // The window lapsing has to put the button's own wording back, so a stale "Click again" is
+    // never what the next click answers.
+    private void TickArmWindow()
+    {
+        if (_armedUntil <= 0f || Time.unscaledTime <= _armedUntil) return;
+
+        Disarm();
+        _editor.SetStatus("Clear all cancelled.");
+    }
+
+    private int LiveCount()
+    {
+        var live = 0;
+        foreach (var trigger in _triggers)
+            if (trigger != null) live++;
+
+        return live;
+    }
 
     // ---- action sequence editing -----------------------------------------------------------
 
@@ -440,7 +501,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         "Move players to trigger",
         "Move players to object",
         "Talk to custom NPC",
-        "Play animation on players"
+        "Play animation on players",
+        "Apply lighting",
+        "Change music"
     ];
 
     // Which question the shared target dropdown is currently asking.
@@ -450,11 +513,15 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Trigger,
         Npc,
         Animation,
-        AnimationMode
+        AnimationMode,
+        Lighting,
+        LightingFade,
+        Music
     }
 
     private TargetStage _stage;
     private string _pendingAnimation;
+    private string _pendingLighting;
 
     // Display names are what the dropdown shows; the ids that go into the action are kept
     // alongside, because an NPC's display name is not what the registry is keyed by.
@@ -809,6 +876,46 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 OpenTargets(TargetStage.Animation, animations);
                 break;
             }
+
+            case TriggerActionType.ApplyLighting:
+            {
+                // Vanilla is always on the list - a trigger that only puts the biome's own
+                // lighting back is a legitimate sequence ender.
+                _targetKeys.Clear();
+                _targetKeys.Add("");
+                var names = new List<string> { "Vanilla lighting" };
+
+                foreach (var profile in LightingProfiles.Names())
+                {
+                    _targetKeys.Add(profile);
+                    names.Add(profile);
+                }
+
+                OpenTargets(TargetStage.Lighting, names);
+                break;
+            }
+
+            case TriggerActionType.ChangeMusic:
+            {
+                // Same FMOD enumeration the music tool uses, so both pickers show one list.
+                var tracks = MusicTool.MusicEvents();
+                if (tracks.Count == 0)
+                {
+                    _editor.SetStatus("No music events found.", StatusSeverity.Warning);
+                    return;
+                }
+
+                _targetKeys.Clear();
+                var names = new List<string>(tracks.Count);
+                foreach (var track in tracks)
+                {
+                    _targetKeys.Add(track);
+                    names.Add(MusicTool.ShortName(track));
+                }
+
+                OpenTargets(TargetStage.Music, names);
+                break;
+            }
         }
     }
 
@@ -843,6 +950,14 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     // "hold this pose for a beat / a while", and a typed seconds field is another modal prompt.
     private static readonly string[] AnimationModes = ["Play once", "Loop 2 seconds", "Loop 5 seconds", "Loop 10 seconds"];
     private static readonly float[] AnimationDurations = [0f, 2f, 5f, 10f];
+
+    // Same shape for the lighting swap: how long it cross-fades over. Instant is last because it
+    // is the old cut, kept for a lightning-strike moment rather than as the normal answer. A
+    // negative duration is what TriggerAction reads as "no fade".
+    private static readonly string[] LightingFadeModes =
+        ["Fade 1 second", "Fade 2 seconds", "Fade 4 seconds", "Instant (no fade)"];
+
+    private static readonly float[] LightingFadeDurations = [1f, 2f, 4f, -1f];
 
     private void OnTargetChosen(int index, string value)
     {
@@ -881,6 +996,34 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                     Duration = index >= 0 && index < AnimationDurations.Length ? AnimationDurations[index] : 0f
                 });
                 _pendingAnimation = null;
+                break;
+
+            case TargetStage.Lighting:
+                // Slot 0 is "Vanilla lighting", whose key is the empty string - so the pending
+                // target is legitimately blank here, and only the stage says it was answered.
+                _pendingLighting = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value;
+                OpenTargets(TargetStage.LightingFade, LightingFadeModes);
+                break;
+
+            case TargetStage.LightingFade:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.ApplyLighting,
+                    Target = _pendingLighting ?? "",
+                    Duration = index >= 0 && index < LightingFadeDurations.Length
+                        ? LightingFadeDurations[index]
+                        : TriggerAction.DefaultLightingFade
+                });
+                _pendingLighting = null;
+                break;
+
+            case TargetStage.Music:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.ChangeMusic,
+                    // The label is the short name; the action needs the full FMOD path.
+                    Target = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value
+                });
                 break;
         }
     }
@@ -930,6 +1073,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         ShowGizmos(false);
         Select(null);
+        // Leaving the tool answers the question: the button must not still be armed on return.
+        Disarm();
         _pickingObject = false;
         _stage = TargetStage.None;
         ClearTargetHighlight();
@@ -939,6 +1084,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     public void OnUpdate()
     {
         Prune();
+        TickArmWindow();
 
         if (Input.GetKeyDown(KeyCode.Delete)) DeleteSelected();
 

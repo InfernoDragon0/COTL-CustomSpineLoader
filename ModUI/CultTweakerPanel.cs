@@ -366,6 +366,13 @@ public class CultTweakerPanel : MonoBehaviour
 
             var current = PlayerSpineLoader.GetFleeceIndex(playerId);
             if (current >= 0 && current < fleeces.Count) fleeceDropdown.SetSelected(current);
+
+            // The picker still works and still remembers, it just does not dress this spine - so
+            // say so here rather than leaving a control that looks broken.
+            var spineConfig = PlayerSpineLoader.ConfigFor(playerId);
+            if (spineConfig != null && spineConfig.DisableFleeceCycling)
+                Note($"{PlayerSpineLoader.ActiveSpineName(playerId)} keeps its own fleece; " +
+                     "your choice is saved for other spines.");
         }
 
         // ---- spine
@@ -389,7 +396,7 @@ public class CultTweakerPanel : MonoBehaviour
         var spineDropdown = _ui.CreateDropdown(_content, "Player Spine", spines,
             (_, value) => ApplySpine(playerId, value));
 
-        var selected = spines.IndexOf(SelectedSpine(playerId));
+        var selected = spines.IndexOf(PlayerSpineLoader.ActiveSpineKey(playerId));
         if (selected >= 0) spineDropdown.SetSelected(selected);
     }
 
@@ -501,9 +508,10 @@ public class CultTweakerPanel : MonoBehaviour
 
     // ---- COTL_API internals ---------------------------------------------------------------------
 
-    // CustomPlayerSpines and SelectedSpine are internal to COTL_API, so they are read through
-    // Harmony's traverse rather than by depending on a publicized build of it - the same approach
-    // the map editor's enemy picker uses for the custom enemy list.
+    // CustomPlayerSpines is internal to COTL_API, so it is read through Harmony's traverse rather
+    // than by depending on a publicized build of it - the same approach the map editor's enemy
+    // picker uses for the custom enemy list. The selected spine is read the same way, but by
+    // PlayerSpineLoader, which needs it to find the active skin's config.
     private static List<string> PlayerSpines()
     {
         try
@@ -529,20 +537,6 @@ public class CultTweakerPanel : MonoBehaviour
         {
             Plugin.Log.LogWarning("CultTweaker: could not read COTL_API player spine list: " + e.Message);
             return [];
-        }
-    }
-
-    private static string SelectedSpine(int playerId)
-    {
-        try
-        {
-            return Traverse.Create(typeof(CustomSkinManager))
-                .Field(playerId == 1 ? "SelectedSpine2" : "SelectedSpine")
-                .GetValue<string>() ?? "";
-        }
-        catch (System.Exception)
-        {
-            return "";
         }
     }
 

@@ -106,24 +106,62 @@ namespace CustomSpineLoader.Patches
             return true;
         }
 
+        // A spine hotswap (and a respawn, which goes through OnEnable) calls PlayerFarming.Start
+        // again. COTL_API's prefix does the swap and Initialize, but the original Start returns at
+        // its own "if (StartComplete)" guard before reaching the SetSkin() it ends with - so on
+        // every swap after the first, the skin is whatever Initialize left behind: the raw data
+        // skin, with no weapon or chore overlay, and nothing to trigger the postfix below.
+        //
+        // StartComplete is read before the original runs, because the original is what sets it.
+        [HarmonyPatch(typeof(PlayerFarming), nameof(PlayerFarming.Start))]
+        [HarmonyPrefix]
+        private static void PlayerFarming_Start_Prefix(PlayerFarming __instance, ref bool __state)
+        {
+            __state = __instance.StartComplete;
+        }
+
+        [HarmonyPatch(typeof(PlayerFarming), nameof(PlayerFarming.Start))]
+        [HarmonyPostfix]
+        private static void PlayerFarming_Start_Postfix(PlayerFarming __instance, bool __state)
+        {
+            // A first, genuine Start already called SetSkin itself.
+            if (!__state) return;
+
+            var playerId = CoopManager.CoopActive && __instance.playerID == 1 ? 1 : 0;
+
+            // Limited to spines this mod loaded with a config.json, so a vanilla respawn keeps
+            // behaving exactly as it did.
+            if (PlayerSpineLoader.ConfigFor(playerId) == null) return;
+
+            Plugin.Log.LogInfo($"Rebuilding player {playerId + 1}'s skin after a spine swap.");
+            __instance.SetSkin();
+        }
+
         [HarmonyPatch(typeof(PlayerFarming), nameof(PlayerFarming.SetSkin), typeof(bool))]
         [HarmonyPostfix]
         private static void PlayerFarming_SetSkin(ref Skin __result, PlayerFarming __instance, bool BlackAndWhite)
         {
+            //check if p1 or p2
+            var playerId = CoopManager.CoopActive && __instance.playerID == 1 ? 1 : 0;
+            var config = PlayerSpineLoader.ConfigFor(playerId);
+
+            DressFleece(__instance, playerId, config);
+
+            // Always, and always last: the fleece above writes to some of the same slots, and the
+            // skin the game just rebuilt has to be stripped whether or not a fleece was applied.
+            PlayerSpineLoader.HideSlots(__instance.Spine, config);
+        }
+
+        private static void DressFleece(PlayerFarming player, int playerId, PlayerSpineConfig config)
+        {
             if (!Plugin.FleeceCyclingEnabled.Value) return;
 
-            var fleeceIndex = -1;
-            var fleeceSkinName = "";
-            //check if p1 or p2
-            if (CoopManager.CoopActive && __instance.playerID == 1)
-            {
-                fleeceIndex = PlayerSpineLoader.currentFleeceIndexP2;
-                Plugin.Log.LogInfo("Applying fleece skin for Player 2: " + fleeceSkinName);
-            }
-            else
-            {
-                fleeceIndex = PlayerSpineLoader.currentFleeceIndexP1;
-            }
+            // This spine dresses its own body; the fleece would write lamb artwork over it.
+            if (config != null && config.DisableFleeceCycling) return;
+
+            var fleeceIndex = playerId == 1
+                ? PlayerSpineLoader.currentFleeceIndexP2
+                : PlayerSpineLoader.currentFleeceIndexP1;
 
             if (fleeceIndex == -1)
             {
@@ -137,11 +175,11 @@ namespace CustomSpineLoader.Patches
                 return;
             }
 
-            fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
+            var fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
 
-            Plugin.Log.LogInfo("Applying fleece skin: " + fleeceSkinName);
+            Plugin.Log.LogInfo($"Applying fleece skin for player {playerId + 1}: {fleeceSkinName}");
 
-            var lambSpine = __instance.Spine;
+            var lambSpine = player.Spine;
             if (lambSpine == null) return;
 
             // Shared with the F-keys and the F7 panel: the fleece lives on another skin, and
@@ -153,7 +191,7 @@ namespace CustomSpineLoader.Patches
                 return;
             }
 
-            PlayerSpineLoader.ApplyFleeceAttachments(lambSpine, lambSkin);
+            PlayerSpineLoader.ApplyFleeceAttachments(lambSpine, lambSkin, config);
         }
 
         [HarmonyPatch(typeof(Follower), nameof(Follower.Update))]

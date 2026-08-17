@@ -96,12 +96,13 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
         _editor.SetStatus($"Music: {ShortName(eventPath)}.");
     }
 
-    private static string ShortName(string eventPath) =>
+    // Public: the trigger tool labels its own music picker the same way.
+    public static string ShortName(string eventPath) =>
         eventPath.StartsWith(MusicPrefix + "/") ? eventPath.Substring(MusicPrefix.Length + 1) : eventPath;
 
     // Enumerated once from the loaded FMOD banks; the game loads its banks at startup, so the
-    // set is stable for the session.
-    private static List<string> MusicEvents()
+    // set is stable for the session. Public for the trigger tool's Change-music action.
+    public static List<string> MusicEvents()
     {
         if (_musicEvents != null) return _musicEvents;
 
