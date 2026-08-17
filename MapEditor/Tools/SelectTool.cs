@@ -170,10 +170,14 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return $"{hit.gameObject.name} (renderer={hasRenderer}, protected={MapEditorProtection.IsProtected(hit.gameObject)})";
     }
 
-    private GameObject PickAtMouse()
-    {
-        var world = _editor.MouseWorld();
+    private GameObject PickAtMouse() => PickWorldObject(_editor.MouseWorld());
 
+    // The editor's shared answer to "what is under the cursor". Public because other tools have to
+    // agree with the select tool about what an object is - the trigger tool picks a move target
+    // this way, and a second implementation there picked HP bars and invisible trigger colliders
+    // that this one has learned to skip.
+    public static GameObject PickWorldObject(Vector3 world)
+    {
         // Only trust a physics hit if the thing is actually drawn. The room is littered with
         // invisible trigger and particle colliders that would otherwise swallow every click.
         var hit = Physics2D.OverlapPoint(world);

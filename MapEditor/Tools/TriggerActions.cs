@@ -351,8 +351,36 @@ public static class TriggerActions
         // Play is asynchronous by a frame or two (and refuses outright if another conversation
         // owns the screen), so the wait is guarded rather than assuming it started.
         var guard = Time.unscaledTime + 2f;
-        while (!MMConversation.isPlaying && Time.unscaledTime < guard) yield return null;
-        while (MMConversation.isPlaying) yield return null;
+        while (!NpcDialogueRunner.IsRunning && !MMConversation.isPlaying && Time.unscaledTime < guard)
+            yield return null;
+
+        // The runner's own flag, not MMConversation.isPlaying: a dialogue tree is a CHAIN of
+        // conversations (one per node, because the choice wheel only appears at the end of one),
+        // and isPlaying drops between them. Waiting on that alone let the sequence resume during
+        // the gap after the first node - the next action ran while the NPC was still talking.
+        var quietSince = -1f;
+        while (NpcDialogueRunner.IsRunning || MMConversation.isPlaying)
+        {
+            if (MMConversation.isPlaying)
+            {
+                quietSince = -1f;
+            }
+            else if (quietSince < 0f)
+            {
+                quietSince = Time.unscaledTime;
+            }
+            else if (Time.unscaledTime - quietSince > 10f)
+            {
+                // Nothing has been on screen for ten seconds while the runner still believes it
+                // is mid-chain: something ate the conversation (a room reload, a dead coroutine
+                // host). Better to finish the sequence than to hold the players frozen forever.
+                Plugin.Log.LogWarning("MapEditor: conversation appears to have been interrupted; " +
+                                      "continuing the trigger sequence.");
+                break;
+            }
+
+            yield return null;
+        }
 
         // The teardown the runner does on the last node lands a frame later.
         yield return null;

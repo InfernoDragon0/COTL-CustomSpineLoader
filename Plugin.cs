@@ -43,6 +43,10 @@ namespace CustomSpineLoader
 
         private RuntimeMapEditor runtimeMapEditor;
 
+        // The F7 panel. Unlike the map editor it is not scoped to a dungeon - fleeces and spines
+        // are just as worth setting in the base - so it lives on its own persistent host.
+        private ModUI.CultTweakerPanel cultTweakerPanel;
+
         private void Awake()
         {
             Log = base.Logger;
@@ -78,6 +82,10 @@ namespace CustomSpineLoader
             SceneManager.sceneLoaded += OnSceneLoaded;
             TryCreateRuntimeEditor(SceneManager.GetActiveScene());
 
+            var panelHost = new GameObject("CultTweakerPanelHost");
+            DontDestroyOnLoad(panelHost);
+            cultTweakerPanel = panelHost.AddComponent<ModUI.CultTweakerPanel>();
+
             var customTestDungeon = new CustomDungeon();
 
             // Registered for the map editor's enemy picker. Deliberately NOT added to
@@ -104,36 +112,38 @@ namespace CustomSpineLoader
     
         public void Update()
         {
-            if (Input.GetKeyDown(KeyCode.F9))
-            {
-                Log.LogInfo("Toggling Fleece Cycling to " + !FleeceCyclingEnabled.Value);
-                FleeceCyclingEnabled.Value = !FleeceCyclingEnabled.Value;
+            // if (Input.GetKeyDown(KeyCode.F9))
+            // {
+            //     Log.LogInfo("Toggling Fleece Cycling to " + !FleeceCyclingEnabled.Value);
+            //     FleeceCyclingEnabled.Value = !FleeceCyclingEnabled.Value;
 
-                if (!FleeceCyclingEnabled.Value && PlayerFarming.Instance != null)
-                {
-                    if (CoopManager.CoopActive)
-                    {
-                        PlayerFarming.players[1].SetSkin();
-                    }
-                    PlayerFarming.Instance.SetSkin();
+            //     if (!FleeceCyclingEnabled.Value && PlayerFarming.Instance != null)
+            //     {
+            //         if (CoopManager.CoopActive)
+            //         {
+            //             PlayerFarming.players[1].SetSkin();
+            //         }
+            //         PlayerFarming.Instance.SetSkin();
 
-                }
-                else
-                {
-                    TestApplySpineOverride(cycle: false);
-                }
-            }
+            //     }
+            //     else
+            //     {
+            //         TestApplySpineOverride(cycle: false);
+            //     }
+            // }
 
+            // F7 used to cycle player 1's fleece one step per press. It opens the mod panel
+            // instead, which does the same job as a list (for every player) alongside the spine
+            // pickers and the mod's own information. F8 keeps the one-key cycle.
             if (Input.GetKeyDown(KeyCode.F7))
             {
-                Log.LogInfo("F7 Pressed - Fleece Cycle Player 1");
-                TestApplySpineOverride();
+                if (cultTweakerPanel != null) cultTweakerPanel.Toggle();
             }
-            if (Input.GetKeyDown(KeyCode.F8))
-            {
-                Log.LogInfo("F8 Pressed - Fleece Cycle Player 2");
-                TestApplySpineOverride(1);
-            }
+            // if (Input.GetKeyDown(KeyCode.F8))
+            // {
+            //     Log.LogInfo("F8 Pressed - Fleece Cycle Player 2");
+            //     TestApplySpineOverride(1);
+            // }
             if (Input.GetKeyDown(KeyCode.F5))
             {
                 // Inside the map editor F5 resets the room; the test-dungeon shortcut would
@@ -149,7 +159,9 @@ namespace CustomSpineLoader
                 }
             }
 
-            if (Input.GetKeyDown(KeyCode.F4) && runtimeMapEditor != null)
+            // Both take the camera, the pause and the HUD; the panel wins while it is up.
+            if (Input.GetKeyDown(KeyCode.F4) && runtimeMapEditor != null &&
+                (cultTweakerPanel == null || !cultTweakerPanel.IsOpen))
             {
                 runtimeMapEditor.ToggleEditor();
             }
@@ -162,112 +174,24 @@ namespace CustomSpineLoader
                 return;
             }
 
-            var fleeceIndex = -1;
-            if (cycle)
-            {
-                fleeceIndex = PlayerSpineLoader.CycleNextFleece(playerID);
-            }
-            else
-            {
-                fleeceIndex = playerID switch
+            var fleeceIndex = cycle
+                ? PlayerSpineLoader.CycleNextFleece(playerID)
+                : playerID switch
                 {
                     0 => CurrentFleeceIndexP1.Value,
                     1 => CurrentFleeceIndexP2.Value,
                     _ => -1
                 };
-            }
-            var fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
-            Log.LogInfo("Applying fleece skin: " + fleeceSkinName);
-            //first, we load the default lamb spine, then we can extract the fleece attachments from it.
-            var lambSpine = PlayerFarming.Instance.Spine;
 
-            if (playerID >= 1)
+            if (playerID >= 1 && !CoopManager.CoopActive)
             {
-                if (CoopManager.CoopActive)
-                {
-                    lambSpine = PlayerFarming.players[1].Spine;
-                    CurrentFleeceIndexP2.Value = fleeceIndex;
-                }
-
-                else
-                {
-                    Log.LogInfo("Coop not active, no fleece cycling");
-                    return;
-                }
-            }
-            else
-            {
-                CurrentFleeceIndexP1.Value = fleeceIndex;
-            }
-
-            Skin lambSkin;
-
-            if (fleeceSkinName.Contains("CultTweaker_"))
-            {
-                //split the name for the custom fleece, CultTweaker_SpineName_FleeceName, max split of 2
-                var split = fleeceSkinName.Split(['_'], count: 3);
-                if (split.Length < 3)
-                {
-                    Log.LogWarning("Invalid custom fleece skin name: " + fleeceSkinName);
-                    return;
-                }
-
-                var SpineName = split[1];
-                if (!PlayerSpineLoader.FleeceCyclingSpines.ContainsKey(SpineName))
-                {
-                    Log.LogWarning("Invalid spine skin name: " + fleeceSkinName + " for spine: " + SpineName);
-                    return;
-                }
-
-                lambSkin = PlayerSpineLoader.FleeceCyclingSpines[SpineName].Item1.skeletonData.FindSkin(split[2]);
-
-                if (lambSkin == null)
-                {
-                    Log.LogWarning("Defaulting to default as Custom Fleece skin not found: " + fleeceSkinName);
-                    lambSkin = lambSpine.Skeleton.Data.FindSkin("Lamb");
-                }
-            }
-            else
-            {
-                lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
-            }
-
-            if (lambSpine == null || lambSkin == null)
-            {
-                Log.LogInfo("Lamb skin was null after cycling, an error occurred! at skin name " + fleeceSkinName);
+                Log.LogInfo("Coop not active, no fleece cycling");
                 return;
             }
 
-            var currentSkin = lambSpine.Skeleton.Skin;
-            foreach (var slot in PlayerSpineLoader.FleeceOverrideSlots)
-            {
-                var slotIndex = lambSpine.Skeleton.FindSlotIndex(slot.Item1);
-                var attachment = lambSkin.GetAttachment(slotIndex, slot.Item2);
-                Log.LogInfo($"Slot {slot.Item1} index is {slotIndex}, attachment {(attachment != null ? "found" : "not found")}");
-
-                if (attachment == null)
-                    currentSkin.RemoveAttachment(slotIndex, slot.Item2);
-                else
-                    currentSkin.SetAttachment(slotIndex, slot.Item2, attachment);
-                Log.LogInfo($"Applied {slot.Item2} attachment to current skin.");
-            }
-
-            // //Right Poncho
-            // var ponchoRightSlot = lambSpine.Skeleton.FindSlotIndex("images/PonchoRight");
-            // var ponchoRightAttachment = lambSkin.GetAttachment(ponchoRightSlot, "PonchoRight");
-
-            // //Left Poncho
-            // var ponchoLeftSlot = lambSpine.Skeleton.FindSlotIndex("images/PonchoLeft");
-            // var ponchoLeftAttachment = lambSkin.GetAttachment(ponchoLeftSlot, "PonchoLeft");
-
-            
-
-            // Log.LogInfo("Current skin is " + (currentSkin != null ? "found" : "not found"));
-            // currentSkin.SetAttachment(ponchoRightSlot, "PonchoRight", ponchoRightAttachment);
-            // currentSkin.SetAttachment(ponchoLeftSlot, "PonchoLeft", ponchoLeftAttachment);
-            Log.LogInfo("Applied" + fleeceSkinName + " attachment to current skin.");
-            lambSpine.Skeleton.SetSlotsToSetupPose();
-            lambSpine.Update(0);
+            // The dressing itself lives in PlayerSpineLoader now, shared with the F7 panel and
+            // the SetSkin patch, so the three cannot drift apart.
+            PlayerSpineLoader.ApplyFleece(playerID, fleeceIndex);
         }
 
         private void OnEnable()

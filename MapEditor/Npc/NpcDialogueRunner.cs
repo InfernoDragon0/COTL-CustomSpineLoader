@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CustomSpineLoader.APIHelper;
 using MMTools;
+using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Npc;
 
@@ -19,6 +20,29 @@ namespace CustomSpineLoader.MapEditor.Npc;
 // Response.ActionCallBack.
 public static class NpcDialogueRunner
 {
+    // True from the first line until the chain truly ends. MMConversation.isPlaying is NOT a
+    // substitute: each dialogue node is its own conversation, so between nodes it drops to false
+    // for a frame or two - long enough for a trigger sequence waiting on it to decide the chat was
+    // over and carry on talking over itself.
+    public static bool IsRunning { get; private set; }
+
+    private static float _lastNodeAt;
+
+    // A chain lives across frames on the editor's coroutine host, so a room reload can kill it
+    // mid-flight and leave IsRunning stuck - which would then refuse every future dialogue.
+    // Nothing on screen and no node started for ten seconds means the chain is gone, not slow:
+    // a node the player is reading keeps MMConversation.isPlaying true the whole time, and the
+    // gap between nodes is a frame or two.
+    private static bool IsStale()
+    {
+        if (MMConversation.isPlaying) return false;
+        if (Time.unscaledTime - _lastNodeAt < 10f) return false;
+
+        Plugin.Log.LogWarning("Custom NPC dialogue was left running by an interrupted chain; resetting.");
+        IsRunning = false;
+        return true;
+    }
+
     public static void Play(CustomNpc npc, UnityEngine.GameObject speaker)
     {
         if (npc?.Dialogue == null || speaker == null) return;
@@ -26,17 +50,21 @@ public static class NpcDialogueRunner
         // A conversation already owns the screen (and the player's input); starting a second
         // one underneath it would corrupt both.
         if (MMConversation.isPlaying) return;
+        if (IsRunning && !IsStale()) return;
 
         // The game rebuilds its language source during load, which wipes terms registered at
         // plugin Awake - re-registered here whenever they are found missing, or the bubbles
         // show raw term keys instead of the dialogue.
         npc.Dialogue.EnsureRegistered(npc);
 
+        IsRunning = true;
         PlayNode(npc, speaker, npc.Dialogue.Start);
     }
 
     private static void PlayNode(CustomNpc npc, UnityEngine.GameObject speaker, string nodeId)
     {
+        _lastNodeAt = Time.unscaledTime;
+
         var node = npc.Dialogue.FindNode(nodeId);
         if (node == null)
         {
@@ -172,6 +200,8 @@ public static class NpcDialogueRunner
     // letterbox, camera and player input are still in conversation mode until this runs.
     private static void EndConversation(CustomNpc npc, string lastNodeId)
     {
+        IsRunning = false;
+
         try
         {
             GameManager.GetInstance()?.OnConversationEnd();

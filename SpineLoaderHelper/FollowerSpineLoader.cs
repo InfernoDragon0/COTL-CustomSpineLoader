@@ -523,3 +523,74 @@ public class DebugOutputSkin
     public int SlotIndex { get; set; }
     public string PartName { get; set; }
 }
+
+// Writes the slot/part list of a follower's live skin to followerSlots.json - the reference an
+// author needs to write a follower skin override, because the part names are not guessable.
+//
+// Two callers: the costume patch (when the debug config flag is on, once per session because the
+// existing file is left alone) and the mod panel's button, which is an explicit request and so
+// overwrites and reports where the file went.
+public static class FollowerSlotDumper
+{
+    public const string FileName = "followerSlots.json";
+
+    public static string OutputPath => Path.Combine(Plugin.PluginPath, FileName);
+
+    public static string Dump(Skeleton skeleton, bool overwrite)
+    {
+        if (skeleton?.Skin == null)
+        {
+            Plugin.Log.LogWarning("Follower slot dump: no skin to read.");
+            return null;
+        }
+
+        var path = OutputPath;
+
+        if (File.Exists(path))
+        {
+            if (!overwrite)
+            {
+                Plugin.Log.LogInfo($"{FileName} already exists, skipping dump. Delete the file to dump again.");
+                return null;
+            }
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"Could not replace {FileName}: {e.Message}");
+                return null;
+            }
+        }
+
+        try
+        {
+            List<DebugOutputSkin> list = [];
+            foreach (var slot in skeleton.Skin.Attachments)
+                list.Add(new DebugOutputSkin { SlotIndex = slot.SlotIndex, PartName = slot.Name });
+
+            File.WriteAllText(path, JsonConvert.SerializeObject(list, Formatting.Indented));
+            Plugin.Log.LogInfo($"Dumped {list.Count} follower slot(s) to {path}");
+            return path;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogError("Follower slot dump failed: " + e);
+            return null;
+        }
+    }
+
+    // The nearest thing to "a follower" that is actually in the world right now.
+    public static Skeleton FindLiveFollowerSkin()
+    {
+        foreach (var follower in UnityEngine.Object.FindObjectsOfType<Follower>())
+        {
+            var skeleton = follower != null && follower.Spine != null ? follower.Spine.Skeleton : null;
+            if (skeleton?.Skin != null) return skeleton;
+        }
+
+        return null;
+    }
+}

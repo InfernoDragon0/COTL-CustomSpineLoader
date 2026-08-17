@@ -139,68 +139,21 @@ namespace CustomSpineLoader.Patches
 
             fleeceSkinName = PlayerSpineLoader.FleeceRotation[fleeceIndex];
 
-
             Plugin.Log.LogInfo("Applying fleece skin: " + fleeceSkinName);
-            //first, we load the default lamb spine, then we can extract the fleece attachments from it.
+
             var lambSpine = __instance.Spine;
-            // var lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+            if (lambSpine == null) return;
 
-            Skin lambSkin;
-
-            if (fleeceSkinName.Contains("CultTweaker_"))
-            {
-                //split the name for the custom fleece, CultTweaker_SpineName_FleeceName, max split of 2
-                var split = fleeceSkinName.Split(['_'], count: 3);
-                if (split.Length < 3)
-                {
-                    Plugin.Log.LogWarning("Invalid custom fleece skin name: " + fleeceSkinName);
-                    return;
-                }
-
-                var SpineName = split[1];
-                if (!PlayerSpineLoader.FleeceCyclingSpines.ContainsKey(SpineName))
-                {
-                    Plugin.Log.LogWarning("Invalid spine skin name: " + fleeceSkinName + " for spine: " + SpineName);
-                    return;
-                }
-
-                lambSkin = PlayerSpineLoader.FleeceCyclingSpines[SpineName].Item1.skeletonData.FindSkin(split[2]);
-
-                if (lambSkin == null)
-                {
-                    Plugin.Log.LogWarning("Defaulting to default as Custom Fleece skin not found: " + fleeceSkinName);
-                    lambSkin = lambSpine.Skeleton.Data.FindSkin("Lamb");
-                }
-            }
-            else
-            {
-                lambSkin = lambSpine.Skeleton.Data.FindSkin(fleeceSkinName);
-            }
-
-            if (lambSpine == null)
+            // Shared with the F-keys and the F7 panel: the fleece lives on another skin, and
+            // wearing it means copying that skin's attachments into the live one.
+            var lambSkin = PlayerSpineLoader.ResolveFleeceSkin(fleeceSkinName, lambSpine);
+            if (lambSkin == null)
             {
                 Plugin.Log.LogInfo("Lamb skin was null after cycling, an error occurred! at skin name " + fleeceSkinName);
                 return;
             }
 
-            var currentSkin = lambSpine.Skeleton.Skin;
-            foreach (var slot in PlayerSpineLoader.FleeceOverrideSlots)
-            {
-                var slotIndex = lambSpine.Skeleton.FindSlotIndex(slot.Item1);
-                var attachment = lambSkin.GetAttachment(slotIndex, slot.Item2);
-                Plugin.Log.LogInfo($"Slot {slot.Item1} index is {slotIndex}, attachment {(attachment != null ? "found" : "not found")}");
-
-                if (attachment == null)
-                    currentSkin.RemoveAttachment(slotIndex, slot.Item2);
-                else
-                    currentSkin.SetAttachment(slotIndex, slot.Item2, attachment);
-                Plugin.Log.LogInfo($"Applied {slot.Item2} attachment to current skin.");
-            }
-
-
-            Plugin.Log.LogInfo("Applied" + fleeceSkinName + " attachment to current skin.");
-            lambSpine.Skeleton.SetSlotsToSetupPose();
-            lambSpine.Update(0);
+            PlayerSpineLoader.ApplyFleeceAttachments(lambSpine, lambSkin);
         }
 
         [HarmonyPatch(typeof(Follower), nameof(Follower.Update))]
@@ -281,20 +234,7 @@ namespace CustomSpineLoader.Patches
             if (Plugin.DebugDumpFollowerSpineAtlas.Value)
             {
                 Plugin.Log.LogWarning("Debug Dump is enabled! Performance may be impacted");
-                var fileName = Path.Combine(Plugin.PluginPath, "followerSlots.json");
-                if (File.Exists(fileName))
-                    Plugin.Log.LogInfo("followerSlots.json already exists, skipping dump. Delete the file to dump again.");
-                else
-                {
-                    Plugin.Log.LogInfo("Creating dump for followerslots");
-                    List<DebugOutputSkin> list = [];
-                    foreach (var slot in skeleton.Skin.Attachments)
-                    {
-                        list.Add(new DebugOutputSkin { SlotIndex = slot.SlotIndex, PartName = slot.Name });
-                    }
-                    var jsonString = JsonConvert.SerializeObject(list, Formatting.Indented);
-                    File.AppendAllText(fileName, jsonString);
-                }
+                FollowerSlotDumper.Dump(skeleton, overwrite: false);
             }
 
             Plugin.Log.LogInfo("Setting follower costume for"); 

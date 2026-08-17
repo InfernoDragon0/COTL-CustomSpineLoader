@@ -391,6 +391,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
         _ui = ui;
+        _panel = panel;
 
         _info = ui.CreateLabel(panel, "No trigger selected", 17, TMPro.TextAlignmentOptions.Center)
             .GetComponent<TMPro.TMP_Text>();
@@ -416,22 +417,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 : $"{_selected.Id} leaves the players in control.");
         }).GetComponent<MapEditorToggle>();
 
-        // ---- action sequence ------------------------------------------------------------
-        ui.CreateHeader(panel, "- Actions -", 19);
-
-        // Rows are rebuilt whenever the list changes, so they live in their own container - the
-        // panel column holds fixed controls above and below them.
-        _actionList = CreateActionListContainer(panel);
-
-        _addDropdown = ui.CreateDropdown(panel, "Add action", ActionLabels, OnAddActionType);
-
-        // One dropdown does every follow-up question (which trigger? which NPC? once or loop?),
-        // re-populated and re-opened per stage. A separate row per question would have left three
-        // dead controls sitting in the panel whenever nothing was being added.
-        _targetDropdown = ui.CreateDropdown(panel, "Target", System.Array.Empty<string>(), OnTargetChosen);
-
-        // Nothing is wired to a trigger yet, so the box lighting up green is the only evidence
-        // one fired. Left on by default for exactly that reason.
+        // Grouped with the other two: it is a checkbox like they are, and it sat below the
+        // action list where nothing else of its kind lived.
         ui.CreateToggle(panel, "Show volumes in play", CTMapTrigger.ShowInPlay, value =>
         {
             CTMapTrigger.ShowInPlay = value;
@@ -459,7 +446,24 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             _editor.SetStatus($"Removed {removed} trigger(s).");
         });
 
+        // ---- action sequence ------------------------------------------------------------
+        // Everything above belongs to the volume itself; from here down belongs to what it does,
+        // and the controls that ADD an action lead the list they add to.
+        ui.CreateHeader(panel, "- Actions -", 19);
+
+        _addDropdown = ui.CreateDropdown(panel, "Add action", ActionLabels, OnAddActionType);
+
+        // One dropdown does every follow-up question (which trigger? which NPC? once or loop?),
+        // re-populated and re-opened per stage. It only exists between choosing an action type and
+        // answering its question, so it is hidden the rest of the time rather than sitting there
+        // captioned "Target" with nothing to offer.
+        _targetDropdown = ui.CreateDropdown(panel, "Target", System.Array.Empty<string>(), OnTargetChosen);
+
+        // Rows are rebuilt whenever the list changes, so they live in their own container.
+        _actionList = CreateActionListContainer(panel);
+
         RebuildActionList();
+        UpdateActionControls();
     }
 
     private MapEditorToggle _onceToggle;
@@ -468,9 +472,13 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     // ---- action sequence editing -----------------------------------------------------------
 
     private MapEditorUI _ui;
+    private RectTransform _panel;
     private RectTransform _actionList;
     private MapEditorDropdown _addDropdown;
     private MapEditorDropdown _targetDropdown;
+
+    // The row the user clicked, whose target is outlined in the world.
+    private TriggerAction _selectedAction;
 
     // Index-aligned with TriggerActionType.
     private static readonly string[] ActionLabels =
@@ -581,8 +589,22 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         plate.sprite = MapEditorUI.RoundedPlate;
         plate.type = Image.Type.Sliced;
         plate.pixelsPerUnitMultiplier = 1.5f;
-        plate.color = new Color(0f, 0f, 0f, 0.55f);
-        plate.raycastTarget = false;
+        plate.color = action == _selectedAction
+            ? new Color(MapEditorUI.Accent.r, MapEditorUI.Accent.g, MapEditorUI.Accent.b, 0.45f)
+            : new Color(0f, 0f, 0f, 0.55f);
+
+        // The plate itself is the select button: clicking the row marks its target in the world.
+        // Its own buttons are children, so they are drawn - and raycast - on top of it and keep
+        // their clicks.
+        plate.raycastTarget = true;
+        var select = row.AddComponent<Button>();
+        select.targetGraphic = plate;
+        select.transition = Selectable.Transition.None;
+        select.onClick.AddListener(() =>
+        {
+            RuntimeMapEditor.Active?.BlockWorldClicks();
+            SelectAction(action);
+        });
 
         // Numbered, because the order is the whole point of a sequence.
         var label = _ui.CreateLabel(row.transform, $"{index + 1}. {action.Describe()}", 15);
@@ -590,27 +612,164 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         labelText.enableWordWrapping = false;
         labelText.overflowMode = TMPro.TextOverflowModes.Ellipsis;
         labelText.margin = new Vector4(8f, 0f, 0f, 0f);
+        labelText.raycastTarget = false;
 
-        var remove = _ui.CreateButton(row.transform, "X", () => RemoveAction(action), RowHeight - 4f);
+        // Reorder before delete, so the destructive button is the one furthest from the row's
+        // other controls. Both arrows are always present - a missing button on the first row
+        // would shift the delete button under the cursor mid-list.
+        RowButton(row, "-", () => MoveAction(action, -1));
+        RowButton(row, "+", () => MoveAction(action, 1));
+        RowButton(row, "X", () => RemoveAction(action));
+    }
+
+    private void RowButton(GameObject row, string text, System.Action onClick)
+    {
+        var button = _ui.CreateButton(row.transform, text, onClick, RowHeight - 4f);
 
         // CreateButton's row layout flexes to fill a column; in a horizontal row that would push
         // the label out entirely.
-        var removeElement = remove.GetComponent<LayoutElement>();
-        removeElement.preferredWidth = 34f;
-        removeElement.minWidth = 34f;
-        removeElement.flexibleWidth = 0f;
+        var element = button.GetComponent<LayoutElement>();
+        element.preferredWidth = 30f;
+        element.minWidth = 30f;
+        element.flexibleWidth = 0f;
     }
 
     private const float RowHeight = 30f;
+
+    private void MoveAction(TriggerAction action, int direction)
+    {
+        if (_selected == null || action == null) return;
+
+        var actions = _selected.Actions;
+        var index = actions.IndexOf(action);
+        var target = index + direction;
+        if (index < 0 || target < 0 || target >= actions.Count)
+        {
+            _editor.SetStatus(direction < 0 ? "Already first." : "Already last.");
+            return;
+        }
+
+        actions.RemoveAt(index);
+        actions.Insert(target, action);
+        RebuildActionList();
+        _editor.SetStatus($"{_selected.Id}: action moved to position {target + 1}.");
+    }
 
     private void RemoveAction(TriggerAction action)
     {
         if (_selected == null || action == null) return;
 
+        if (_selectedAction == action) SelectAction(null);
+
         _selected.Actions.Remove(action);
         RebuildActionList();
         UpdateInfo();
         _editor.SetStatus($"{_selected.Id}: removed action ({_selected.Actions.Count} left).");
+    }
+
+    // ---- action target highlight -------------------------------------------------------------
+
+    // Clicking a row answers "what does this step act on?" by outlining that thing in green: the
+    // object or NPC it moves to, the volume it sends the players to, or the players themselves for
+    // an animation. Reading it off the row label alone meant guessing which of five similar props
+    // was picked.
+    private void SelectAction(TriggerAction action)
+    {
+        // A second click on the same row clears it, so the outline can be dismissed without
+        // selecting something else.
+        _selectedAction = _selectedAction == action ? null : action;
+
+        RebuildActionList();
+        SyncTargetHighlight();
+
+        if (_selectedAction != null)
+            _editor.SetStatus($"Target: {_selectedAction.Describe()}.");
+    }
+
+    private readonly List<GameObject> _targetBoxes = [];
+    private readonly List<Bounds> _targetBounds = [];
+
+    private static readonly Color TargetColour = new(0.35f, 1f, 0.4f, 1f);
+
+    // Rebuilt every frame rather than once on selection: a target can be dragged (or, for the
+    // players, moved by the game) while the outline is up.
+    private void SyncTargetHighlight()
+    {
+        _targetBounds.Clear();
+        if (_selectedAction != null && _gizmosVisible) CollectTargetBounds(_selectedAction, _targetBounds);
+
+        for (var i = 0; i < _targetBounds.Count; i++)
+        {
+            if (i >= _targetBoxes.Count)
+                _targetBoxes.Add(MapEditorGizmos.CreateBox("MapEditor_TriggerTarget", TargetColour));
+
+            var box = _targetBoxes[i];
+            if (box == null) continue;
+
+            if (!box.activeSelf) box.SetActive(true);
+            MapEditorGizmos.SetBox(box, _targetBounds[i]);
+        }
+
+        for (var i = _targetBounds.Count; i < _targetBoxes.Count; i++)
+            if (_targetBoxes[i] != null && _targetBoxes[i].activeSelf) _targetBoxes[i].SetActive(false);
+    }
+
+    private static void CollectTargetBounds(TriggerAction action, List<Bounds> into)
+    {
+        switch (action.Type)
+        {
+            case TriggerActionType.MovePlayersToTrigger:
+            {
+                var trigger = TriggerActions.FindTrigger(action.Target);
+                // From the volume's own rectangle: a trigger has no renderer to measure, and its
+                // gizmo is only there while this tool is open.
+                if (trigger != null)
+                    into.Add(new Bounds(trigger.transform.position,
+                        new Vector3(trigger.Size.x, trigger.Size.y, 0.1f)));
+                break;
+            }
+
+            case TriggerActionType.MovePlayersToObject:
+            {
+                var go = TriggerActions.ResolveObject(action.Target);
+                if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
+                // The object is not in this room; the authored position is still where the players
+                // would be sent, so it is marked instead of showing nothing.
+                else into.Add(new Bounds(action.Position, new Vector3(1.5f, 1.5f, 0.1f)));
+                break;
+            }
+
+            case TriggerActionType.StartConversation:
+            {
+                foreach (var npc in Object.FindObjectsOfType<Npc.CustomNpcBehaviour>())
+                {
+                    if (npc == null || npc.Definition == null) continue;
+                    if (npc.Definition.InternalName != action.Target) continue;
+                    if (MapEditorGizmos.TryGetBounds(npc.gameObject, out var bounds)) into.Add(bounds);
+                    break;
+                }
+                break;
+            }
+
+            case TriggerActionType.PlayPlayerAnimation:
+            {
+                // Every player, because that is who performs it.
+                foreach (var player in TriggerActions.LivePlayers())
+                {
+                    if (MapEditorGizmos.TryGetBounds(player.gameObject, out var bounds)) into.Add(bounds);
+                    else into.Add(new Bounds(player.transform.position, new Vector3(1f, 2f, 0.1f)));
+                }
+                break;
+            }
+        }
+    }
+
+    private void ClearTargetHighlight()
+    {
+        _selectedAction = null;
+        foreach (var box in _targetBoxes)
+            if (box != null) Object.Destroy(box);
+        _targetBoxes.Clear();
     }
 
     private void AddAction(TriggerAction action)
@@ -624,12 +783,14 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         _stage = TargetStage.None;
         _addDropdown?.SetSelected(-1);
+        UpdateActionControls();
     }
 
     private void OnAddActionType(int index, string label)
     {
         _pickingObject = false;
         _stage = TargetStage.None;
+        UpdateActionControls();
 
         if (_selected == null)
         {
@@ -711,7 +872,30 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         _stage = stage;
         _targetDropdown.SetOptions(options);
+
+        // Shown, then laid out, THEN opened: the floating list positions itself against the row's
+        // screen corners, and a row activated this frame has not been placed by its layout group
+        // yet - the list would open where the row used to be.
+        UpdateActionControls();
+        if (_panel != null) LayoutRebuilder.ForceRebuildLayoutImmediate(_panel);
+
         _targetDropdown.Open();
+    }
+
+    // The add-action controls belong to a selected trigger, and the target dropdown only to a
+    // half-finished action, so both come and go rather than sitting there inert.
+    private void UpdateActionControls()
+    {
+        var addRoot = _addDropdown?.Root;
+        if (addRoot != null && addRoot.activeSelf != (_selected != null))
+            addRoot.SetActive(_selected != null);
+
+        var targetRoot = _targetDropdown?.Root;
+        var wantTarget = _selected != null && _stage != TargetStage.None;
+        if (targetRoot != null && targetRoot.activeSelf != wantTarget)
+            targetRoot.SetActive(wantTarget);
+
+        _editor.RequestOptionsResize();
     }
 
     // Loop lengths rather than a free number: the only thing an author actually wants to say is
@@ -760,35 +944,16 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         }
     }
 
-    // The world click that names a Move-to-object target. Physics first, then the smallest
-    // visible renderer under the cursor - the same order the select tool picks in, because the
-    // room is full of invisible trigger colliders that would otherwise win every click.
+    // The world click that names a Move-to-object target. The select tool's own query, so an
+    // object that can be selected can also be targeted - the hand-rolled version this replaced
+    // disagreed with it, picking HP bars and invisible trigger colliders.
     private bool TryPickObject(Vector3 world)
     {
-        GameObject picked = null;
+        var picked = SelectTool.PickWorldObject(world);
 
-        var hit = Physics2D.OverlapPoint(world);
-        if (hit != null && hit.GetComponentInParent<CTMapTrigger>() == null) picked = hit.gameObject;
-
-        if (picked == null)
-        {
-            var bestSize = float.MaxValue;
-            foreach (var renderer in Object.FindObjectsOfType<Renderer>())
-            {
-                if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
-                if (renderer is ParticleSystemRenderer) continue;
-                if (renderer.GetComponentInParent<CTMapTrigger>() != null) continue;
-
-                var bounds = renderer.bounds;
-                if (world.x < bounds.min.x || world.x > bounds.max.x) continue;
-                if (world.y < bounds.min.y || world.y > bounds.max.y) continue;
-
-                var size = bounds.size.x * bounds.size.y;
-                if (size >= bestSize) continue;
-                bestSize = size;
-                picked = renderer.gameObject;
-            }
-        }
+        // One exception the select tool has no reason to make: our own volumes are gizmos, not
+        // scenery, and clicking one means the trigger, not a place to walk to.
+        if (picked != null && picked.GetComponentInParent<CTMapTrigger>() != null) picked = null;
 
         if (picked == null)
         {
@@ -805,6 +970,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         });
 
         _pickingObject = false;
+        UpdateActionControls();
         return true;
     }
 
@@ -828,6 +994,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Select(null);
         _pickingObject = false;
         _stage = TargetStage.None;
+        ClearTargetHighlight();
+        UpdateActionControls();
     }
 
     public void OnUpdate()
@@ -840,6 +1008,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         if (_pickingObject && Input.GetKeyDown(KeyCode.Escape))
         {
             _pickingObject = false;
+            _stage = TargetStage.None;
+            UpdateActionControls();
             _editor.SetStatus("Target pick cancelled.");
         }
 
@@ -861,6 +1031,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         }
 
         SyncHandles();
+        SyncTargetHighlight();
     }
 
     // ---- placement --------------------------------------------------------------------------
@@ -941,11 +1112,20 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         if (_selected != null) _selected.SetHighlighted(false);
         _selected = trigger;
 
+        // The highlighted action belonged to the trigger being left behind.
+        _selectedAction = null;
+        SyncTargetHighlight();
+
+        // A half-answered "which target?" question does not survive changing triggers either.
+        _stage = TargetStage.None;
+        _pickingObject = false;
+
         if (_selected == null)
         {
             SetHandlesActive(false);
             if (_info != null) _info.text = "No trigger selected";
             RebuildActionList();
+            UpdateActionControls();
             return;
         }
 
@@ -955,6 +1135,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         // Only on selection, never from the drag path below: rebuilding the rows every frame of a
         // resize would destroy and recreate the whole list continuously.
         RebuildActionList();
+        UpdateActionControls();
         _editor.SetStatus(placed
             ? $"Placed {_selected.Id}."
             : $"Selected {_selected.Id} ({_selected.Size.x:0.#} x {_selected.Size.y:0.#}).");
@@ -1143,11 +1324,13 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _triggers.Clear();
         _selected = null;
         SetHandlesActive(false);
+        ClearTargetHighlight();
 
         // A sequence belonging to the room being replaced must not keep the global lock (or the
         // players' InActive state) into the new one.
         CTMapTrigger.ResetSequenceState();
         RebuildActionList();
+        UpdateActionControls();
     }
 
     // Everything this tool put in the room, for the clear tool.

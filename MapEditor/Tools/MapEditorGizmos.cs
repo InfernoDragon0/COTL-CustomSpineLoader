@@ -40,8 +40,17 @@ public static class MapEditorGizmos
     // so it sits in the scene with the object instead of hovering over it.
     public static GameObject CreateSelectionBox(GameObject target, string name)
     {
-        if (target == null || !TryGetBounds(target, out var bounds)) return null;
+        if (target == null || !TryGetBounds(target, out _)) return null;
 
+        var go = CreateBox(name, BoxColour);
+        UpdateSelectionBox(go, target);
+        return go;
+    }
+
+    // A box with no target of its own, for callers that know their own bounds - the trigger tool
+    // marks an action's target this way, and a trigger volume has no renderer to measure.
+    public static GameObject CreateBox(string name, Color colour)
+    {
         var go = new GameObject(name);
         var line = go.AddComponent<LineRenderer>();
 
@@ -51,11 +60,22 @@ public static class MapEditorGizmos
         line.startWidth = line.endWidth = 0.1f;
         line.numCapVertices = 2;
         line.material = new Material(Shader.Find("Sprites/Default"));
-        line.startColor = line.endColor = BoxColour;
+        line.startColor = line.endColor = colour;
         line.sortingOrder = 32000;
-
-        UpdateSelectionBox(go, target);
         return go;
+    }
+
+    public static void SetBox(GameObject box, Bounds bounds, float z = -0.05f)
+    {
+        var line = box != null ? box.GetComponent<LineRenderer>() : null;
+        if (line == null) return;
+
+        line.SetPositions([
+            new Vector3(bounds.min.x, bounds.min.y, z),
+            new Vector3(bounds.max.x, bounds.min.y, z),
+            new Vector3(bounds.max.x, bounds.max.y, z),
+            new Vector3(bounds.min.x, bounds.max.y, z)
+        ]);
     }
 
     public static void UpdateSelectionBox(GameObject box, GameObject target)

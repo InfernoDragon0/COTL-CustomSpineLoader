@@ -9,6 +9,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
+using Spine;
 using Spine.Unity;
 
 namespace CustomSpineLoader.SpineLoaderHelper;
@@ -64,6 +65,130 @@ public class PlayerSpineLoader
         Plugin.Log.LogInfo("Player " + (playerID + 1) + " cycled to fleece index " + result + " (" + FleeceRotation[result] + ")");
 
         return result;
+    }
+
+    // ---- fleece application -------------------------------------------------------------------
+
+    // The fleece lives on ANOTHER skin (a vanilla one on the lamb's own skeleton, or a skin from a
+    // FleeceCyclingOnly spine we loaded ourselves); wearing it means copying that skin's
+    // attachments into the slots the player is currently rendering. Shared by every caller -
+    // the F-keys, the panel and the SetSkin patch - so one fix reaches all three.
+    public static Skin ResolveFleeceSkin(string fleeceSkinName, SkeletonAnimation targetSpine)
+    {
+        if (string.IsNullOrEmpty(fleeceSkinName) || targetSpine == null) return null;
+
+        if (!fleeceSkinName.Contains("CultTweaker_"))
+            return targetSpine.Skeleton.Data.FindSkin(fleeceSkinName);
+
+        // CultTweaker_<SpineName>_<FleeceName>; the fleece name may itself contain underscores,
+        // which is why the split is capped at 3.
+        var split = fleeceSkinName.Split(['_'], count: 3);
+        if (split.Length < 3)
+        {
+            Plugin.Log.LogWarning("Invalid custom fleece skin name: " + fleeceSkinName);
+            return null;
+        }
+
+        var spineName = split[1];
+        if (!FleeceCyclingSpines.ContainsKey(spineName))
+        {
+            Plugin.Log.LogWarning("Invalid spine skin name: " + fleeceSkinName + " for spine: " + spineName);
+            return null;
+        }
+
+        var skin = FleeceCyclingSpines[spineName].Item1.skeletonData.FindSkin(split[2]);
+        if (skin != null) return skin;
+
+        Plugin.Log.LogWarning("Defaulting to default as Custom Fleece skin not found: " + fleeceSkinName);
+        return targetSpine.Skeleton.Data.FindSkin("Lamb");
+    }
+
+    // Copies the fleece's attachments into the live skin, slot by slot. A slot the fleece does not
+    // fill is CLEARED rather than left alone - otherwise the previous fleece's poncho stays on
+    // under the new one.
+    public static void ApplyFleeceAttachments(SkeletonAnimation spine, Skin fleeceSkin)
+    {
+        if (spine == null || fleeceSkin == null) return;
+
+        var currentSkin = spine.Skeleton.Skin;
+        foreach (var slot in FleeceOverrideSlots)
+        {
+            var slotIndex = spine.Skeleton.FindSlotIndex(slot.Item1);
+            var attachment = fleeceSkin.GetAttachment(slotIndex, slot.Item2);
+
+            if (attachment == null)
+                currentSkin.RemoveAttachment(slotIndex, slot.Item2);
+            else
+                currentSkin.SetAttachment(slotIndex, slot.Item2, attachment);
+        }
+
+        spine.Skeleton.SetSlotsToSetupPose();
+        spine.Update(0);
+    }
+
+    // players is only populated when coop features are enabled, so solo play lives entirely in
+    // Instance and player 0 has to fall back to it.
+    public static PlayerFarming ResolvePlayer(int playerId)
+    {
+        var players = PlayerFarming.players;
+        if (players != null && playerId >= 0 && playerId < players.Count && players[playerId] != null)
+            return players[playerId];
+
+        return playerId == 0 ? PlayerFarming.Instance : null;
+    }
+
+    public static int GetFleeceIndex(int playerId) => playerId switch
+    {
+        0 => currentFleeceIndexP1,
+        1 => currentFleeceIndexP2,
+        _ => -1
+    };
+
+    // Dresses one player in one fleece. Players beyond the second are dressed but NOT remembered:
+    // both the config and the SetSkin patch that re-applies a fleece after a respawn only know
+    // about two, so a third player's choice lasts until the game next rebuilds their skin.
+    public static bool ApplyFleece(int playerId, int fleeceIndex, bool persist = true)
+    {
+        if (fleeceIndex < 0 || fleeceIndex >= FleeceRotation.Count)
+        {
+            Plugin.Log.LogWarning($"Fleece index {fleeceIndex} is out of range (0-{FleeceRotation.Count - 1}).");
+            return false;
+        }
+
+        var player = ResolvePlayer(playerId);
+        if (player == null || player.Spine == null)
+        {
+            Plugin.Log.LogInfo($"Player {playerId + 1} is not in the game; no fleece applied.");
+            return false;
+        }
+
+        var fleeceSkinName = FleeceRotation[fleeceIndex];
+        var fleeceSkin = ResolveFleeceSkin(fleeceSkinName, player.Spine);
+        if (fleeceSkin == null)
+        {
+            Plugin.Log.LogWarning("Fleece skin could not be resolved: " + fleeceSkinName);
+            return false;
+        }
+
+        ApplyFleeceAttachments(player.Spine, fleeceSkin);
+
+        if (persist)
+        {
+            switch (playerId)
+            {
+                case 0:
+                    currentFleeceIndexP1 = fleeceIndex;
+                    Plugin.CurrentFleeceIndexP1.Value = fleeceIndex;
+                    break;
+                case 1:
+                    currentFleeceIndexP2 = fleeceIndex;
+                    Plugin.CurrentFleeceIndexP2.Value = fleeceIndex;
+                    break;
+            }
+        }
+
+        Plugin.Log.LogInfo($"Player {playerId + 1} is wearing {fleeceSkinName}.");
+        return true;
     }
     public static void LoadAllPlayerSpines(Material material = null)
     {
