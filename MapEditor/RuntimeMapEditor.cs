@@ -11,13 +11,8 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor;
 
-// TODO:
-// add a trigger collider volume placement tool that can be used to trigger events in the map
-// add a npc placement tool
-// improve the UI so that it is less wordy and more intuitive
-// fix the zoom issue, each time a structure is selected, the zoom gets further
-// cant zoom in or out yet with Z X
-// check the increment for z axis data for each shape to stack on top of each other
+// Editor host. What each tool does, and the reasoning behind the parts that look odd, is in
+// MapEditor/README.md.
 public class RuntimeMapEditor : MonoBehaviour
 {
     private Canvas _canvas;
@@ -74,9 +69,6 @@ public class RuntimeMapEditor : MonoBehaviour
 
     public bool IsEditing => _editing;
 
-    // True while a vanilla modal (the naming dialog) is up. Its canvas sorts around 100 and the
-    // editor's at 5000, so the editor would draw over it and its raycaster would win every
-    // click - the whole UI hides for the duration instead.
     public bool ModalOpen
     {
         get => _modalOpen;
@@ -203,18 +195,12 @@ public class RuntimeMapEditor : MonoBehaviour
         _editing = true;
         _canvas.enabled = true;
 
-        // Hide the HUD before freezing time, and snap rather than animate. COTL_API's ShowHUD
-        // passes Snap: false, so the fade-out was still running when timeScale hit zero and the
-        // HUD stayed frozen on screen over the editor.
         if (HUD_Manager.Instance != null) HUD_Manager.Instance.Hide(true, 0);
 
         _savedTimeScale = Time.timeScale;
         Time.timeScale = 0f;
         TakeCameraControl();
 
-        // Capture the shape template and profiles NOW, while the room is intact: the shape tool
-        // otherwise captures lazily on first entry, and clearing the terrain before ever opening
-        // it would leave no sprite shape in the scene to base new shapes on.
         GetTool<ShapeTool>()?.PrepareForLoad();
 
         SelectTool(_tools.FirstOrDefault());
@@ -264,12 +250,6 @@ public class RuntimeMapEditor : MonoBehaviour
     {
         if (!_editing) return;
 
-        // The naming dialog is driving; nothing here should also respond to the same input - and
-        // in particular the pause below must not be re-asserted underneath it. UIMenuBase.DoShow
-        // waits on an Animator clip, Animators advance on SCALED time, and the menu only selects
-        // its input field and sets its own pause once that clip finishes. Holding timeScale at 0
-        // therefore froze the dialog half-open: visible, clickable, and permanently unable to
-        // take a keystroke. The menu pauses the game itself (OnShowCompleted) a moment later.
         if (ModalOpen) return;
 
         // Game menus opened from a tool (the build menu in particular) restore timeScale when
@@ -310,11 +290,6 @@ public class RuntimeMapEditor : MonoBehaviour
         }
     }
 
-    // Panning drives the game's own camera rig through a dummy follow target, rather than moving
-    // Camera.main directly: CameraFollowTarget re-asserts the camera position every frame, so
-    // direct writes are silently reverted.
-    //
-    // timeScale is 0 while editing, so everything here must use unscaled time.
     private void HandleCameraControls()
     {
         if (_cameraAnchor == null) return;
@@ -329,9 +304,6 @@ public class RuntimeMapEditor : MonoBehaviour
         if (move != Vector3.zero)
             _cameraAnchor.transform.position += move.normalized * (PanSpeed * dt);
 
-        // Z/X rather than Q/E: the game's UI navigator binds Q/E to page-left/page-right, so
-        // pressing them cycled the editor's own tool buttons instead of zooming. Ctrl is
-        // excluded so Ctrl+Z undoes rather than zooming at the same time.
         var zoomDelta = 0f;
         if (!CtrlHeld)
         {
@@ -344,22 +316,11 @@ public class RuntimeMapEditor : MonoBehaviour
 
         HandleWheel();
 
-        // Asserted EVERY frame, and via CameraSetZoom rather than CameraSetTargetZoom: the
-        // camera only chases targetDistance with scaled deltaTime, which is 0 while the editor
-        // is paused, so a target-only write never becomes visible. Meanwhile game menus opened
-        // from the editor drift the real distance through their own unscaled zoom path, which
-        // is why the view crept further out on every build-menu open. Setting distance and
-        // target together each frame makes Z/X work under pause and pins the drift.
         ApplyZoom();
     }
 
     public static bool CtrlHeld => Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
-    // Both wheel sources are live in this game - Rewired's pointer module reads
-    // Input.mouseScrollDelta, and MouseManager reads the legacy "Mouse ScrollWheel" axis - so
-    // either will do. What differs between them, and between mice, is SCALE: one notch is 1.0
-    // through mouseScrollDelta but around 0.1 through the axis. The fallback is kept for the
-    // case where the delta reads flat.
     private static bool _wheelAxisMissing;
 
     private static float WheelDelta()
@@ -381,10 +342,6 @@ public class RuntimeMapEditor : MonoBehaviour
         }
     }
 
-    // Any wheel movement is one step. Summing the delta and waiting for it to reach 1.0 is what
-    // broke this: a mouse reporting ~0.1 per notch needed ten notches to change tool, which read
-    // as the wheel doing nothing at all while the lists - which scroll proportionally - were
-    // fine. A short cooldown does the de-bouncing instead, at any scale.
     private const float ToolSwitchCooldown = 0.12f;
     private float _lastToolSwitch;
 
@@ -393,10 +350,6 @@ public class RuntimeMapEditor : MonoBehaviour
         var scroll = WheelDelta();
         if (Mathf.Abs(scroll) < 0.005f) return;
 
-        // Over one of the editor's own lists the wheel belongs to that list. It cannot be left
-        // to uGUI either: this game installs Rewired's pointer module, which never delivers
-        // scroll events to our ScrollRects, so it is routed by hand - the same reason
-        // PointerOverUi tests our own rects instead of asking the EventSystem.
         if (ScrollUiUnderPointer(scroll)) return;
 
         if (Time.unscaledTime - _lastToolSwitch < ToolSwitchCooldown) return;
@@ -423,10 +376,6 @@ public class RuntimeMapEditor : MonoBehaviour
             if (!RectTransformUtility.RectangleContainsScreenPoint(scroll.viewport, mouse, null)) continue;
 
             var hidden = scroll.content.rect.height - scroll.viewport.rect.height;
-            // A fixed step per wheel event rather than one proportional to the delta: the delta's
-            // scale varies by an order of magnitude between input sources and mice, which would
-            // otherwise make the same flick scroll ten times further on one setup than another.
-            // Still consumed when there is nothing to scroll - the cursor is over a list.
             if (hidden > 1f)
                 scroll.verticalNormalizedPosition =
                     Mathf.Clamp01(scroll.verticalNormalizedPosition + Mathf.Sign(delta) * 90f / hidden);
@@ -466,17 +415,10 @@ public class RuntimeMapEditor : MonoBehaviour
         SuspendAreaCulling();
     }
 
-    // BaseBiomeAreaCulling deactivates whole areas whose precomputed bounds fall outside the
-    // camera viewport. Editing breaks its assumptions in two ways: the camera roams far from the
-    // player, and moving an object (a door especially) puts it outside the area it was registered
-    // to, so it vanishes the next time the view shifts. Suspended for the duration of the session.
     private void SuspendAreaCulling()
     {
         _suspendedCulling.Clear();
 
-        // FindObjectsOfTypeAll rather than FindObjectsOfType: the latter skips components on
-        // inactive objects, which left some culling live and still deactivating areas as the
-        // editor camera roamed.
         foreach (var culling in Resources.FindObjectsOfTypeAll<BaseBiomeAreaCulling>())
         {
             if (culling == null || !culling.enabled) continue;
@@ -490,11 +432,6 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private void RestoreAreaCulling()
     {
-        // BaseBiomeAreaCulling reparents objects into a culling area based on position, and the
-        // area's bounds never move. A door dragged out of its original area therefore gets
-        // deactivated along with that area the moment culling resumes, which looks exactly like
-        // the door being deleted. Once anything has been moved, culling stays off for the rest of
-        // the session; it is only a performance optimisation.
         if (KeepCullingSuspended)
         {
             Plugin.Log.LogInfo("MapEditor: leaving area culling suspended because objects were repositioned.");
@@ -549,14 +486,6 @@ public class RuntimeMapEditor : MonoBehaviour
         _cameraAnchor.transform.position = new Vector3(worldPosition.x, worldPosition.y, 0f);
     }
 
-    // True when the cursor is over editor chrome, so tools do not also act on the click.
-    //
-    // Deliberately not EventSystem.IsPointerOverGameObject(): this game installs Rewired's own
-    // pointer input module, under which that call reported true almost everywhere and silently
-    // rejected every world click. Testing our own rects is exact and input-module independent.
-    // Set whenever editor chrome is clicked. A press on a button must not also register as a
-    // world click for whichever tool is active a moment later; the window covers the gap
-    // between the button firing on pointer-up and the tool seeing the same press.
     private float _worldClickBlockedUntil;
 
     public void BlockWorldClicks() => _worldClickBlockedUntil = Time.unscaledTime + 0.2f;
@@ -592,9 +521,6 @@ public class RuntimeMapEditor : MonoBehaviour
         if (rect != null && !_uiBlockers.Contains(rect)) _uiBlockers.Add(rect);
     }
 
-    // The status bar is the editor's only feedback channel, and a blocked save read exactly like
-    // a routine "tool active" line. Severity colours the text and, for anything the user has to
-    // act on, darkens the bar and pulses it once so it cannot be missed.
     public void SetStatus(string message, StatusSeverity severity = StatusSeverity.Info)
     {
         _statusMessage = message;
@@ -627,9 +553,6 @@ public class RuntimeMapEditor : MonoBehaviour
 
         if (_statusPanel == null) return;
 
-        // The alert border tracks the last real message, not whatever the cursor is hovering
-        // over, and it stays up until something good replaces it. A blink was easy to miss and
-        // stopped drawing attention the moment it finished.
         if (pulse)
         {
             var urgent = severity is StatusSeverity.Warning or StatusSeverity.Error;
@@ -645,9 +568,6 @@ public class RuntimeMapEditor : MonoBehaviour
         }
     }
 
-    // Restarts the blueprint's music event whenever it stops; FMOD events only loop when
-    // authored to, so this is what makes one-shot tracks usable as room music. Null stops
-    // the loop (a load without MusicLoop, or one with no music at all).
     private Coroutine _musicLoopRoutine;
 
     public void SetMusicLoop(string eventPath)
@@ -757,17 +677,9 @@ public class RuntimeMapEditor : MonoBehaviour
         }
     }
 
-    // The tool dock: one flat row of square icon buttons across the bottom of the screen, with
-    // the map's own actions at its right end. It replaces the tall left-hand column, which ate a
-    // quarter of the screen and had to scroll - and a scrolled-away button sat outside every
-    // registered blocker rect, so clicking it placed an object in the world instead.
     private const float ToolIconSize = 72f;
     private const int DockPadding = 8;
 
-    // The plate is exactly its icons plus the padding: nothing is centred inside dead space, and
-    // the bar stops claiming screen (and blocker rect - a click on empty dock still counts as UI)
-    // that no button occupies. A fixed 1260x112 had to be guessed wide enough for whatever tool
-    // came next, so it was always too wide for the tools that existed.
     private const float DockHeight = ToolIconSize + DockPadding * 2;
 
     // Resolved once the fitter has run; the status bar sits on top of the dock and matches it.
@@ -794,16 +706,8 @@ public class RuntimeMapEditor : MonoBehaviour
                 () => SelectTool(captured), out var ring, ToolIconSize, hoverText: tool.Name);
             _toolRings[tool.Name] = ring;
 
-            // Everything up to and including the door tool builds the room itself; what follows
-            // is mood, housekeeping and blueprints. The gap is the whole grouping story - a
-            // Photoshop-style flyout would have hidden tools behind a press-and-hold.
             if (tool is DoorTool) CreateDockSeparator(dock);
 
-            // Save sits immediately after Load Map: they are the two halves of the same job, and
-            // one of them being a tool and the other an action off at the end of the dock made
-            // that pair harder to find than it should be. It is an icon like the tools; Rename
-            // went with the naming dialog (Save asks for the name now), and Close and Reset are
-            // keys the shortcut list already spells out.
             if (tool is LoadTool)
                 _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
                     out _, ToolIconSize, hoverText: "Save map");
@@ -838,9 +742,6 @@ public class RuntimeMapEditor : MonoBehaviour
     private const float OptionsHeaderHeight = 34f;
     private const float OptionsMaxHeight = 820f;
 
-    // Narrower than before (the settings-menu row clones it had to accommodate are gone) and it
-    // now sizes itself to the tool showing in it, so a two-button tool no longer reserves the
-    // same 620px of screen as the lighting editor.
     private void CreateOptionsPanel()
     {
         _toolOptionsPanel = CreatePanel("ToolOptions", new Vector2(1f, 1f),
@@ -893,12 +794,6 @@ public class RuntimeMapEditor : MonoBehaviour
         if (label != null) label.text = _optionsCollapsed ? "+" : "–";
     }
 
-    // The panel follows the active tool's content height rather than sitting at a fixed size.
-    // ContentSizeFitter has already resolved that height by LateUpdate.
-    // Nested ContentSizeFitters (the grid inside the tool's column) do not settle on their own
-    // when children are destroyed: the column kept its old height until something else - a
-    // scroll - forced a rebuild, so swapping a 150-entry group for a 12-entry one left the
-    // panel oversized. Tools that rebuild their contents ask for a rebuild here instead.
     private int _optionsRebuildFrames;
 
     public void RequestOptionsResize() => _optionsRebuildFrames = 3;
@@ -1012,9 +907,6 @@ public class RuntimeMapEditor : MonoBehaviour
         RegisterUiBlocker(_shortcutPanel);
     }
 
-    // Collapsed, the panel is just its own title bar in the bottom-left corner - the same deal
-    // the tool options panel offers on the right. The hints are a reference, not a control
-    // surface, and a tool with several of its own shortcuts stacked them halfway up the screen.
     private bool _shortcutsCollapsed;
 
     private void ToggleShortcutsCollapsed()
@@ -1047,12 +939,6 @@ public class RuntimeMapEditor : MonoBehaviour
             _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
         }
 
-        // The bar goes at the BOTTOM of the stack, unlike the options panel's header: this panel
-        // is pivoted to the bottom-left corner and grows upward, so the last row is the one that
-        // holds still. A title bar on top would slide up and down the screen with the hint count
-        // and the collapse toggle would never be twice in the same place.
-        // Rebuilt with the rows rather than kept aside, because the whole stack is torn down on
-        // every tool change.
         _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   –",
             ToggleShortcutsCollapsed, 30f);
     }
@@ -1080,15 +966,6 @@ public class RuntimeMapEditor : MonoBehaviour
         return rt;
     }
 
-    // Inline text entry driven straight off Input.inputString rather than a TMP_InputField: text
-    // fields route through the EventSystem, which this game hands to Rewired's pointer module,
-    // whereas raw keyboard input is known to work here. Generic so any tool can prompt for text.
-    // Text entry is modal, and it has to be: MMButton derives from Unity's Button, so it handles
-    // ISubmitHandler, and this game's input module raises submit from the interact key. Typing an
-    // "e" into a map name therefore re-pressed whatever button was focused - usually Rename, the
-    // one that opened the prompt. Clearing the selection was not enough, because focus comes back.
-    // Suspending the whole EventSystem for the duration is what actually holds: the raw
-    // Input.inputString read below does not need it, and Enter or Escape always gets out.
     private bool _eventSystemSuspended;
 
     private void SuspendEventSystem()
@@ -1117,15 +994,6 @@ public class RuntimeMapEditor : MonoBehaviour
         _promptDone = onDone;
         UpdateNameLabel();
         SetStatus($"Type a {label} - Enter confirms, Escape cancels.");
-    }
-
-    private void BeginRename()
-    {
-        PromptText("map name", Map.MapName, value =>
-        {
-            Map.MapName = string.IsNullOrWhiteSpace(value) ? "UntitledMap" : value.Trim();
-            SetStatus("Name: " + Map.MapName);
-        });
     }
 
     private void HandleRenameInput()
@@ -1174,15 +1042,8 @@ public class RuntimeMapEditor : MonoBehaviour
             : TitleText;
     }
 
-    // Save asks for the name through the game's own naming dialog, which is where the overwrite
-    // warning lives now - it can say what will be replaced while the name is still being typed,
-    // instead of the old press-Save-twice guard that only spoke after the fact.
     private void SaveMap()
     {
-        // Four-door rule: a level drops this room into whatever slot the generated walk hands
-        // it, and the walk decides which sides need a door. A blueprint missing one has no door
-        // where the level needs it, and the run dead-ends - so it cannot be saved incomplete.
-        // Checked before the dialog opens: no point naming a map that cannot be written.
         var doorTool = GetTool<DoorTool>();
         var missing = doorTool?.MissingDirections();
         if (missing != null && missing.Count > 0)
@@ -1194,15 +1055,6 @@ public class RuntimeMapEditor : MonoBehaviour
             return;
         }
 
-        // The editor closes for the duration rather than sitting behind the dialog.
-        //
-        // Every previous attempt to run the two side by side lost to something: the editor canvas
-        // sorted above the dialog, then its raycaster won the clicks, then the editor's pause
-        // froze the dialog's Animator half-open so it could never finish showing - and a menu
-        // that never finishes showing never hands its input field the keyboard. Standing the
-        // editor down entirely leaves the dialog in an ordinary game, which is the one situation
-        // it is built for. The view and the active tool are restored on the way back, so the only
-        // visible difference is the chrome disappearing while the dialog is up.
         var previousTool = _activeTool;
         var previousCamera = _cameraAnchor != null ? _cameraAnchor.transform.position : (Vector3?)null;
         var previousZoom = _zoom;
@@ -1233,10 +1085,6 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private void WriteMap() => StartCoroutine(WriteMapRoutine());
 
-    // Saving used to happen entirely inside one frame: sweep the room, resolve every object to a
-    // prefab key, serialise, write, then screenshot and PNG-encode the whole screen. That is a
-    // very visible hitch. The work is the same, but it is now spread over several frames with
-    // the file writes handed to a thread, so no single frame carries all of it.
     private IEnumerator WriteMapRoutine()
     {
         SetStatus("Saving...");
@@ -1268,9 +1116,6 @@ public class RuntimeMapEditor : MonoBehaviour
         yield return CaptureSnapshot();
     }
 
-    // Captures the room with every piece of editor chrome hidden and writes it next to the
-    // json as <mapname>.png - the stable pairing a future preview UI reads. Exiting the active
-    // tool is what clears its handles, gizmos and cursor previews from the world.
     private IEnumerator CaptureSnapshot()
     {
         var tool = _activeTool;
@@ -1285,9 +1130,6 @@ public class RuntimeMapEditor : MonoBehaviour
         {
             var full = ScreenCapture.CaptureScreenshotAsTexture();
 
-            // Downscaled before encoding. A full-resolution PNG of the whole screen is several
-            // megabytes and the encode alone is most of the old hitch - and the preview is drawn
-            // at 168px in the load grid, so none of that resolution was ever visible.
             var scaled = Downscale(full, SnapshotWidth);
             Destroy(full);
 
@@ -1358,10 +1200,6 @@ public class RuntimeMapEditor : MonoBehaviour
         }
     }
 
-    // Re-enters the dungeon, regenerating the room from scratch. This is the undo story, and it
-    // discards unsaved edits, so it takes two presses to fire. The arming lapses after a few
-    // seconds so a stray first click cannot leave it primed indefinitely.
-    // F5 while the editor is open. Outside it, F5 still means "enter the test dungeon".
     public void RequestResetRoom()
     {
         if (_editing && !ModalOpen && !_renaming) ResetRoom();
@@ -1392,13 +1230,6 @@ public class RuntimeMapEditor : MonoBehaviour
     private void DisarmReset() => _resetArmed = false;
 }
 
-// The world's interaction handling has no business running while the editor owns the screen.
-//
-// Interactor.Update reads the interact key every frame, so typing a map name fired the game's
-// "E" action - opening a prompt over the editor and swallowing the keystroke before the rename
-// buffer ever saw it. Nothing in the room is meant to be interactive during editing anyway, and
-// the same suppression keeps its build-placement branch (which dereferences a PlacementRegion
-// that dungeons do not have) from running at all.
 [HarmonyLib.HarmonyPatch(typeof(Interactor), "Update")]
 internal static class Interactor_Update_Patch
 {

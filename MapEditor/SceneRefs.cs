@@ -5,17 +5,12 @@ using UnityEngine.U2D;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Null-guarded access to the scene objects the editor drives. Every member here can legitimately
-// be null (wrong scene, room not generated yet), so callers must always check.
 public static class SceneRefs
 {
     public static GenerateRoom Room => GenerateRoom.Instance;
 
     public static bool HasRoom => GenerateRoom.Instance != null;
 
-    // Parent for everything the editor creates. GenerateRoom exposes this transform specifically
-    // for content that is not part of the procedural generation, so our objects survive the
-    // generator's own cleanup passes.
     public static Transform ContentRoot
     {
         get
@@ -45,20 +40,8 @@ public static class SceneRefs
 
     public static Material ShapeMaterial => Decorations != null ? Decorations.SpriteShapeMaterial : null;
 
-    // The room's floor collision. Island polygons are parented here with usedByComposite set,
-    // and the composite merges them in Outlines mode so only the union's boundary is solid --
-    // the player walks inside the island.
     public static CompositeCollider2D RoomComposite => Room != null ? Room.RoomTransform : null;
 
-    // Rebuilds the merged floor outline. Must be called after adding or changing any collider
-    // that participates in the composite.
-    //
-    // Defers to the generator's own SetColliderAndUpdatePathfinding, which is what the game runs
-    // to finalise a room. Calling GenerateGeometry directly was not equivalent: it left the
-    // geometry type at whatever the last generation step set (Polygons is used as an intermediate
-    // during generation, and would make shapes solid again), skipped the Island layer assignment,
-    // and rescanned A* without resizing the grid graph, so shapes extending past the original
-    // room bounds got no navigation coverage.
     public static void RegenerateRoomCollision()
     {
         var room = Room;
@@ -82,11 +65,6 @@ public static class SceneRefs
         }
     }
 
-    // An island collider that is enabled but not flagged usedByComposite stays a solid standalone
-    // body rather than contributing to the merged outline, so the player is blocked by its filled
-    // area instead of walking on it. That is what traps the player where two original islands
-    // overlap. GenerateRoom.CompositeColliders does the same thing but dereferences
-    // piece.Collider without a null check, so this does it defensively.
     private static void EnsurePiecesComposited(GenerateRoom room)
     {
         if (room.Pieces == null) return;

@@ -10,18 +10,6 @@ using UnityEngine.U2D;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Captures every prop currently in the room as prefab-path + transform entries, so a blueprint
-// can recreate the whole room from nothing. Resolution is tiered:
-//
-//   1. ObjectPool bookkeeping: spawnedObjects maps a live instance back to its prefab, and the
-//      pool's path dictionaries map that prefab back to the string it was spawned from. This
-//      covers all pooled decorations and critters exactly.
-//   2. Name matching against the Addressables catalog for anything instantiated directly
-//      (island pieces, encounters, secondary sprite shapes, ctrl-drag clones). Only names
-//      ending in "(Clone)" are considered - prefab-authored children never carry that suffix,
-//      so this cleanly separates runtime additions from content a recorded prefab already
-//      brings back by itself.
-//   3. Anything else is logged and skipped.
 public static class RoomSnapshot
 {
     // filename-without-extension -> addressable key; null value marks an ambiguous name.
@@ -66,10 +54,6 @@ public static class RoomSnapshot
                     });
                     resolved++;
 
-                    // The island's runtime children (its textured floor art and encounter) are
-                    // their own spawns - the bare prefab is only the flat green placeholder fill,
-                    // so losing the art child is very visible. They record which island entry
-                    // owns them so the loader can re-parent them correctly.
                     Sweep(child, parentTag, runtimeOnly: true, parentIslandIndex: map.Props.Count - 1);
                 }
                 else if (TryResolve(child.gameObject, prefabPaths, out var key, out var isAddressable))
@@ -87,16 +71,10 @@ public static class RoomSnapshot
                     });
                     resolved++;
 
-                    // Runtime additions nested one level down (an island piece's encounter and
-                    // secondary sprite shape) are their own spawns and need their own entries -
-                    // re-instantiating the island prefab alone would not bring them back.
                     Sweep(child, parentTag, runtimeOnly: true, parentIslandIndex);
                 }
                 else if (!runtimeOnly && !child.name.EndsWith("(Clone)"))
                 {
-                    // Authored into the room prefab, so no prefab key exists - but the room
-                    // shell regenerates it. Recorded so the loader preserves it through the
-                    // clear; a deleted one is simply absent and gets cleared like the rest.
                     map.KeptAuthored.Add(new MapKeptData
                     {
                         Parent = parentTag,
@@ -185,9 +163,6 @@ public static class RoomSnapshot
         // Doors, player, camera, room-lock logic and the editor's own objects.
         if (MapEditorProtection.IsProtected(go)) return true;
 
-        // The room backdrop is derived state: the loader wipes every copy and recreates exactly
-        // one, so saving it would only ever duplicate it (vanilla also stacks a new copy per
-        // room re-entry, which is why it kept appearing as an unresolvable skip).
         if (go.name.StartsWith("Room Back Sprite")) return true;
 
         // Nested sweeps only pick up runtime spawns; prefab-authored children come back with
@@ -223,11 +198,6 @@ public static class RoomSnapshot
         return false;
     }
 
-    // Island pieces are Object.Instantiate'd from GenerateRoom's own prefab lists, never pooled
-    // and rarely unique in the addressables catalog - resolving them against those lists is what
-    // guarantees the floor terrain round-trips. A missing island is not cosmetic: the composite
-    // union loses the region connecting the doorway to the authored floor and the player gets
-    // walled in at the entrance.
     private static bool TryResolveIsland(GameObject go, GenerateRoom room, out string key)
     {
         key = null;
@@ -252,11 +222,6 @@ public static class RoomSnapshot
     // name -> island prefab, across every source. Cached because tier 2 blocks on a load.
     private static readonly Dictionary<string, GameObject> _islandPrefabs = [];
 
-    // Islands are the room's floor: a missing one leaves a hole in the collision union and the
-    // player walled off from part of the map. Resolution cannot stop at the current room's
-    // lists, because each room prefab carries its OWN addressable island set (Addr_StartPieces
-    // and friends) - an entrance room's islands simply are not in a normal room's lists, so a
-    // blueprint authored in one room type would lose its terrain in the other.
     public static GameObject FindIslandPrefabObject(GenerateRoom room, string prefabName)
     {
         if (string.IsNullOrEmpty(prefabName)) return null;
@@ -272,10 +237,6 @@ public static class RoomSnapshot
                     if (piece != null && piece.name == prefabName) return CacheIsland(prefabName, piece.gameObject);
             }
         }
-
-        // Tier 2 (the addressables catalog, for islands this room's lists do not carry) is not
-        // reachable synchronously - blocking on Addressables mid-rebuild crashes the game - so
-        // it lives in ResolveIslandRoutine. Callers inside a coroutine should use that.
 
         // Tier 3: any island prefab still held in memory from an earlier room.
         foreach (var piece in Resources.FindObjectsOfTypeAll<IslandPiece>())
@@ -307,13 +268,6 @@ public static class RoomSnapshot
 
     private static readonly Dictionary<string, GameObject> _prefabCache = [];
 
-    // Any prefab in the addressables catalog, by filename - used to reach assets the current
-    // room does not hold, like the room prefab a blueprint was authored in.
-    //
-    // Deliberately a coroutine: the synchronous WaitForCompletion this used to call blocks the
-    // main thread until Addressables settles, and doing that from inside the room rebuild -
-    // with the pool, the scene and other loads all in flight - hard-crashed the game on the
-    // third room. Polling IsDone costs a few frames behind an already-black screen.
     public static IEnumerator LoadPrefabByNameRoutine(string prefabName, System.Action<GameObject> onDone)
     {
         if (string.IsNullOrEmpty(prefabName))
@@ -452,10 +406,6 @@ public static class RoomSnapshot
         while (name.EndsWith("(Clone)"))
             name = name.Substring(0, name.Length - "(Clone)".Length).TrimEnd();
 
-        // Tier 2: the owning island's serialized art/encounter path lists. These hold the exact
-        // addressable keys InitIsland spawned the child from, so unlike the global catalog there
-        // is no name ambiguity - and the floor art child MUST resolve, or a loaded island shows
-        // only its flat green placeholder fill.
         var piece = go.GetComponentInParent<IslandPiece>();
         if (piece != null)
         {

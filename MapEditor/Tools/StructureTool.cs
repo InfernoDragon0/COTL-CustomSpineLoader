@@ -10,15 +10,6 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Places structures into the room.
-//
-// The picker is the game's real build menu, extended with a "Map Assets" tab (MapAssetsTab) so
-// non-buildable background props are reachable too.
-//
-// Placement instantiates the structure prefab directly under the room's content root rather than
-// going through StructureManager.BuildStructure: dungeon locations have no cult placement grid,
-// and a map builder wants a positioned prop, not a functioning cult building with a StructureBrain
-// and a save entry.
 public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Structures";
@@ -45,9 +36,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _editor = editor;
     }
 
-    // Build-menu structures are just one more group in the same browser as the vanilla props.
-    // They used to be a separate grid with its own undo and a button that reopened the real
-    // build menu, which showed the same icons this grid already draws.
     private const string StructureGroup = "Build Menu Structures";
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
@@ -108,10 +96,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 if (entry.Type == StructureBrain.TYPES.EDIT_BUILDINGS) continue;
                 if (!seen.Add(entry.Type)) continue;
 
-                // The icon is taken straight off the entry we are already holding. Going back
-                // through TypeAndPlacementObjects.GetByType for it is what other mods hook to
-                // lazily build menu entries, and doing that once per structure was both slow
-                // and the trigger for a stream of errors from that machinery.
                 MapEditorIcons.GetStructureIcon(entry.Type, entry.IconImage);
                 entries.Add(StructureEntry(entry.Type, entry.Type.ToString()));
             }
@@ -156,7 +140,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     private readonly List<GameObject> _placedProps = [];
 
-
     private string _propPath;
     private GameObject _propPreview;
     private string _propPreviewPath;
@@ -171,10 +154,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     private static readonly HashSet<string> ExcludedPropFolders =
         ["Enemies", "UI", "Fonts", "Audio", "Materials", "Shaders", "Player", "Followers"];
 
-    // Every prop prefab in the catalog, grouped by folder - the same sweep the enemy tool does,
-    // so DLC and other dungeons' decorations are reachable and not just the biome the editor
-    // happens to be standing in. The current biome's own decoration set is listed first, since
-    // those are the pieces that match this room's art.
     private static SortedDictionary<string, List<string>> PropGroups()
     {
         if (_propGroups != null) return _propGroups;
@@ -286,9 +265,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             });
         }
 
-        // Built a few cells per frame, and each icon - the prefab's own first sprite, since props
-        // carry no authored icon - is loaded in the background after that. A group of several
-        // hundred props was otherwise a full-second stall on the click that opened it.
         _grid.Populate(_editor, entries, id =>
             MapEditorIcons.GetPropIcon(_editor, id, sprite => _grid?.SetCellIcon(id, sprite)));
     }
@@ -492,18 +468,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         Place(_pending, world);
     }
 
-    // Ghost of the chosen structure following the cursor.
-    //
-    // Built from the structure's OWN prefab - the same asset placement uses - exactly as the
-    // prop groups build theirs. It used to come from TypeAndPlacementObject.PlacementObject,
-    // the build menu's preview wrapper, which turned out to be the wrong dependency: that
-    // wrapper only draws anything once its Start() has asynchronously instantiated the real
-    // asset underneath it, and it publishes itself to the static PlacementObject.Instance while
-    // it does, which sends Interactor.Update down a build-placement branch that dungeons cannot
-    // satisfy. Loading the asset ourselves gets the same picture with neither problem.
-    //
-    // The wrapper's recipe for making that asset inert is copied though: every script off except
-    // the renderers, colliders disabled - which is what disableBehaviours: true does here.
     private void UpdatePreview()
     {
         if (_preview != null && _previewType == _pending)
@@ -570,9 +534,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             renderer.color = new Color(1f, 1f, 1f, 0.6f);
         }
 
-        // Two of these can overlap when the selection changes mid-load; only the one still
-        // matching may install its ghost, and anything already installed is destroyed rather
-        // than orphaned in the room.
         if (_previewType != type)
         {
             Object.Destroy(ghost);
@@ -599,26 +560,17 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     private static string ResolvePrefabPath(StructureBrain.TYPES type, bool isCustom)
     {
-        // Custom structures expose their synthetic addressable key, which COTL_API's
-        // AddressablesImpl.InstantiateAsync patch intercepts and re-skins. It is already a
-        // complete key and must not be rewritten.
         if (isCustom && CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom))
             return custom.PrefabPath;
 
         var data = StructuresData.GetInfoByType(type, 0);
         if (data == null || string.IsNullOrEmpty(data.PrefabPath)) return null;
 
-        // Vanilla PrefabPath is stored as a bare relative name, not an addressable key. The game
-        // expands it the same way in LocationManager.InstantiateStructureAsync; skipping this is
-        // why placing vanilla structures failed with an invalid-key error.
         return data.PrefabPath.Contains("Assets")
             ? data.PrefabPath
             : "Assets/" + data.PrefabPath + ".prefab";
     }
 
-    // Shared by direct placement and the blueprint loader. Self-registers into _placed so the
-    // next save round-trips. deferNav skips the per-placement A* rescan; the loader does one
-    // batch rebuild at the end instead.
     public IEnumerator PlaceAt(StructureBrain.TYPES type, bool isCustom, Vector3 position,
         float rotation, bool flipX, bool deferNav)
     {

@@ -9,17 +9,6 @@ using UnityEngine.U2D;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Rebuilds a room from a saved CTNodeBlueprint.
-//
-// Sequence: capture (templates/profiles that clearing would destroy) -> clear everything ->
-// shapes -> props -> structures -> doors -> enemies -> podiums -> one batched collision and
-// pathfinding rebuild -> close the editor and walk the player in through the entrance door,
-// mirroring the game's own first-arrival routine so they are never clipped into terrain.
-//
-// Everything up to the walk-in runs with the editor open at timeScale 0 (all of it is machinery
-// the tools already run under pause). The walk-in needs real time and a fresh A* graph, so the
-// editor is closed first. Every phase logs-and-continues per item; one bad entry never aborts
-// the load.
 public class BlueprintLoader
 {
     private readonly RuntimeMapEditor _editor;
@@ -74,9 +63,6 @@ public class BlueprintLoader
         shapeTool?.PrepareForLoad();
         podiumTool?.AcquireTemplate();
 
-        // ---- Phase 1: clear ----------------------------------------------------------------
-        // Room-prefab-authored objects the blueprint wants kept (no prefab key exists to respawn
-        // them) are parked under the protected editor transform so the clear passes miss them.
         var keptObjects = ParkKeptAuthored(bp, room);
         ParkAuthoredLeftovers(room);
 
@@ -138,11 +124,6 @@ public class BlueprintLoader
             }
         }
 
-        // ---- Phase 5: doors ----------------------------------------------------------------
-        // Full reconciliation: the blueprint is the authority on which doors this room has.
-        // Saved directions are repositioned (spawned first if the generation did not roll them),
-        // and generated doors the blueprint does not list are hidden along with their floor
-        // patch. Collision is deferred to the single Phase 8 rebuild.
         if (doorTool != null)
         {
             var wanted = new HashSet<string>();
@@ -156,11 +137,6 @@ public class BlueprintLoader
                     Plugin.Log.LogWarning($"MapEditor: {d.Direction} door could not be created, skipped.");
                     continue;
                 }
-                // Move the whole door ISLAND, not just the door object. The island carries the
-                // doorway's floor, and each room prefab places its doors at its own edges - so
-                // moving the door alone left its floor out at the generated edge, disconnected
-                // from the blueprint's terrain. That is the "composite outline has 2 path(s)"
-                // warning, and walking in put the player on the stranded side of it.
                 var target = MapEditorSerialization.ToVector3(d.Position);
                 var island = door.GetComponentInParent<IslandPiece>(true);
                 if (island != null && island.transform != door.transform)
@@ -204,9 +180,6 @@ public class BlueprintLoader
                 podiumTool.SpawnPodium(MapEditorSerialization.ToVector3(p.Position), p.Type, p.ClearAllOnEquip);
         }
 
-        // ---- Phase 7b: trigger volumes -----------------------------------------------------
-        // Last of the placement phases on purpose: a trigger's actions address NPCs and objects
-        // by name, so everything they can point at is already in the room by the time they exist.
         if (triggerTool != null)
         {
             foreach (var t in bp.Triggers)
@@ -214,22 +187,13 @@ public class BlueprintLoader
                     t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl);
         }
 
-        // ---- Phase 8: one batched collision + pathfinding rebuild --------------------------
-        // The doorway pads built in phase 5 only have a mesh - and therefore a bakeable
-        // collider - at end of frame, so the union must not be rebuilt before they are in it.
         yield return null;
         doorTool?.FinalizeAllPads();
 
         yield return RebuildCollisionAndWait(room);
 
-        // A doorway can still fall short of the terrain the blueprint drew. Grow only the pads
-        // that are actually cut off, a step at a time, rather than making every pad long enough
-        // for the worst case - that is what put a walkway across the whole room.
         yield return ConnectStrandedDoors(doorTool, room);
 
-        // Doors the generated walk gave no room behind are made inert here, once the room is
-        // fully built: the blueprint always carries all four, but only some of them lead
-        // anywhere in this particular slot.
         doorTool?.SealDoorsWithoutNeighbours();
 
         // The room now holds blueprint content: stop vanilla re-entry code from re-rolling
@@ -345,9 +309,6 @@ public class BlueprintLoader
         return result;
     }
 
-    // Authored objects this blueprint does NOT keep are parked deactivated instead of being
-    // destroyed by the clear passes: no prefab key exists to ever respawn them, and a different
-    // blueprint loaded into this room later may want them back.
     private void ParkAuthoredLeftovers(GenerateRoom room)
     {
         var roots = new List<Transform>();
@@ -371,9 +332,6 @@ public class BlueprintLoader
                 var child = root.GetChild(i);
                 if (child == null || containers.Contains(child)) continue;
 
-                // Runtime spawns are the props/enemies/shapes systems' business - only objects
-                // authored into the room prefab (no "(Clone)" suffix, unknown to the pool) are
-                // unrecoverable and worth preserving.
                 if (child.name.EndsWith("(Clone)")) continue;
                 if (pool != null && pool.spawnedObjects.ContainsKey(child.gameObject)) continue;
                 if (MapEditorProtection.IsProtected(child.gameObject)) continue;
@@ -407,10 +365,6 @@ public class BlueprintLoader
         }
     }
 
-    // Kept-authored objects are children of the room prefab the blueprint was saved in, so a
-    // room generated from a different prefab simply does not have them - that is every
-    // "not present in this room" line in the log. They have no prefab key to respawn from, but
-    // their source room does: load that prefab from the catalog and copy the object out of it.
     private static IEnumerator SpawnMissingKeptAuthored(CTNodeBlueprint bp, GenerateRoom room,
         List<KeptObject> restored)
     {
@@ -467,10 +421,6 @@ public class BlueprintLoader
         Plugin.Log.LogInfo($"MapEditor: copied {copied}/{missing.Count} authored object(s) from '{bp.SourceRoom}'.");
     }
 
-    // Loose objects directly under Room Transform (the backdrop sprite, previous loads'
-    // island-parented props) are otherwise never cleared: the room-root sweep deliberately
-    // skips this subtree and the terrain pass only covers registered island pieces - so they
-    // accumulated across loads.
     private static void ClearRoomTransformStrays(GenerateRoom room)
     {
         var composite = room != null ? room.RoomTransform : null;
@@ -488,9 +438,6 @@ public class BlueprintLoader
         }
     }
 
-    // Custom enemies spawn at the scene root and blueprint doors/VFX can reparent others, so the
-    // container sweeps miss them - without this, every load stacked another wave of enemies.
-    // Team2 only: the player and any companions are Team1 (and protected regardless).
     private static void ClearEnemies()
     {
         var cleared = 0;
@@ -524,9 +471,6 @@ public class BlueprintLoader
     {
         var pending = 0;
 
-        // Prop-index -> spawned island, so an island's art/encounter children re-parent onto it.
-        // Without this they would land under RoomTransform and be mistaken for standalone shapes
-        // by the next save.
         var islandsByIndex = new Dictionary<int, Transform>();
 
         for (var index = 0; index < bp.Props.Count; index++)
@@ -543,10 +487,6 @@ public class BlueprintLoader
                 continue;
             }
 
-            // Islands respawn synchronously from GenerateRoom's own prefab lists; they carry the
-            // floor collision, so they must not depend on catalog lookups or pool state. Their
-            // recorded children (spawned right after, in saved order) hold the textured floor
-            // art - the prefab alone renders only its flat placeholder fill.
             if (prop.IsIslandRef)
             {
                 GameObject prefab = null;
@@ -562,10 +502,6 @@ public class BlueprintLoader
                 _propsSpawned++;
                 var island = Object.Instantiate(prefab, parent);
                 ApplyPropTransform(island, prop, room);
-                // Vanilla's InitIsland hides the prefab's authored placeholder sprites (the flat
-                // green "Sprite + Collider" fill) before spawning the textured art. We spawn the
-                // art ourselves from the saved child props, so hide the placeholders here - before
-                // any children arrive, so their renderers are untouched.
                 island.GetComponent<IslandPiece>()?.HideSprites();
                 islandsByIndex[index] = island.transform;
                 continue;
@@ -637,9 +573,6 @@ public class BlueprintLoader
 
     private static IEnumerator RebuildCollisionAndWait(GenerateRoom room)
     {
-        // GeneratedPathing is still true from the room's original generation; without resetting
-        // it first, waiting on it would pass instantly and race the grid-resize coroutine,
-        // leaving the walk-in to path on a stale graph.
         room.GeneratedPathing = false;
         SceneRefs.RegenerateRoomCollision();
 
@@ -673,12 +606,6 @@ public class BlueprintLoader
         }
     }
 
-    // In Outlines mode the composite turns its members into a single walkable boundary. A
-    // collider sitting under it that is NOT flagged usedByComposite is not part of that union -
-    // it stays a filled, solid body, so the player is blocked by the very floor they should be
-    // standing on. That is invisible in-game and looks like "the ground collision is wrong"
-    // rather than like a missing flag, so it is repaired here and anything unrepairable is
-    // named outright.
     private static void AuditRoomColliders(CompositeCollider2D composite)
     {
         var repaired = 0;
@@ -694,9 +621,6 @@ public class BlueprintLoader
                           collider.GetComponentInParent<IslandPiece>() != null;
             if (isFloor)
             {
-                // Edge colliders cannot be composited at all ("not capable of being
-                // composited"), so flagging one only logs an error and leaves it solid.
-                // Disabling it is the repair: the shape's art stays, its stray wall does not.
                 if (collider is EdgeCollider2D)
                 {
                     collider.enabled = false;
@@ -729,9 +653,6 @@ public class BlueprintLoader
                                   "outline (these will block the player): " + string.Join("; ", strays));
     }
 
-    // Grows the pad of any doorway that cannot reach the room's floor, rechecking after each
-    // step, until every door connects or the pads stop growing. Only the doors that need it
-    // change, so a room whose terrain already meets its doors keeps short doorway aprons.
     private IEnumerator ConnectStrandedDoors(DoorTool doorTool, GenerateRoom room)
     {
         if (doorTool == null || AstarPath.active == null) yield break;
@@ -788,9 +709,6 @@ public class BlueprintLoader
         return result;
     }
 
-    // Which door is on the wrong side of a gap. The path count alone says a room is split but
-    // not where, and a door whose floor is cut off from the room cannot be walked through even
-    // though it is present and unlocked.
     private static void ReportStrandedDoors(CompositeCollider2D composite)
     {
         if (AstarPath.active == null) return;
@@ -812,9 +730,6 @@ public class BlueprintLoader
         }
     }
 
-    // Mirrors BiomeGenerator.PlayersFirstEnterRoomDelayedGotoAndStop: teleport onto the entrance
-    // door's PlayerPosition marker, then GoToAndStop a few units into the room with the collider
-    // off. EndGoToAndStop restores State.Idle and the collider, releasing input.
     private IEnumerator PlayerEntryRoutine(GenerateRoom room, CTNodeBlueprint bp, DoorTool doorTool,
         string preferredEntryDirection)
     {
@@ -838,10 +753,6 @@ public class BlueprintLoader
         var dir = door.GetDoorDirection();
         var doorway = door.PlayerPosition.position;
 
-        // The original entrance turns into a SOLID wall once the run's first walk-in finishes
-        // (PlayerFinishedEnteringDoor), so teleporting into the door frame strands the player on
-        // the unwalkable side of it - that was the "blocked by the door" entry. Both the start
-        // and the target snap to the walkable graph just inside the doorway instead.
         var start = SnapToWalkable(doorway + dir * 2f) ?? doorway;
         player.transform.position = start;
         player.state.facingAngle = Vector3.Angle(Vector3.right, dir);
@@ -850,9 +761,6 @@ public class BlueprintLoader
         // far never leaves the player wedged in terrain.
         var target = SnapToWalkable(doorway + dir * 7.3f) ?? start;
 
-        // Suppress the door's trigger while entering: touching it mid-arrival re-runs the
-        // trigger preamble (colliders off, state InActive) and, for an Entrance door in a
-        // dungeon, then does nothing - a soft-lock.
         door.Used = true;
 
         player.GoToAndStop(target, null, IdleOnEnd: true, DisableCollider: true,
@@ -887,11 +795,6 @@ public class BlueprintLoader
         if (door != null) door.Used = false;
     }
 
-    // Everything vanilla does at the end of its own room arrival
-    // (BiomeGenerator.PlayersFirstEnterRoomDelayedGotoAndStop's GoToAndStop callback). Our
-    // walk-in replaces vanilla's, so its callback never fires - which left the entry cinematic
-    // running: letterbox bars stuck on screen, camera in conversation mode, allies frozen and
-    // every input except movement swallowed.
     private static IEnumerator FinishArrival()
     {
         // Vanilla routes this through DelayEndConversation's 0.3s wait.
@@ -942,10 +845,6 @@ public class BlueprintLoader
         return new Vector3(p.x, p.y, 0f);
     }
 
-    // The current room's entrance door may be a direction the blueprint was never authored
-    // around (each generation rolls its own layout), which put the player outside the loaded
-    // map. Doors the blueprint actually repositioned are authoritative: prefer the entrance
-    // doorway when the blueprint knows it, then any blueprint-listed door, then whatever exists.
     private static Door PickEntryDoor(CTNodeBlueprint bp, DoorTool doorTool, string preferredDirection)
     {
         // Level playback enters through the side opposite the door just used, when it exists.

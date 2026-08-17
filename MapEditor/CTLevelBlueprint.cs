@@ -5,13 +5,6 @@ using Newtonsoft.Json;
 
 namespace CustomSpineLoader.MapEditor;
 
-// One level of the custom dungeon: an ordered chain of rooms, each generated from one of the
-// CTNodeBlueprints in its pool. Tier 2 of the hierarchy (CTMapSelector -> CTLevelBlueprint ->
-// CTNodeBlueprint). Saved as <PluginPath>/CustomLevelBlueprints/<name>.json.
-//
-// Invariant the tool enforces: Rooms[0] is always the Entrance and Rooms[^1] always the Exit;
-// added rooms go between them. Traversal (doors actually generating the next room from these
-// pools) is the next phase - this class is the data it will consume.
 [Serializable]
 public class CTLevelBlueprint
 {
@@ -27,18 +20,11 @@ public class CTLevelBlueprint
 [Serializable]
 public class CTLevelRoom
 {
-    // A pool entry that means "leave this room exactly as the game generated it", so a level
-    // can mix authored rooms with vanilla ones. Angle brackets keep it out of reach of real
-    // map names, which Sanitize strips those characters from.
     public const string VanillaNode = "<vanilla>";
 
     public string Role = "Normal"; // Entrance | Normal | Exit
     public List<string> NodePool = []; // CTNodeBlueprint MapNames allowed here; empty = any saved node
 
-    // Consumed by traversal:
-    //   None   - walk through freely
-    //   Combat - doors lock until every spawned enemy is dead
-    //   Reward - a weapon podium roll is guaranteed in this room
     public string Modifier = "None";
 }
 

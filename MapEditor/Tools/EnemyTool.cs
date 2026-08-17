@@ -12,16 +12,6 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Spawns enemies, both vanilla and custom.
-//
-// There is no vanilla enemy factory or enum-to-prefab table: enemies are simply addressable
-// prefabs under Assets/Prefabs/Enemies/**, so the catalog is enumerated straight from the
-// Addressables locators (minus the Dead Bodies and Weapons folders, which are corpses and
-// projectiles). Custom enemies come from COTL_API's CustomEnemyManager and are keyed by their
-// InternalName, never the runtime-minted Enemy enum value.
-//
-// Placed enemies are LIVE: frozen only while the editor holds timeScale at 0, acting the moment
-// it closes. They join Health.team2, so room-lock doors may close until they are dealt with.
 public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Enemies";
@@ -34,7 +24,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     // Group name -> list of (label, addressable key). Custom enemies use a synthetic group.
     private static SortedDictionary<string, List<(string label, string key)>> _catalog;
-
 
     private string _pendingKey;
     private bool _pendingIsCustom;
@@ -155,10 +144,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return removed;
     }
 
-    // Also the loader's entry point: self-registers so load then save round-trips. withVfx runs
-    // the game's teleport-in effect (and EnemyRoundsBase registration); it is skipped for editor
-    // placement because its coroutine is frozen under timeScale 0 and would leave the enemy
-    // invisible until the editor closes.
     public IEnumerator SpawnEnemyRoutine(string key, bool isCustom, Vector3 position, bool withVfx)
     {
         if (isCustom)
@@ -245,9 +230,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     // ---- picker -----------------------------------------------------------------------------
 
-    // Only the chosen group's cells exist at a time, and their thumbnails are rendered a few
-    // frames apart afterwards - a group of 150 enemies would otherwise be 150 Spine
-    // instantiations in one frame.
     private void ShowGroup(string group)
     {
         if (_grid == null || !Catalog().TryGetValue(group, out var entries)) return;
@@ -272,9 +254,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (list.Count == 0) _editor.SetStatus("No custom enemies registered.", StatusSeverity.Warning);
     }
 
-    // Cells go in a few per frame and their thumbnails are rendered a few frames apart after
-    // that: a group of 150 enemies is 150 Spine instantiations, and doing any of it in one frame
-    // is a visible stall.
     private void Populate(IList<MapEditorGrid.Entry> entries)
     {
         EnemyThumbnails.CancelPending();
@@ -404,11 +383,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         done(handle.Status == AsyncOperationStatus.Succeeded ? handle.Result : null);
     }
 
-    // A custom enemy's or custom NPC's skeleton override, without needing an instance to apply
-    // it to. The thumbnail renderer drives a bare skeleton straight from this rather than
-    // building the mimic prefab just to re-skin it. One lookup for both registries: their keys
-    // are distinct InternalNames, and every consumer (thumbnails, cursor ghosts) wants the same
-    // answer regardless of which kind of custom thing the key names.
     internal static bool TryGetCustomSkin(string key, out SkeletonDataAsset asset, out string skin)
     {
         asset = null;
@@ -435,9 +409,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return false;
     }
 
-    // Custom enemies and NPCs re-skin their mimic prefab at spawn; this mirrors that for ghosts
-    // and previews. SetToSetupPose + Update(0) are what actually push the new skin into the
-    // mesh - the normal skeleton update never runs while the editor holds timeScale 0.
     internal static void ApplyCustomSkin(SkeletonAnimation spine, string key)
     {
         if (spine == null) return;
@@ -471,9 +442,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (ghost == null) yield break;
         ghost.transform.position = _editor.MouseWorld();
 
-        // The controller's own Spine field is the authoritative skeleton - the mimic prefab
-        // carries additional SkeletonRenderers (ghost/afterimage effects) that must not render
-        // in a preview, or the base skin shows through under the override.
         var spine = MainSkeleton(ghost);
         if (spine != null)
         {
@@ -489,9 +457,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (spine.Skeleton != null) spine.Skeleton.A = 0.6f;
         }
 
-        // Two of these coroutines can overlap when the selection changes mid-load; only the one
-        // still matching the current key may install its ghost, and anything already installed
-        // must be destroyed rather than orphaned - that was the leaked preview object.
         if (_previewKey != key)
         {
             Object.Destroy(ghost);
@@ -546,11 +511,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     }
 }
 
-// Keeps a spawned enemy on the authored floor. Vanilla rooms contain enemies through a mix of
-// closed room-lock barriers and unit-position correction that custom maps do not get, so
-// knockback or wandering could carry them across the composite outline and out of bounds.
-// The walkable A* graph mirrors the built collision exactly: anything that strays more than a
-// node-and-a-half off it is snapped back to the nearest walkable point.
 public class EnemyContainment : MonoBehaviour
 {
     private const float CheckInterval = 0.5f;

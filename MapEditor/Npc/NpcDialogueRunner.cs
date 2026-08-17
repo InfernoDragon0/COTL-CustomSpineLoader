@@ -6,33 +6,12 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Npc;
 
-// Drives a custom NPC's dialogue tree through the game's own conversation system.
-//
-// One dialogue NODE = one MMConversation. That granularity is forced by the game: the choice
-// wheel only appears after a conversation's LAST line has finished typing, so a mid-tree branch
-// has to end its conversation and start the next one from the response callback. Every Play here
-// therefore passes CallOnConversationEnd: false, and the letterbox/camera/input teardown
-// (GameManager.OnConversationEnd) runs exactly once, when the chain truly ends.
-//
-// Callback rules learned from the decompiled game: ConversationEntry.Callback is a UnityEvent
-// whose runtime listeners NEVER fire (MMConversation only invokes it when its persistent count
-// is non-zero), so everything routes through ConversationObject.CallBack (an Action) and
-// Response.ActionCallBack.
 public static class NpcDialogueRunner
 {
-    // True from the first line until the chain truly ends. MMConversation.isPlaying is NOT a
-    // substitute: each dialogue node is its own conversation, so between nodes it drops to false
-    // for a frame or two - long enough for a trigger sequence waiting on it to decide the chat was
-    // over and carry on talking over itself.
     public static bool IsRunning { get; private set; }
 
     private static float _lastNodeAt;
 
-    // A chain lives across frames on the editor's coroutine host, so a room reload can kill it
-    // mid-flight and leave IsRunning stuck - which would then refuse every future dialogue.
-    // Nothing on screen and no node started for ten seconds means the chain is gone, not slow:
-    // a node the player is reading keeps MMConversation.isPlaying true the whole time, and the
-    // gap between nodes is a frame or two.
     private static bool IsStale()
     {
         if (MMConversation.isPlaying) return false;
@@ -52,9 +31,6 @@ public static class NpcDialogueRunner
         if (MMConversation.isPlaying) return;
         if (IsRunning && !IsStale()) return;
 
-        // The game rebuilds its language source during load, which wipes terms registered at
-        // plugin Awake - re-registered here whenever they are found missing, or the bubbles
-        // show raw term keys instead of the dialogue.
         npc.Dialogue.EnsureRegistered(npc);
 
         IsRunning = true;
@@ -127,9 +103,6 @@ public static class NpcDialogueRunner
         MMConversation.Play(conversation, CallOnConversationEnd: false);
     }
 
-    // A response callback fires while the previous conversation is still tearing itself down
-    // (DoClose invokes it just before isPlaying drops), so the next node cannot Play
-    // immediately - it waits a frame on the editor host, which lives in every dungeon scene.
     private static void Continue(CustomNpc npc, UnityEngine.GameObject speaker, string fromNodeId, string nextId)
     {
         if (string.IsNullOrEmpty(nextId))
@@ -174,21 +147,12 @@ public static class NpcDialogueRunner
         {
             if (line == null || string.IsNullOrEmpty(line.Term)) continue;
 
-            // Per-line animation, falling back to the NPC's talk animation. The game guards
-            // every name with FindAnimation before playing, so a typo is a static pose, not an
-            // exception.
             var animation = string.IsNullOrEmpty(line.Animation) ? npc.TalkAnimation : line.Animation;
 
             entries.Add(new ConversationEntry(speaker, line.Term, animation)
             {
                 CharacterName = npc.Dialogue.NameTerm ?? "-",
                 LoopAnimation = line.Loop,
-                // Only one-shot lines get a default queued behind them. The game queues
-                // DefaultAnimation unconditionally when it is set, and Spine starts a queued
-                // animation after ONE CYCLE of a looping predecessor - so a looping line with
-                // idle as its default played a single loop and stopped, which read as the Loop
-                // flag doing nothing. Empty means nothing is queued and the loop holds until
-                // the next line changes it.
                 DefaultAnimation = line.Loop ? "" : npc.IdleAnimation
             });
         }

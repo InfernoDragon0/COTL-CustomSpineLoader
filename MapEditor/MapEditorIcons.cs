@@ -10,20 +10,6 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Every sprite the editor chrome draws, in one place.
-//
-// Three very different sources, deliberately behind one façade:
-//
-//  - tool icons come off disk (Assets/EditorIcons/<Tool.Name>.png), with colorwheel.png as the
-//    placeholder until real art exists - dropping a correctly named PNG in that folder is the
-//    whole hand-over, no code change;
-//  - structure icons are the build menu's own icons (TypeAndPlacementObjects.GetByType), which
-//    are scene-scoped: the singleton dies with the scene, so that cache is cleared with it;
-//  - prop icons are pulled out of the prefab's first SpriteRenderer, which needs an addressable
-//    load and therefore arrives late, through a callback.
-//
-// Runtime-built textures carry HideFlags.DontUnloadUnusedAsset: the game runs
-// Resources.UnloadUnusedAssets on room changes and would otherwise blank the icons mid-session.
 public static class MapEditorIcons
 {
     private const string IconFolder = "Assets/EditorIcons";
@@ -89,14 +75,6 @@ public static class MapEditorIcons
         }
     }
 
-    // The build menu's icon for a structure type - exactly what the vanilla grid shows, so the
-    // editor's grid reads as the same catalogue.
-    //
-    // `known` is the IconImage the caller already has in hand from walking
-    // TypeAndPlacementObjects' own list. Deliberately NOT resolved through
-    // TypeAndPlacementObjects.GetByType here: other mods patch that method to lazily register
-    // build-menu entries, and a grid asking it about every structure in the game ran that
-    // registration hundreds of times per panel open.
     public static Sprite GetStructureIcon(StructureBrain.TYPES type, Sprite known = null)
     {
         if (_structureIcons.TryGetValue(type, out var cached) && cached != null) return cached;
@@ -125,9 +103,6 @@ public static class MapEditorIcons
 
     // ---- prop icons -------------------------------------------------------------------------
 
-    // Props have no authored icons; their first SpriteRenderer is the closest honest preview.
-    // The load is async and the catalogue is large, so requests are queued and drained a few at
-    // a time - a grid of 200 props must not stall the frame it opens on.
     private const int MaxConcurrent = 4;
 
     private static readonly Queue<(string path, Action<Sprite> callback)> _propQueue = new();

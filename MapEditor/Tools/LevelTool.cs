@@ -4,14 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Authors CTLevelBlueprints: the room chain a custom level generates from. Create or open a
-// level, set how many rooms it has, and pick which CTNodeBlueprints each room may generate
-// from. The first room is always the Entrance and the last always the Exit - added rooms go
-// between them, and neither end can be removed.
-//
-// Play Level runs the open level: every room slot resolves to one node blueprint from its
-// pool, the entrance room loads, and each door walks the player into the next room in the
-// chain (LevelPlayback owns that door redirection).
 public class LevelTool : IMapEditorTool
 {
     public string Name => "Level";
@@ -186,9 +178,6 @@ public class LevelTool : IMapEditorTool
         }
     }
 
-    // Resolves the whole chain, re-enters the dungeon scene fresh (same flow as Reset/F5) and
-    // loads the entrance room once the new scene has generated. Walking through doors then
-    // advances the chain until the exit room's door ends it.
     private void PlayLevel()
     {
         EnsureEndRooms(_level);

@@ -3,10 +3,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Shared rule for what must never be destroyed by the clear or delete tools.
-//
-// Doors are themselves IslandPieces and carry the RoomLockController, so destroying one
-// soft-locks the room: it can never be completed or exited.
 public static class MapEditorProtection
 {
     public static bool IsProtected(GameObject go)

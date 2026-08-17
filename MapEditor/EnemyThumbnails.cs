@@ -7,30 +7,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Icons for the enemy grid.
-//
-// The game has no 2D icons for enemies anywhere - they exist only as Spine skeletons - so the
-// thumbnails are rendered here. The game itself does this two different ways, and which one is
-// right depends entirely on how many distinct skeletons are on screen:
-//
-//  - FollowerInformationBox, FollowerCommandWheelPortrait and ~40 other cards put a live
-//    SkeletonGraphic straight in the canvas. That works because every one of them shows the SAME
-//    follower skeleton and only swaps a skin, so the skeleton data and atlas are already resident
-//    and there are never more than a handful on screen.
-//
-//  - FollowersNameManager bakes instead: one reusable off-screen camera and RenderTexture, one
-//    Camera.Render() per item, ReadPixels into a shared buffer, and the result blitted into a
-//    single shared atlas texture that every nameplate then draws as a plain Sprite.
-//
-// A grid of 150+ DIFFERENT enemy skeletons is the second case, so this follows the nameplate
-// manager: the rig below is built once and reused, and the finished icons all live in a few
-// shared atlas pages, which is what keeps them to a handful of draw calls and lets them clip
-// inside a scroll view like any other sprite.
-//
-// From the SkeletonGraphic side we take the part that matters: the subject is built from the
-// prefab's skeletonDataAsset rather than by instantiating the enemy. Cloning a whole enemy - AI,
-// health, colliders, particles, child rigs - just to photograph it was by far the most expensive
-// thing this file used to do.
 public static class EnemyThumbnails
 {
     // Source resolution per icon. The grid draws them at 88px.
@@ -83,10 +59,6 @@ public static class EnemyThumbnails
     public static void ClearSceneScopedCache()
     {
         _queue.Clear();
-        // The worker coroutine died with its host, so the flag has to come back down or the
-        // next editor would queue requests that nothing picks up. The finished sprites and the
-        // rig survive: both are flagged not to unload, and rebuilding them per scene would
-        // throw away every icon the player has already waited for.
         _draining = false;
     }
 
@@ -123,12 +95,6 @@ public static class EnemyThumbnails
             Plugin.Log.LogWarning("MapEditor: enemy thumbnail callback failed: " + e.Message);
         }
     }
-
-    // ---- the rig ----------------------------------------------------------------------------
-    //
-    // Built once and kept for the process, exactly like FollowersNameManager's TMP_Render_Camera:
-    // HideAndDontSave so a scene change does not take it, and the camera disabled so it only ever
-    // renders when we ask it to.
 
     private static Camera _camera;
     private static RenderTexture _target;
@@ -250,19 +216,6 @@ public static class EnemyThumbnails
         }
     }
 
-    // ---- unlit subject ----------------------------------------------------------------------
-    //
-    // The room's lighting is not a light shining on the subject - it is a set of GLOBAL shader
-    // values (_GlobalHCol, _GlobalSCol, _GlobalExposure, the fog pair and the screen-space
-    // lighting texture) that LightingManager rewrites whenever the biome, the time of day or the
-    // editor's own lighting tool changes. Every material the game draws sprites and skeletons
-    // with reads them, so a thumbnail rendered with those materials wore whatever mood the room
-    // happened to be in, and re-rendered thumbnails did not match the ones already in the grid.
-    //
-    // The subject is therefore photographed through the plain unlit shaders instead: the atlas
-    // texture and vertex colours come across unchanged, and nothing the lighting system sets is
-    // ever sampled. The copies are per-render and destroyed with the subject - the game's own
-    // shared materials are never touched.
     private static Shader _spineUnlit;
     private static Shader _spriteUnlit;
     private static bool _shadersResolved;
@@ -319,9 +272,6 @@ public static class EnemyThumbnails
         }
     }
 
-    // A bare SkeletonAnimation driven by the prefab's own skeleton data, rather than a clone of
-    // the enemy. Falls back to the full ghost for anything that is not Spine-driven (a handful
-    // of enemies are plain sprites).
     private static GameObject BuildSubject(GameObject prefab, string key, bool isCustom)
     {
         var source = FindSourceSkeleton(prefab, key, isCustom, out var dataAsset, out var skin);
@@ -470,9 +420,6 @@ public static class EnemyThumbnails
 
     // ---- readback + atlas -------------------------------------------------------------------
 
-    // Reads what the camera drew and files it into a shared atlas page, the way the nameplate
-    // manager does: every icon on a page is one texture, so a full grid is a few draw calls
-    // instead of one per cell, and there is no per-icon Texture2D to leak.
     private static Sprite Capture(string key)
     {
         var previous = RenderTexture.active;

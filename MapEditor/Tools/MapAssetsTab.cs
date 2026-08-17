@@ -10,18 +10,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Adds a "Map Assets" tab to the game's build menu listing every structure type, including the
-// background props (TREE, BUSH, GRASS, ROCK, WEEDS, TILE_*, the DECORATION_* sets) that the
-// vanilla tabs never show because they are not player-buildable.
-//
-// Why a full listing rather than "vanilla tabs minus their contents": the vanilla categories are
-// assembled from several DataManager sources with their own unlock gating, so subtracting them
-// exactly is guesswork. Listing everything guarantees a map builder can reach every asset, and
-// the vanilla tabs still provide the curated buildable view.
-//
-// BuildMenuCategory.Populate filters on unlock state, and BuildMenuItem.Configure marks anything
-// not unlocked as non-clickable. ForceUnlockAll flips those checks for the duration of our own
-// population pass only.
 [HarmonyPatch]
 public static class MapAssetsTab
 {
@@ -48,9 +36,6 @@ public static class MapAssetsTab
         return all.OrderBy(t => t.ToString(), StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    // Clones the Aesthetic tab and its content page, repoints the clone at our catalog, and
-    // appends it to the tab navigator. Returns false if anything is missing, in which case the
-    // caller falls back to the plain vanilla menu.
     public static bool Inject(UIBuildMenuController menu)
     {
         if (menu == null || _injectionFailed) return false;
@@ -136,10 +121,6 @@ public static class MapAssetsTab
 
         var catalog = BuildCatalog();
 
-        // CheckCanAfford short-circuits on this, which keeps every entry clickable regardless of
-        // the player's resources. Restored to the PREVIOUS value, not false: the structure tool
-        // holds ForceUnlockAll for the whole picker session, and this populate pass runs inside
-        // that window.
         var previousUnlock = ForceUnlockAll;
         var previousFree = CheatConsole.BuildingsFree;
         ForceUnlockAll = true;
@@ -165,9 +146,6 @@ public static class MapAssetsTab
 
     // --- Harmony patches -------------------------------------------------------------------
 
-    // Replace the aesthetic population with ours, but only for our cloned page.
-    // Explicit empty argument list: Populate is overloaded, and the two-argument form is the one
-    // we call ourselves.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(AestheticCategory), "Populate", new Type[0])]
     private static bool AestheticCategory_Populate(AestheticCategory __instance)
@@ -221,10 +199,6 @@ public static class MapAssetsTab
         if (ForceUnlockAll) __result = false;
     }
 
-    // The per-item affordability gate on the VANILLA tabs, which populate outside our transient
-    // window. The structure tool holds ForceUnlockAll for the whole picker session, so every
-    // item stays coloured and clickable regardless of materials. Editor placement instantiates
-    // prefabs directly and never deducts, so nothing needs patching on the placement side.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(BuildMenuItem), "CheckCanAfford")]
     private static void BuildMenuItem_CheckCanAfford(ref bool __result)
@@ -232,9 +206,6 @@ public static class MapAssetsTab
         if (ForceUnlockAll) __result = true;
     }
 
-    // The menu's own Update re-shows the "edit buildings" hint every frame; edit mode is a base
-    // feature and does nothing in a dungeon, so it is hidden while the editor's picker is open.
-    // (The shortcut itself is neutralised in StructureTool.OnBuildingChosen.)
     [HarmonyPostfix]
     [HarmonyPatch(typeof(UIBuildMenuController), "Update")]
     private static void UIBuildMenuController_Update(UIBuildMenuController __instance)

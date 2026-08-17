@@ -7,12 +7,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor;
 
-// A dropdown built out of the editor's own widgets.
-//
-// The game's MMDropdown opens through UIMenuBase.ActiveMenus, a menu stack the editor is
-// deliberately outside of, so it cannot be reused. This is the same interaction: a caption row
-// that opens a floating list over everything else, with a full-screen catcher behind it so a
-// click anywhere else closes it rather than falling through into the world.
 public class MapEditorDropdown
 {
     private readonly MapEditorUI _ui;
@@ -174,10 +168,6 @@ public class MapEditorDropdown
     }
 }
 
-// A grid of square icon cells, the shape the vanilla build menu uses to show what you are about
-// to place. Icons can arrive after the cell does (prop icons load asynchronously, enemy
-// thumbnails are rendered a few frames apart), so every cell starts as a letter tile and is
-// filled in later by id.
 public class MapEditorGrid
 {
     private class Cell
@@ -238,9 +228,6 @@ public class MapEditorGrid
         _fill = null;
     }
 
-    // Builds the cells a few per frame instead of all at once. A prop group holds several
-    // hundred entries, and creating that many GameObjects in one frame is a visible stall -
-    // the same reason the enemy thumbnails are rendered progressively.
     public void Populate(MonoBehaviour host, IList<Entry> entries, Action<string> onCellAdded, int perFrame = 8)
     {
         Clear();

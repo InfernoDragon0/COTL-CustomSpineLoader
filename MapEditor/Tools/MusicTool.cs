@@ -4,9 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Picks the music for this node blueprint from every music event in the loaded FMOD banks.
-// Selecting a track plays it immediately as the preview; the choice is saved on the blueprint
-// and replayed when it loads. Empty selection keeps the vanilla biome music.
 public class MusicTool : IMapEditorTool, IMapDataContributor
 {
     public string Name => "Music";
@@ -17,7 +14,6 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
 
     private static List<string> _musicEvents;
 
-
     public MusicTool(RuntimeMapEditor editor)
     {
         _editor = editor;
@@ -25,10 +21,6 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        // Tracks have nothing to show as an icon, so this stays a list - just one that opens
-        // over the panel instead of appending several hundred buttons below it. "Vanilla" is
-        // the first entry rather than a separate Clear button: no music IS a choice of music,
-        // and the dropdown showing it removes the need for a label saying which is current.
         _dropdown = ui.CreateDropdown(panel, VanillaOption, [], (index, _) =>
         {
             if (index <= 0)

@@ -7,15 +7,6 @@ using Newtonsoft.Json.Linq;
 
 namespace CustomSpineLoader.MapEditor.Npc;
 
-// The JSON dialogue schema a custom NPC carries in its config.json, plus validation and the
-// localization plumbing that makes the text actually render.
-//
-// The game's conversation UI only draws LOCALIZED text: MMConversation.UpdateText runs every
-// line through LocalizationManager.GetTranslation, and a term that does not exist comes back
-// null - raw strings never appear. So every line, choice and character name here is registered
-// as a real I2 term at load time (AddTerm + SetTranslation on language 0), which is also the
-// game's own runtime idiom (ConversationEntry.AddTerm). English fills slot 0 and I2's fallback
-// serves it to every other language.
 [Serializable]
 public class NpcDialogue
 {
@@ -31,13 +22,6 @@ public class NpcDialogue
         return null;
     }
 
-    // Normalizes the tree so the runner never has to defend itself:
-    //  - Start must resolve (falls back to the first node);
-    //  - every Next must resolve or be null;
-    //  - a node offers 0 or exactly 2 choices - the game's DialogueWheel is a fixed two-option
-    //    serialized array, one response throws, three render as two. Offending nodes keep their
-    //    lines and lose their choices.
-    // Cycles are legal (a hub node that loops back is the normal shape).
     public bool Validate(string npcName)
     {
         if (Nodes == null || Nodes.Count == 0)
@@ -99,19 +83,10 @@ public class NpcDialogue
 
     // ---- localization ------------------------------------------------------------------------
 
-    // Registration at plugin Awake is not enough on its own: the game (re)builds its I2 language
-    // source while loading, and terms registered before that ended up displaying as their raw
-    // keys. This runs at the start of every conversation and re-registers only when the terms
-    // are actually missing from the live source, so the one UpdateDictionary rebuild it costs is
-    // paid at most once per source rebuild.
     public void EnsureRegistered(CustomNpc npc)
     {
         try
         {
-            // The translation itself is the test, not the TermData: a term can exist with its
-            // translation missing for the CURRENT language, and this game's source is configured
-            // to answer that with the term string itself (MissingTranslationAction.ShowTerm) -
-            // which is exactly the placeholder-key text on screen.
             if (!string.IsNullOrEmpty(NameTerm))
             {
                 var translation = LocalizationManager.GetTranslation(NameTerm);
@@ -126,9 +101,6 @@ public class NpcDialogue
         RegisterTerms(npc);
     }
 
-    // Registers every string as an I2 term and remembers the generated term keys on the nodes.
-    // Idempotent: AddTerm returns the existing TermData when the term already exists, so a
-    // re-register (or two NPCs with the same name) only rewrites the same translations.
     public void RegisterTerms(CustomNpc npc)
     {
         LanguageSourceData source;
@@ -174,11 +146,6 @@ public class NpcDialogue
             if (data.Languages == null || data.Languages.Length < languageCount)
                 Array.Resize(ref data.Languages, languageCount);
 
-            // EVERY language slot, not just slot 0: the source resolves by the current
-            // language's index and answers a missing translation with the raw term
-            // (MissingTranslationAction.ShowTerm) rather than falling back - filling slot 0
-            // alone is why the dialogue showed its keys. Custom NPC text has no translations,
-            // so the same string in every slot IS the correct content.
             for (var i = 0; i < data.Languages.Length; i++)
                 data.SetTranslation(i, text ?? "");
 
@@ -205,15 +172,9 @@ public class NpcDialogueNode
     // conversation.
     public string Next;
 
-    // Exactly 2 or absent (enforced by Validate). Shown after the node's LAST line has finished
-    // typing - the game renders choices only at the end of a conversation, which is why each
-    // node is its own MMConversation.
     public List<NpcDialogueChoice> Choices;
 }
 
-// One spoken line. In JSON either a bare string ("Hello.") or an object
-// ({ "Text": "Hello.", "Animation": "cheer1", "Loop": false }) - the converter below accepts
-// both, so existing configs keep working.
 [Serializable]
 [JsonConverter(typeof(NpcDialogueLineConverter))]
 public class NpcDialogueLine

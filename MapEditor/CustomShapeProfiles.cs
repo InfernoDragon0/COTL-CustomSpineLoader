@@ -8,14 +8,6 @@ using UnityEngine.U2D;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Builds SpriteShape profiles from disk: CustomShapeProfiles/<Folder>/config.json plus the PNGs
-// it references. A profile named "Dirt" becomes the runtime asset "CultTweaker_Dirt", so custom
-// names can never collide with vanilla profiles, and blueprints reference it by exactly that
-// name (MapShapeData.Profile).
-//
-// Minimal config is fill-only: {"Name":"Dirt","FillTexture":"dirt.png"} renders the interior
-// texture with no edge art. AngleRanges add edge sprites per outline angle, Corners add corner
-// sprites - both optional.
 [Serializable]
 public class ShapeProfileConfig
 {

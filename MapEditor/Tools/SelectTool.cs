@@ -5,13 +5,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Click an object to select it, then delete it individually. Ctrl-click-drag clones it.
-//
-// Picking uses physics first, then falls back to renderer bounds, because much of the room
-// dressing is purely visual and carries no collider.
-//
-// Deleting needs no bookkeeping: the blueprint is a full snapshot of what exists at save time,
-// so a deleted object is simply absent from it.
 public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 {
     public string Name => "Select";
@@ -92,10 +85,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         SyncGizmos();
     }
 
-    // Ctrl-click on an object spawns a copy under the same parent and drags it until the button
-    // is released. Doors can never be cloned: they are protected, so PickAtMouse never returns
-    // them. A cloned editor-placed structure is adopted by the structure tool so it saves with
-    // its type; anything else is picked up by the room snapshot's name-based resolution.
     private void BeginClone()
     {
         var source = PickAtMouse();
@@ -172,10 +161,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     private GameObject PickAtMouse() => PickWorldObject(_editor.MouseWorld());
 
-    // The editor's shared answer to "what is under the cursor". Public because other tools have to
-    // agree with the select tool about what an object is - the trigger tool picks a move target
-    // this way, and a second implementation there picked HP bars and invisible trigger colliders
-    // that this one has learned to skip.
     public static GameObject PickWorldObject(Vector3 world)
     {
         // Only trust a physics hit if the thing is actually drawn. The room is littered with
@@ -237,9 +222,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return false;
     }
 
-    // Many props are assembled from several sprites under a shared parent, so selecting the exact
-    // renderer that was hit grabs only one piece of the building. Walk up to the outermost parent
-    // that is still map content, stopping before the room containers so we never select the world.
     private static GameObject SelectionRoot(GameObject go)
     {
         if (go == null) return null;
@@ -368,15 +350,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         _editor.SetStatus($"{_selected.name} Z: {_selected.transform.position.z:0.###}");
     }
 
-    // Mirrors the selection horizontally by negating its X scale.
-    //
-    // Not a rotation: the view is 2.5D and the art is flat, so turning a prop about any axis
-    // either tips it over (Z) or swings it edge-on and through its own sorting plane (Y). What
-    // "face the other way" actually means here is a mirror, which is also how the game's own
-    // build placement offers it - and it is already what MapStructureData.FlipX stores.
-    //
-    // Doors are refused: their walkable pad, barrier and lock visuals are all built from the
-    // direction they face, so a mirrored door would keep its doorway pointing the old way.
     private void FlipHorizontal()
     {
         if (_selected == null)
@@ -395,9 +368,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         var scale = _selected.transform.localScale;
         _selected.transform.localScale = new Vector3(-scale.x, scale.y, scale.z);
 
-        // Structures serialise their own mirror flag rather than reading it back off the
-        // transform, so the tracked value has to follow or the flip would be lost on save.
-        // Props need nothing: the room snapshot records their scale, sign included.
         _editor.GetTool<StructureTool>()?.TryFlip(_selected);
 
         _editor.KeepCullingSuspended = true;

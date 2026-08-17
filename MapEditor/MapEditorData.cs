@@ -7,26 +7,11 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Save format for one authored room, written as <PluginPath>/CustomNodeBlueprints/<name>.json.
-//
-// Naming: the dungeon data hierarchy is CTMapSelector (run map, later) -> CTLevelBlueprint (one
-// level, later) -> CTNodeBlueprint (one room, this class). The CT prefix keeps these clear of the
-// game's own Map.NodeBlueprint ScriptableObject, which the CTMapSelector work will reference.
-//
-// A blueprint is a FULL snapshot of the room: loading always clears everything first, so a deleted
-// object is simply absent from the snapshot and vanilla scenery is captured as Props entries.
-//
-// Structures and custom enemies are keyed by NAME, never by their enum integer: vanilla ids shift
-// between game versions and COTL_API mints custom ones at runtime via GuidManager, so a saved
-// integer would resolve to the wrong thing on the next launch.
 [Serializable]
 public class CTNodeBlueprint
 {
     public string MapName = "UntitledMap";
     public string SceneName = "Dungeon1";
-    // The room prefab this blueprint was authored in ("Entrance Room Dungeon 1"). KeptAuthored
-    // objects have no prefab key of their own - they are children of this prefab - so loading
-    // into a different room type needs it to copy them across.
     public string SourceRoom = "";
     public bool UseVanillaFloorCollision = true;
     public string MusicEvent = "";   // FMOD event path (event:/music/...); empty = vanilla music
@@ -69,11 +54,6 @@ public class MapShapePointData
     public bool Corner;
 }
 
-// A room-prefab-authored object (no prefab key exists for it - e.g. the "Dungeon Specific"
-// backdrop assets) that was present at save time. It cannot be re-instantiated, but the same
-// room shell regenerates it, so the loader PRESERVES it through the clear instead: parked under
-// the editor transform while everything else is wiped, then restored at the saved transform.
-// Deleting one in the editor still round-trips - absent from this list means it gets cleared.
 [Serializable]
 public class MapKeptData
 {
@@ -139,9 +119,6 @@ public class MapEnemyData
     public SerializableVector3 Position;
 }
 
-// A non-combat character placed in the room. Same shape as MapEnemyData on purpose - NPCs are
-// addressable prefabs under Assets/Prefabs/NPC/** with no factory of their own either. IsCustom
-// is written for the mod-registered NPCs that do not exist yet; nothing sets it today.
 [Serializable]
 public class MapNpcData
 {
@@ -157,9 +134,6 @@ public class MapTriggerData
 {
     public string Id = "";
 
-    // The single free-text action name the first version of the tool stored. Superseded by
-    // Actions; kept so blueprints saved before the sequence existed still load (it is read as a
-    // one-entry sequence when Actions is empty).
     public string Action = "";
 
     public SerializableVector3 Position;   // centre
@@ -176,9 +150,6 @@ public class MapTriggerData
     public bool LockPlayerControl = true;
 }
 
-// One step of a trigger's sequence. One flat shape for every action type rather than a class per
-// type: blueprints are hand-editable JSON, and Newtonsoft type discrimination would put a
-// $type key in every entry.
 [Serializable]
 public class MapTriggerActionData
 {
@@ -201,9 +172,6 @@ public class MapTriggerActionData
     public float Duration;
 }
 
-// Lighting and fog are not objects in the room - they are a BiomeLightingSettings asset the
-// game's LightingManager applies - so a blueprint stores the values rather than a prefab.
-// Enabled = false leaves the biome's own lighting alone.
 [Serializable]
 public class MapLightingData
 {
@@ -267,9 +235,6 @@ public static class MapEditorSerialization
 
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
 
-    // Returns the path written, or null on failure.
-    // Same as Save, but the file write happens on a thread pool thread. Serialisation stays on
-    // the caller's thread because the blueprint is live scene-derived data; only the I/O moves.
     public static System.Threading.Tasks.Task<string> SaveAsync(CTNodeBlueprint map)
     {
         if (map == null) return System.Threading.Tasks.Task.FromResult<string>(null);

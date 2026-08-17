@@ -4,8 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Marks a GenerateRoom whose contents were replaced by a loaded CTNodeBlueprint, so vanilla
-// room-reactivation code stops re-rolling content on top of the blueprint's.
 public class CustomRoomMarker : MonoBehaviour { }
 
 public static class CustomRoomPatches
@@ -29,10 +27,6 @@ public static class CustomRoomPatches
         return false;
     }
 
-    // BiomeRoom.Activate runs this on every re-entry to the room: it re-rolls decorations,
-    // respawns the room sprite shape and heavy assets and destroys "Sprite shape"-named
-    // children - all on top of blueprint content the loader already placed. Everything it
-    // would create is either saved in the blueprint or deliberately absent from it.
     [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.SpawnHeavyAssets))]
     private static class GenerateRoom_SpawnHeavyAssets_Patch
     {

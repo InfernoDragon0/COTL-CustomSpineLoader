@@ -3,14 +3,6 @@ using System.Collections.Generic;
 
 namespace CustomSpineLoader.MapEditor;
 
-// One undo stack for the whole editor.
-//
-// Every tool used to carry its own "Undo Last X" button, which meant remembering which tool had
-// placed the thing you regretted before you could take it back. Tools now push an entry as they
-// place, and Ctrl+Z walks the single history regardless of which tool is active.
-//
-// Entries return false when the thing they would undo has already gone - cleared, loaded over,
-// or destroyed by another tool - and the stack simply moves on to the next one.
 public class MapEditorHistory
 {
     private class Entry

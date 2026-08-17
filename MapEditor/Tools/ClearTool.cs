@@ -4,10 +4,6 @@ using UnityEngine.U2D;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Bulk-wipes the procedurally generated room contents, in two levels.
-//
-// Biome lighting, BiomeVolume and parallax are deliberately left alone: removing them makes the
-// scene unreadable and they are not part of what "background objects" means here.
 public class ClearTool : IMapEditorTool
 {
     public string Name => "Clear";

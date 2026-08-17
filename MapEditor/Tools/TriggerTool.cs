@@ -5,23 +5,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// A box the player can step into.
-//
-// Detection runs two ways on purpose, because either alone has a hole in it:
-//
-//  - A BoxCollider2D marked isTrigger, with an OnTriggerEnter2D that only accepts a collider
-//    carrying PlayerFarming - vanilla's own rule (TriggerCallback). This never fires unless the
-//    two objects' layers are enabled against each other in the project's collision matrix, and
-//    one of them has a Rigidbody2D, neither of which a runtime-created object can guarantee.
-//  - A point-in-rectangle poll against every live player. This needs nothing from physics, and
-//    is what actually makes the volume work in a room the editor built.
-//
-// Both paths funnel into Fire(), which is edge-triggered, so a trigger never fires twice for one
-// entry no matter which path saw it first.
-//
-// Firing runs the trigger's action sequence (TriggerActions) and raises Entered for anything else
-// that wants to know. The gizmo flashes green as it fires and can be left visible during play, so
-// "did it fire?" is answerable without reading the log.
 public class CTMapTrigger : MonoBehaviour
 {
     public string Id = "";
@@ -227,9 +210,6 @@ public class CTMapTrigger : MonoBehaviour
 
         var inside = AnyPlayerInside();
 
-        // A trigger that deferred (another sequence owns the players) is NOT marked as entered,
-        // so it tries again next frame instead of being swallowed by one that happened to fire
-        // first. Fire is cheap when it defers.
         if (inside && !_inside) _inside = Fire();
         else _inside = inside;
 
@@ -243,10 +223,6 @@ public class CTMapTrigger : MonoBehaviour
 
     private bool _flashing;
 
-    // Every player is tested - both halves of a coop pair, plus Instance, which is the only one
-    // populated when coop features are off (PlayerFarming only adds itself to `players` when
-    // EnableCoopFeatures is set). The body is used where there is one: a player's pivot sits at
-    // their feet, so brushing the edge of a volume should count as stepping into it.
     private bool AnyPlayerInside()
     {
         var rect = WorldRect;
@@ -279,10 +255,6 @@ public class CTMapTrigger : MonoBehaviour
     {
         if (Once && Tripped) return true;
 
-        // Deferred rather than dropped: two sequences would each be taking and handing back
-        // control of the same players, and whichever finished first would unfreeze them in the
-        // middle of the other's scene. Walking through two volumes at once is easy to do by
-        // accident, and losing one of the scenes to it would look like a broken trigger.
         if (Actions.Count > 0 && SequencePlaying) return false;
 
         Tripped = true;
@@ -318,9 +290,6 @@ public class CTMapTrigger : MonoBehaviour
     {
         if (Actions.Count == 0 || _sequenceOwner != null) return;
 
-        // Hosted on the editor rather than on this component: deleting the volume (or clearing
-        // the room) mid-sequence would otherwise kill the coroutine with the players still
-        // frozen. The editor object lives for the whole scene.
         var host = RuntimeMapEditor.Active != null ? (MonoBehaviour)RuntimeMapEditor.Active : this;
         _sequenceOwner = this;
         host.StartCoroutine(SequenceRoutine());
@@ -328,9 +297,6 @@ public class CTMapTrigger : MonoBehaviour
 
     private System.Collections.IEnumerator SequenceRoutine()
     {
-        // The sequence copies what it needs up front, so it survives this component being
-        // destroyed - but the control lock has to be released either way, hence the finally-like
-        // clear below rather than one inside Run.
         yield return TriggerActions.Run(this);
 
         _sequenceOwner = null;
@@ -356,11 +322,6 @@ public class CTMapTrigger : MonoBehaviour
     }
 }
 
-// Places and edits the trigger volumes above.
-//
-// Click empty space to drop one, click an existing one to select it, then drag its centre to move
-// it or its corner to resize it. Volumes are only drawn while this tool is open - they are
-// authoring gizmos, not room art.
 public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Triggers";
@@ -446,17 +407,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             _editor.SetStatus($"Removed {removed} trigger(s).");
         });
 
-        // ---- action sequence ------------------------------------------------------------
-        // Everything above belongs to the volume itself; from here down belongs to what it does,
-        // and the controls that ADD an action lead the list they add to.
         ui.CreateHeader(panel, "- Actions -", 19);
 
         _addDropdown = ui.CreateDropdown(panel, "Add action", ActionLabels, OnAddActionType);
 
-        // One dropdown does every follow-up question (which trigger? which NPC? once or loop?),
-        // re-populated and re-opened per stage. It only exists between choosing an action type and
-        // answering its question, so it is hidden the rest of the time rather than sitting there
-        // captioned "Target" with nothing to offer.
         _targetDropdown = ui.CreateDropdown(panel, "Target", System.Array.Empty<string>(), OnTargetChosen);
 
         // Rows are rebuilt whenever the list changes, so they live in their own container.
@@ -593,9 +547,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             ? new Color(MapEditorUI.Accent.r, MapEditorUI.Accent.g, MapEditorUI.Accent.b, 0.45f)
             : new Color(0f, 0f, 0f, 0.55f);
 
-        // The plate itself is the select button: clicking the row marks its target in the world.
-        // Its own buttons are children, so they are drawn - and raycast - on top of it and keep
-        // their clicks.
         plate.raycastTarget = true;
         var select = row.AddComponent<Button>();
         select.targetGraphic = plate;
@@ -614,9 +565,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         labelText.margin = new Vector4(8f, 0f, 0f, 0f);
         labelText.raycastTarget = false;
 
-        // Reorder before delete, so the destructive button is the one furthest from the row's
-        // other controls. Both arrows are always present - a missing button on the first row
-        // would shift the delete button under the cursor mid-list.
         RowButton(row, "-", () => MoveAction(action, -1));
         RowButton(row, "+", () => MoveAction(action, 1));
         RowButton(row, "X", () => RemoveAction(action));
@@ -669,10 +617,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     // ---- action target highlight -------------------------------------------------------------
 
-    // Clicking a row answers "what does this step act on?" by outlining that thing in green: the
-    // object or NPC it moves to, the volume it sends the players to, or the players themselves for
-    // an animation. Reading it off the row label alone meant guessing which of five similar props
-    // was picked.
     private void SelectAction(TriggerAction action)
     {
         // A second click on the same row clears it, so the outline can be dismissed without
@@ -873,9 +817,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _stage = stage;
         _targetDropdown.SetOptions(options);
 
-        // Shown, then laid out, THEN opened: the floating list positions itself against the row's
-        // screen corners, and a row activated this frame has not been placed by its layout group
-        // yet - the list would open where the row used to be.
         UpdateActionControls();
         if (_panel != null) LayoutRebuilder.ForceRebuildLayoutImmediate(_panel);
 
@@ -944,9 +885,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         }
     }
 
-    // The world click that names a Move-to-object target. The select tool's own query, so an
-    // object that can be selected can also be targeted - the hand-rolled version this replaced
-    // disagreed with it, picking HP bars and invisible trigger colliders.
     private bool TryPickObject(Vector3 world)
     {
         var picked = SelectTool.PickWorldObject(world);

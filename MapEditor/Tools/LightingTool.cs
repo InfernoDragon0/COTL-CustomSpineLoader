@@ -3,21 +3,12 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Edits the room's lighting and fog.
-//
-// These are not objects that can be placed: the game drives them from a BiomeLightingSettings
-// asset applied by LightingManager, so there is no prefab to spawn and no list to pick from -
-// only values. The tool edits a settings instance of its own and pushes it through the game's
-// own override channel (LightingManager.overrideSettings + inOverride), the same one the
-// NightFox interaction uses to tint a scene, with per-property flags so only what the blueprint
-// sets is overridden and everything else keeps following the biome.
 public class LightingTool : IMapEditorTool, IMapDataContributor
 {
     public string Name => "Lighting";
 
     private readonly RuntimeMapEditor _editor;
 
-    private BiomeLightingSettings _settings;
     private TMP_Text _stateLabel;
     private bool _built;
 
@@ -127,11 +118,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         data.FogSpread = current.FogSpread;
     }
 
-    // What the biome looked like before this session's first override. Restoring these values
-    // is how the override is undone: clearing inOverride asks LightingManager to transition
-    // back to its time-of-day target, which is not the same thing as the biome's own dungeon
-    // lighting and left the room wearing the custom mood. Re-applying the captured values goes
-    // through the exact path that visibly works.
     private static MapLightingData _biomeSnapshot;
 
     private static void SnapshotBiome(LightingManager manager)
@@ -208,10 +194,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             manager.inOverride = true;
             // 0 = apply now rather than crossfading, so a slider reads as immediate feedback.
             manager.transitionDurationMultiplier = 0f;
-            // forceUpdate matters: TransitionLighting bails out early when it decides the
-            // current and target settings are equivalent, and our edits change the shader
-            // globals without always changing the asset it compares - which is why Reset To
-            // Biome could look like it did nothing at all.
             manager.UpdateLighting(allowInterupt: true, ignoreAccessibilitySetting: false, forceUpdate: true);
         }
         catch (System.Exception e)
@@ -222,15 +204,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     private void Apply() => Apply(Data);
 
-    // LightingManager's transition advances its timer with Time.deltaTime unless the settings
-    // involved ask for unscaled time, and it only ends once that timer passes the duration. The
-    // editor runs at timeScale 0, where deltaTime is zero: the loop spun forever with
-    // lerpActive stuck true, and UpdateLighting's first branch swallows every call made while
-    // that flag is set. One change landed at full strength and nothing moved again until the
-    // editor closed and the clock restarted.
-    //
-    // currentSettings is one half of the "use unscaled time" test, so flagging it makes the
-    // reset transition (whose target is the biome's own asset) work under pause too.
     private static void PrepareManager(LightingManager manager)
     {
         if (manager.currentSettings != null) manager.currentSettings.UnscaledTime = true;
@@ -246,9 +219,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         // restore from either.
         if (_biomeSnapshot == null && !manager.inOverride) return;
 
-        // Restore the values the biome had before the first override. Dropping inOverride on
-        // its own transitions to LightingManager's time-of-day target, which in a dungeon is
-        // not the biome's lighting - the room kept the custom mood.
         if (_biomeSnapshot != null)
         {
             var snapshot = _biomeSnapshot;
@@ -264,10 +234,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             PrepareManager(manager);
             manager.inOverride = false;
             manager.transitionDurationMultiplier = 1f;
-            // forceUpdate matters: TransitionLighting bails out early when it decides the
-            // current and target settings are equivalent, and our edits change the shader
-            // globals without always changing the asset it compares - which is why Reset To
-            // Biome could look like it did nothing at all.
             manager.UpdateLighting(allowInterupt: true, ignoreAccessibilitySetting: false, forceUpdate: true);
         }
         catch (System.Exception e)

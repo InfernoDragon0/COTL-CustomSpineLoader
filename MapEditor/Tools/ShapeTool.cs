@@ -8,13 +8,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Spawns and edits SpriteShapeControllers, and keeps their collision in sync.
-//
-// New shapes are cloned from a sprite shape that already exists in the room rather than built
-// from a bare GameObject. Building one from scratch produced untextured geometry, because a
-// working shape needs a matching profile, fill material, sorting layer and renderer settings,
-// and only the profile is reachable through GenerateRoom.DecorationList. Cloning inherits all
-// of it, so authored terrain matches the biome automatically.
 public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Shape";
@@ -42,7 +35,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private GameObject _collisionToggleRow;
 
     private const float ZStep = 0.1f;
-
 
     // Spline.InsertPointAt throws if a new point lands on an existing one.
     private const float MinPointSpacing = 0.25f;
@@ -274,9 +266,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private void SpawnShape()
     {
-        // Parented under the room's CompositeCollider2D, not the generic content root: a
-        // composite only merges colliders on itself and its own children. This is where the
-        // generator puts its island pieces too.
         var composite = SceneRefs.RoomComposite;
         var root = composite != null ? composite.transform : SceneRefs.ContentRoot;
         if (root == null)
@@ -551,16 +540,10 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         CommitShape(_active);
     }
 
-    // SpriteShapeController bakes into an EdgeCollider2D (open spline) or PolygonCollider2D
-    // (closed) but never creates one. Without the component present BakeCollider silently does
-    // nothing, which is why authored shapes had no collision.
     private static void EnsureCollider(SpriteShapeController ctrl)
     {
         if (ctrl == null) return;
 
-        // DestroyImmediate, not Destroy: normal Destroy is deferred to the end of the frame, so
-        // the collider being replaced would still be attached when the new one is added and the
-        // controller could bake into the stale one.
         if (ctrl.spline.isOpenEnded)
         {
             var poly = ctrl.gameObject.GetComponent<PolygonCollider2D>();
@@ -587,9 +570,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             _collisionOverlay = null;
         }
 
-        // A pending bake coroutine can complete after the tool has been exited or the editor
-        // closed, which would rebuild the overlay into a scene with no editor open. That is the
-        // stray collision outline that appeared after closing.
         if (!_showCollision || !_toolActive || !_editor.IsEditing) return;
 
         _collisionOverlay = new GameObject("MapEditor_CollisionOverlay");
@@ -657,9 +637,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         ctrl.RefreshSpriteShape();
     }
 
-    // Many of the room's sprite shapes are purely decorative and carry no collider at all.
-    // Collision is therefore treated as a per-shape property read off the object itself, so
-    // editing a decorative shape never silently gives it collision it never had.
     public static bool ShapeHasCollision(SpriteShapeController ctrl)
     {
         if (ctrl == null) return false;
@@ -694,9 +671,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.SetStatus("Shape collision off - visual only.");
     }
 
-    // Mesh generation is deferred to the end of the frame, so baking collision immediately after
-    // RefreshSpriteShape bakes the *previous* outline - that was the source of the wrong-looking
-    // collision. Waiting a frame makes the collider match what is on screen.
     private void CommitShape(SpriteShapeController ctrl)
     {
         if (ctrl == null) return;
@@ -728,13 +702,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (ReferenceEquals(ctrl, _active)) RefreshCollisionOverlay();
     }
 
-    // The composite merges the vanilla island pieces with authored shapes, so the walkable area
-    // is their union and can never shrink below the original room floor -- shrinking a shape
-    // inside that floor has no visible effect. Turning this off disables the island colliders so
-    // the floor is defined purely by authored shapes, which is what makes shrinking possible.
-    //
-    // The colliders are disabled rather than having usedByComposite cleared: clearing that flag
-    // would turn each island back into a solid standalone body and block the player outright.
     private void SetVanillaFloorCollision(bool enabled)
     {
         var affected = ApplyVanillaFloorFlag(enabled);
@@ -770,12 +737,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return affected;
     }
 
-    // Hands the baked collider to the room's composite instead of leaving it as a standalone
-    // body. A lone PolygonCollider2D is solid, so the player was blocked by the whole filled
-    // area and shoved out of the shape, and it fought the room's own floor wherever the two
-    // overlapped. Merged into the composite the shape becomes part of the walkable island, with
-    // only the union's outline solid - the same treatment IslandPiece colliders get in
-    // GenerateRoom.CompositeColliders.
     private static void JoinRoomComposite(SpriteShapeController ctrl)
     {
         var composite = SceneRefs.RoomComposite;
@@ -973,11 +934,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         }
     }
 
-    // The blueprint is a full snapshot, so every standalone sprite shape in the room is saved as
-    // spline data, not only the ones this tool created. Shapes under island pieces are excluded:
-    // the island roots are captured as prefab props and bring their own shapes back on load.
-    // Door pads are excluded too - they are derived from door presence and rebuilt on load, so
-    // serializing them would duplicate the floor patch.
     private List<SpriteShapeController> CollectSerializableShapes()
     {
         var list = new List<SpriteShapeController>();

@@ -53,16 +53,6 @@ public class TriggerAction
     }
 }
 
-// Runs a trigger's action list.
-//
-// Everything here drives the game's OWN player API rather than moving transforms directly:
-// GoToAndStop pathfinds and animates the walk, CustomAnimation owns the spine track and the state
-// it belongs to, and InActive is the state the game itself parks the player in during a cutscene
-// (PlayerFarming.Update returns early on it, so no input is read). Teleporting a transform and
-// poking the skeleton would have fought all three.
-//
-// Coop is a first-class case: every routine works over the whole player list, never
-// PlayerFarming.Instance alone.
 public static class TriggerActions
 {
     public static IEnumerator Run(CTMapTrigger trigger)
@@ -82,9 +72,6 @@ public static class TriggerActions
 
             if (lockControl)
             {
-                // Handed back for the action that needs it, taken again for the next one that
-                // does not - so a sequence can be "walk over, talk, walk away" without the player
-                // wandering off mid-scene or being stuck unable to answer.
                 if (action.NeedsPlayerInput && locked)
                 {
                     SetControl(true);
@@ -140,9 +127,6 @@ public static class TriggerActions
 
     // ---- players ---------------------------------------------------------------------------
 
-    // PlayerFarming.players is only filled when coop features are enabled, so solo play has an
-    // empty list and lives entirely in Instance. Both are read, and Instance is added only when
-    // the list does not already hold it.
     public static List<PlayerFarming> LivePlayers()
     {
         var result = new List<PlayerFarming>(2);
@@ -159,9 +143,6 @@ public static class TriggerActions
         return result;
     }
 
-    // InActive is the game's own cutscene parking state: PlayerFarming.Update bails on it before
-    // reading a single input. SetInactive handles the case where the player is mid-walk, which
-    // assigning the state directly would strand.
     public static void SetControl(bool enabled)
     {
         foreach (var player in LivePlayers())
@@ -189,9 +170,6 @@ public static class TriggerActions
 
     // ---- move ------------------------------------------------------------------------------
 
-    // One player lands on the spot; several settle evenly around it on a ring, so a coop pair
-    // never ends up standing inside each other (and the game's own group offset - a flat 1 unit
-    // below the leader - does not apply, which is why groupAction is left off).
     private static IEnumerator MovePlayers(Vector3 centre, float spread, bool keepLocked)
     {
         var players = LivePlayers();
@@ -211,10 +189,6 @@ public static class TriggerActions
             var player = players[i];
             if (player.GoToAndStopping) player.AbortGoTo(InvokeAbortCallback: false);
 
-            // IdleOnEnd decides the state the player is left in on arrival: Idle hands control
-            // back, InActive keeps the lock for the rest of the sequence.
-            // forcePositionOnTimeout, because a blocked path must not stall the whole sequence -
-            // the game snaps the player to the spot after maxDuration and carries on.
             player.GoToAndStop(target, null, IdleOnEnd: !keepLocked, DisableCollider: false,
                 GoToCallback: null, maxDuration: 8f, forcePositionOnTimeout: true,
                 AbortGoToCallback: null, groupAction: false);
@@ -236,9 +210,6 @@ public static class TriggerActions
 
     // ---- animation --------------------------------------------------------------------------
 
-    // Both players perform it, offset by a small random delay: two lambs hitting the same frame
-    // of the same animation looks like one puppet mirrored, and the game's own crowd scenes
-    // stagger for the same reason.
     private static IEnumerator Animate(string animation, bool loop, float duration, bool keepLocked)
     {
         if (string.IsNullOrEmpty(animation)) yield break;
@@ -261,9 +232,6 @@ public static class TriggerActions
         var length = duration > 0f ? duration : AnimationLength(players[0], animation);
         yield return new WaitForSeconds(longestDelay + length);
 
-        // A looping animation never ends on its own, and CustomAnimation leaves the player in the
-        // CustomAnimation state either way - which is itself a control lock. Cleared here unless
-        // the sequence is about to re-lock anyway.
         foreach (var player in players)
         {
             if (player == null || player.state == null) continue;
@@ -319,9 +287,6 @@ public static class TriggerActions
 
     // ---- conversation -------------------------------------------------------------------------
 
-    // Custom NPCs only: they are the ones that carry a dialogue tree this mod can start. A vanilla
-    // NPC's conversation lives inside its own Interaction and expects the player to have pressed
-    // the button themselves.
     private static IEnumerator Converse(string internalName)
     {
         if (string.IsNullOrEmpty(internalName)) yield break;
@@ -354,10 +319,6 @@ public static class TriggerActions
         while (!NpcDialogueRunner.IsRunning && !MMConversation.isPlaying && Time.unscaledTime < guard)
             yield return null;
 
-        // The runner's own flag, not MMConversation.isPlaying: a dialogue tree is a CHAIN of
-        // conversations (one per node, because the choice wheel only appears at the end of one),
-        // and isPlaying drops between them. Waiting on that alone let the sequence resume during
-        // the gap after the first node - the next action ran while the NPC was still talking.
         var quietSince = -1f;
         while (NpcDialogueRunner.IsRunning || MMConversation.isPlaying)
         {
@@ -371,9 +332,6 @@ public static class TriggerActions
             }
             else if (Time.unscaledTime - quietSince > 10f)
             {
-                // Nothing has been on screen for ten seconds while the runner still believes it
-                // is mid-chain: something ate the conversation (a room reload, a dead coroutine
-                // host). Better to finish the sequence than to hold the players frozen forever.
                 Plugin.Log.LogWarning("MapEditor: conversation appears to have been interrupted; " +
                                       "continuing the trigger sequence.");
                 break;
@@ -420,9 +378,6 @@ public static class TriggerActions
         var direct = GameObject.Find(path);
         if (direct != null) return direct;
 
-        // The room rebuilds its hierarchy on load, so an exact path is not guaranteed; the leaf
-        // name is the part an author would recognise, and matching on it is better than giving up
-        // and using a stale position.
         var slash = path.LastIndexOf('/');
         var leaf = slash >= 0 && slash < path.Length - 1 ? path.Substring(slash + 1) : path;
 

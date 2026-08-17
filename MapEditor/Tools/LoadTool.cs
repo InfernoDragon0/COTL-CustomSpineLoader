@@ -4,10 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Lists the saved blueprints under CustomNodeBlueprints/ and loads the chosen one. Each entry
-// shows the save-time snapshot (<mapname>.png) when one exists. Loading clears the whole room,
-// rebuilds it from the blueprint, closes the editor and walks the player in through the
-// entrance door; press F4 afterwards to continue editing the loaded room.
 public class LoadTool : IMapEditorTool
 {
     public string Name => "Load Map";

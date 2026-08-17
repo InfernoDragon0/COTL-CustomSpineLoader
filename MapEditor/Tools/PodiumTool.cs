@@ -5,16 +5,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Per-podium equip behavior. Vanilla treats a room's podiums as choose-one-of-N: equipping
-// from one disables all the others. With ClearAllOnEquip false only the used podium is
-// consumed.
-//
-// Three layers enforce that, because the podium prefab we place carries an empty
-// otherWeaponOptions array while the room's authored podiums carry a populated one - so the
-// podium that does the disabling is often not one we spawned:
-//   1. PodiumTool's OnInteract patch blanks the used podium's disable-others list;
-//   2. its IsPodiumInSameRoom patch makes vanilla skip any podium marked keep-usable;
-//   3. this component restores its own podium if something turned it off anyway.
 public class CTPodiumBehavior : MonoBehaviour
 {
     public bool ClearAllOnEquip = true;
@@ -62,14 +52,6 @@ public class CTPodiumBehavior : MonoBehaviour
     }
 }
 
-// Places weapon selection podiums (the pedestals guaranteed in every dungeon's first room).
-//
-// The game never instantiates these from code except via Interaction_Chest, so the prefab is
-// acquired either from a loaded chest's serialized asset reference or by cloning a scene podium
-// before anything can destroy it. Both routes keep the instance under an INACTIVE holder while
-// fields are fixed up: OnEnableInteraction destroys any podium whose RemoveIfNotFirstLayer flag
-// is still set once the run has left its first room, and the inactive window is what lets us
-// clear that flag before the check runs.
 public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Podiums";
@@ -92,9 +74,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
 
     private bool _clearAllOnEquip = true;
 
-    // The disable-others pass at the tail of OnInteract walks otherWeaponOptions; swapping in
-    // an empty array for the duration of the call is the least invasive way to skip it for
-    // keep-others podiums while leaving every other podium (and vanilla rooms) untouched.
     [HarmonyPatch(typeof(Interaction_WeaponSelectionPodium),
         nameof(Interaction_WeaponSelectionPodium.OnInteract))]
     private static class Podium_OnInteract_Patch
@@ -121,10 +100,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         }
     }
 
-    // Vanilla's disable-others loop only touches podiums this returns true for, so reporting
-    // "not in this room" for a keep-usable podium is the cleanest way to exempt it - and it
-    // works no matter which podium was equipped, including the room's authored ones whose
-    // otherWeaponOptions array is the one actually populated.
     [HarmonyPatch(typeof(Interaction_WeaponSelectionPodium), "IsPodiumInSameRoom")]
     private static class Podium_IsPodiumInSameRoom_Patch
     {
@@ -241,13 +216,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         _preview = null;
     }
 
-    // The toggle is the room's podium rule, not just a stamp on the next placement: it applies
-    // to every podium already in the room, including the ones the room generated with. Those
-    // carry no marker of their own, and they are the podiums whose otherWeaponOptions array is
-    // actually populated - so while they kept vanilla's clear-all rule, equipping from one of
-    // them wiped the placed podiums no matter what the toggle said.
-    // onlyUnmarked: fill in podiums that have no setting yet (the room's authored ones) without
-    // overwriting values a loaded blueprint brought in.
     public int ApplyBehaviorToRoom(bool clearAllOnEquip, bool onlyUnmarked = false)
     {
         var count = 0;
@@ -416,11 +384,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             });
         }
 
-        // The room's own authored podiums (the default first-room pedestals) are captured too:
-        // the snapshot deliberately never records podiums as props, so without this they were
-        // lost on load. Their live Type is the authored value. FindObjectsOfType skips inactive
-        // objects, which excludes the template clone and dormant coop twins; preview ghosts have
-        // no podium component left to find.
         foreach (var podium in Object.FindObjectsOfType<Interaction_WeaponSelectionPodium>())
         {
             if (podium == null || IsTrackedOrChild(podium.gameObject)) continue;

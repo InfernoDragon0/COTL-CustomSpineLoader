@@ -4,8 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Npc;
 
-// The per-instance side of a spawned custom NPC: carries the definition and owns the "Talk"
-// interaction. Added by CustomNpcManager.Spawn after the mimic's own brains are stripped.
 public class CustomNpcBehaviour : MonoBehaviour
 {
     public CustomNpc Definition { get; private set; }

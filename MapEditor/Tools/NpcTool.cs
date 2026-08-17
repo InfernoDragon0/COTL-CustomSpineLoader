@@ -10,25 +10,6 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Spawns NPCs - the non-combat characters.
-//
-// They come from two very different places, which is why this tool is not simply the enemy tool
-// with a different folder:
-//
-//  - Assets/Prefabs/NPC/** holds standalone NPC prefabs, and there are only FOUR of them in the
-//    shipped catalog (the ghost children and the lost lamb).
-//  - Every named character - Ratau, Midas, Plimbo, Sozo, the Fisherman, the marketplace vendors,
-//    Klunko & Bop, the Witness - is authored INSIDE a room prefab under Assets/_Rooms/ and has no
-//    prefab of its own. Nothing in the game ever spawns one from code, so there is no key to look
-//    up: the character is a child object of "Special Midas.prefab" and friends.
-//
-// So a source room is a group here too. Picking one loads that room prefab (once, cached) and
-// lists the character subtrees inside it; placing instantiates just that subtree. Those entries
-// are keyed "room:<room prefab key>|<child path>", which is what round-trips into the blueprint.
-//
-// Custom NPCs (mod-defined, CustomNpcManager) are the third source: registered at plugin load,
-// keyed by InternalName, spawned through CustomNpcManager.Spawn, and listed under their own
-// "Custom (mods)" group read live each time it is opened.
 public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "NPCs";
@@ -39,11 +20,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     private static readonly string[] RoomPrefixes = ["Assets/_Rooms/", "Assets/Prefabs/Rescue Rooms/"];
 
-    // Which room prefabs are worth opening, and which bucket each lands in. One group per source
-    // room meant a hundred-entry dropdown for a catalog where most rooms hold a single character,
-    // so the rooms are pooled: a bucket scans all of its rooms and shows every character it found
-    // in one grid. First matching bucket wins, so "Special Midas" lands under the story
-    // characters rather than with the generic special rooms.
     private static readonly (string Label, string[] Patterns)[] RoomBuckets =
     [
         ("Story Characters", [
@@ -161,9 +137,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     private int _scanToken;
 
-    // Opens each of the bucket's rooms in turn, adding what it finds to the grid as it goes, so
-    // the panel fills rather than sitting empty through the whole sweep. Rooms already in the
-    // saved index are not opened at all, which is what makes the second visit instant.
     private IEnumerator ScanRooms(NpcGroup group, int token)
     {
         group.Entries ??= [];
@@ -402,9 +375,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     // and placement, so all three agree on what a key means.
     internal static IEnumerator ResolveRoutine(string key, Action<GameObject> done)
     {
-        // Custom NPCs resolve to their mimic prefab (the custom skin is applied separately, via
-        // the generalized TryGetCustomSkin lookup). InternalNames cannot collide with addressable
-        // paths or room: keys.
         if (APIHelper.CustomNpcManager.CustomNpcList.ContainsKey(key))
         {
             var deadline = Time.unscaledTime + 10f;
@@ -532,10 +502,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     // ---- saved index ---------------------------------------------------------------------------
 
-    // Which characters each room holds, remembered between sessions. Scanning a bucket means
-    // opening dozens of room prefabs, and the answer never changes until the game updates - so
-    // it is paid once and written next to the plugin. A stale entry costs nothing worse than a
-    // refused placement, which is logged.
     private static Dictionary<string, List<(string label, string key)>> _index;
 
     private static string IndexPath => Path.Combine(Plugin.PluginPath, "EditorCache", "npc-index.json");
@@ -597,18 +563,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         }
     }
 
-    // Finds the character subtrees inside a room prefab.
-    //
-    // Searching top-down for "a node with a skeleton somewhere under it" was wrong in the worst
-    // possible way: the room root's own containers satisfy that, so the first match down a branch
-    // was often a container holding the whole room - which is why placing an NPC sometimes
-    // dropped an entire room into the scene, taking the editor's own room references with it.
-    //
-    // This goes the other way round. Every skeleton in the prefab is a candidate character, and
-    // each one is widened UPWARDS only while the enclosing node still describes that one
-    // character: the moment a parent would take in a second skeleton, or is room structure (a
-    // door, an island piece, a sprite shape), the walk stops. That yields the tightest subtree
-    // that is still the whole character rather than a bare rig.
     private const int MaxCharactersPerRoom = 40;
 
     private static List<(string label, string key)> ExtractCharacters(GameObject room, string roomKey)
@@ -636,11 +590,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return results;
     }
 
-    // The outermost ancestor that still describes one character. Stopping at the first parent
-    // holding a second skeleton was too strict: plenty of characters carry a companion rig, a
-    // VFX spine or a shadow, and their interaction components sit on the parent above both - so
-    // that rule cut the character down to a bare rig with no NPC component left on it, and the
-    // filter below then threw it away entirely. Size and room structure are the real limits.
     private static Transform CharacterRoot(Transform skeleton, Transform roomRoot)
     {
         var best = skeleton;
@@ -664,9 +613,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     private const int MaxSkeletonsPerCharacter = 4;
 
-    // Anything that makes an object part of the room rather than a resident of it. Instantiating
-    // one of these is what broke the editor: they publish themselves to the generator's static
-    // state, so a copy replaces the live room's own references.
     private static bool IsRoomStructure(GameObject go)
     {
         return go.GetComponent<MMRoomGeneration.GenerateRoom>() != null ||
@@ -713,9 +659,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return path;
     }
 
-    // Last line of defence, applied to what a key actually resolves to rather than to what the
-    // scan thought it was picking. A blueprint saved before this check can still name a whole
-    // room, and instantiating one silently wrecks the live room.
     private const int MaxCharacterTransforms = 250;
 
     private static bool IsSafeToSpawn(GameObject source, out string reason)

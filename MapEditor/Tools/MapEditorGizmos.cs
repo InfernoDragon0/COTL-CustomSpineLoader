@@ -2,8 +2,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Shared selection visuals, so every tool marks things the same way: a cyan box around the
-// object's bounds plus a yellow centre dot that doubles as the drag grip.
 public static class MapEditorGizmos
 {
     public static readonly Color BoxColour = new(0.1f, 1f, 1f, 1f);
@@ -80,19 +78,10 @@ public static class MapEditorGizmos
 
     public static void UpdateSelectionBox(GameObject box, GameObject target)
     {
-        if (box == null || target == null) return;
-
-        var line = box.GetComponent<LineRenderer>();
-        if (line == null || !TryGetBounds(target, out var bounds)) return;
+        if (box == null || target == null || !TryGetBounds(target, out var bounds)) return;
 
         // Anchored to the target's own Z so the outline is coplanar with what it is marking.
-        var z = target.transform.position.z - 0.05f;
-        line.SetPositions([
-            new Vector3(bounds.min.x, bounds.min.y, z),
-            new Vector3(bounds.max.x, bounds.min.y, z),
-            new Vector3(bounds.max.x, bounds.max.y, z),
-            new Vector3(bounds.min.x, bounds.max.y, z)
-        ]);
+        SetBox(box, bounds, target.transform.position.z - 0.05f);
     }
 
     // Where a drag grip should sit: the centre of the object's footprint.

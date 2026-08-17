@@ -9,17 +9,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Builds the editor chrome.
-//
-// Rows are built from scratch rather than cloned out of the settings menu: those rows are
-// authored 56px tall for a full-width panel and squashed their labels in the editor's narrower
-// column, and they only existed at all once the player had opened the settings menu. Everything
-// here is self-contained and available on a cold start.
-//
-// The look follows the game's own menus: rounded dark plates that brighten under the cursor, the
-// menu font at menu sizes, the settings sliders' green for anything that fills, and the cult red
-// for whatever is currently selected. Buttons still get a real MMButton for its confirm SFX,
-// with its colour transition switched off so it does not fight the hover tint.
 public class MapEditorUI
 {
     // Rows across the whole editor. One number, so panels stay predictable in height.
@@ -105,9 +94,6 @@ public class MapEditorUI
 
     private static Sprite _outline;
 
-    // The same rounded rectangle with a transparent middle, so it can be laid over a panel as a
-    // frame rather than covering it. A child Graphic always draws on top of its parent's, which
-    // is why the status bar's alert border cannot simply be a tinted plate behind it.
     public static Sprite RoundedOutline
     {
         get
@@ -224,10 +210,6 @@ public class MapEditorUI
         }
     }
 
-    // COTL_API's font helpers scrape the live menus, so they return null until those menus have
-    // been built. Fall back through the alternatives and finally scavenge the font off any text
-    // already in the scene, so editor chrome matches the game rather than dropping to the
-    // TextMeshPro default.
     private static TMP_FontAsset GameFont
     {
         get
@@ -347,16 +329,8 @@ public class MapEditorUI
         return go;
     }
 
-    // MMButton is the game's own button class, so we inherit its confirm SFX. Its colour
-    // transition is switched off: it drives the same graphic the hover tint owns, and the two
-    // fought over it.
     private static void AttachButton(GameObject go, Image graphic, Action onClick)
     {
-        // Every editor button goes through here, which is the one place that can guarantee a
-        // click on chrome is never ALSO treated as a world click. Without it, pressing a tool
-        // icon while a structure was armed dropped that structure into the world behind the
-        // dock - the button fires on pointer-up, and the tool that took over saw the same
-        // press as its own.
         void Handle()
         {
             RuntimeMapEditor.Active?.BlockWorldClicks();
@@ -410,9 +384,6 @@ public class MapEditorUI
 
     // ---- slider -----------------------------------------------------------------------------
 
-    // A real-range uGUI slider in one row: label, track, numeric readout. The old implementation
-    // cloned the settings menu's row, which only worked in whole percent and needed the settings
-    // menu to have been opened at least once. The fill is the game's own slider green.
     public GameObject CreateSlider(Transform parent, string label, float min, float max, float initial, Action<float> onChanged)
     {
         var row = new GameObject("Slider_" + label);
@@ -501,9 +472,6 @@ public class MapEditorUI
 
     // ---- toggle -----------------------------------------------------------------------------
 
-    // Deliberately not plate-shaped: a toggle that looked exactly like a button gave no hint
-    // that it had a state. The row is bare, and the state lives in an outlined box on the right
-    // that fills with the game's green when it is on.
     public GameObject CreateToggle(Transform parent, string label, bool initial, Action<bool> onChanged)
     {
         var row = new GameObject("Toggle_" + label);
@@ -561,9 +529,6 @@ public class MapEditorUI
 
     // ---- containers -------------------------------------------------------------------------
 
-    // Scrollable vertical list. Tool panels outgrew their fixed height, so the options column
-    // lives inside a ScrollRect. Returns the content transform to build into; `root` is the outer
-    // object to show and hide.
     public RectTransform CreateScrollColumn(Transform parent, string name, out GameObject root, float spacing = 5f)
     {
         var scrollGO = new GameObject(name);
@@ -692,12 +657,6 @@ public class MapEditorUI
 
     // ---- dropdown ---------------------------------------------------------------------------
 
-    // The game's own MMDropdown cannot be used here: its Open() walks UIMenuBase.ActiveMenus,
-    // a stack the editor is deliberately not part of. This is the same interaction built on the
-    // widgets we already have.
-    //
-    // Styled as a sunken field with its own arrow panel rather than as a plate, so it does not
-    // read as one more button in the column.
     public MapEditorDropdown CreateDropdown(Transform parent, string caption, IList<string> options,
         Action<int, string> onSelected)
     {

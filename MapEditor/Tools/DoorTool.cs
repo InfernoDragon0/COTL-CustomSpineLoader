@@ -9,15 +9,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Repositions, adds and removes the room's doors.
-//
-// Safe to move freely: Door.OnTriggerEnter2D switches on the Door's own ConnectionType field and
-// a private NextRoom index, and never reads world position. The door's PlayerPosition marker is a
-// child transform, so it travels with the door and the player still arrives in the right spot.
-//
-// Add/remove operates on the door ISLAND (the IslandPiece the Door lives in): the island bundles
-// the door, its lock controller AND the rectangular floor patch the player walks through, so
-// spawning one makes the doorway walkable and hiding one hides the ground shape with it.
 public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "Doors";
@@ -34,10 +25,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     // Doors the user deliberately removed; the revive safety net must not resurrect these.
     private readonly HashSet<Door> _removedByTool = [];
 
-    // Each present door owns a "pad": a small collidable floor rectangle built from the room's
-    // shape template and merged into the composite, so the doorway is walkable wherever the
-    // door sits - the vanilla walkway is part of the island's authored shape and cannot move
-    // with a dragged door. Pads are derived state: never serialized, rebuilt on load.
     public const string PadName = "CultTweaker_DoorPad";
     private readonly Dictionary<Door, SpriteShapeController> _pads = [];
     // Width stays inside the door's barrier collider: a wider pad let the player slip around
@@ -82,9 +69,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
                 : "All four doors present.");
         });
 
-        // A door is present or it is not, and the save rule wants all four - so these read as
-        // state rather than as an action. They were buttons labelled "Toggle North Door", which
-        // said nothing about whether that door existed right now.
         foreach (var direction in AllDirections)
         {
             var captured = direction;
@@ -117,10 +101,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _editor.SetStatus($"{_knownDoors.Count} door(s) in this room.");
     }
 
-    // Door.OnDisable removes the door from Door.Doors, so a door that gets deactivated for any
-    // reason vanishes from that list and can never be found again - which is why it looked
-    // permanently deleted. Keeping our own references lets us detect and undo it.
-    // Public: the blueprint loader also needs the full roster before repositioning.
     public void RememberDoors()
     {
         foreach (var door in Door.Doors)
@@ -145,13 +125,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public static readonly string[] AllDirections = ["North", "East", "South", "West"];
 
-    // Doors carry PlayerDistanceMovement, the component that slides the doorway as the player
-    // walks up to it. It caches StartPos - a WORLD position - in Start(), which runs during
-    // generation, long before a door is repositioned. Once the player came close enough, its
-    // Update lerped the door back towards that stale anchor: the door "randomly" drifting away
-    // from where the blueprint put it, taking its walkable floor with it. Vanilla hits the same
-    // problem and solves it only for the entrance door (ForceReset + disable in
-    // PlayerFinishedEnteringDoor); every door we move needs the anchor re-cached instead.
     public static void RefreshMovementAnchors(Door door)
     {
         if (door == null) return;
@@ -168,10 +141,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         }
     }
 
-    // A node blueprint is dropped into whatever slot the generated walk gives it, and the walk
-    // decides which sides connect to a neighbour - so a blueprint missing a side simply has no
-    // door there when the room needs one, and the level dead-ends. Every blueprint therefore
-    // has to carry all four; the ones the graph does not use are barriered off at load.
     public List<string> MissingDirections()
     {
         var missing = new List<string>();
@@ -246,10 +215,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     {
         if (door == null) return;
 
-        // Only door-specific islands are hidden with the door. In authored rooms (the entrance
-        // room) the door sits on the room's one big floor shape - hiding that island would
-        // remove the entire floor. The walkway nub carved into that shape cannot be deleted, so
-        // it gets a solid plug at the doorway mouth instead: nobody can walk into the dead end.
         var island = DoorIsland(door);
         if (island != null && island.IsDoor)
         {
@@ -269,9 +234,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         if (!deferCollision) SceneRefs.RegenerateRoomCollision();
     }
 
-    // Rebuilds (or moves) the walkable floor rectangle under a door. Parented under the room
-    // composite - not the door - because only colliders below the composite's transform merge
-    // into the walkable union; the pad is repositioned whenever the door moves instead.
     public void RefreshPad(Door door, bool deferCollision)
     {
         if (door == null || !door.gameObject.activeInHierarchy) return;
@@ -285,11 +247,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             pad = shapeTool?.CreateUntrackedShape(composite.transform, PadName + "_" + door.direction);
             if (pad == null) return;
 
-            // The sprite shape's own collider is an EdgeCollider2D, which a CompositeCollider2D
-            // cannot merge ("not capable of being composited"). Left like that the pad stayed a
-            // standalone solid body running its whole length - a wall across the room rather
-            // than floor. A pad is a rectangle, so it gets a box collider instead: boxes do
-            // composite, and the shape keeps drawing the ground art.
             pad.autoUpdateCollider = false;
 
             var edge = pad.GetComponent<EdgeCollider2D>();
@@ -298,10 +255,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _pads[door] = pad;
         }
 
-        // The spline is rebuilt rather than just moved: the pad has to be long enough to reach
-        // the room's floor from wherever this door ended up, and that distance is different in
-        // every room. A fixed-length strip left the doorway as its own island of walkable
-        // ground - the extra composite paths, and doors that could not be walked through.
         var length = PadLengthFor(door);
         BuildPadSpline(pad, door, length);
         PositionPad(pad, door, length);
@@ -384,9 +337,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     private IEnumerator FinalizePad(SpriteShapeController pad, bool deferCollision)
     {
-        // Only the art needs the frame: the pad's collision is the box built in RefreshPad,
-        // which is ready immediately. Baking the sprite shape's own collider here is what put
-        // an uncompositable EdgeCollider2D back on the pad.
         yield return null;
         if (pad == null) yield break;
 
@@ -417,9 +367,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         if (pad != null) Object.DestroyImmediate(pad.gameObject);
     }
 
-    // A standalone solid collider across the doorway mouth. Deliberately NOT part of the
-    // composite: a solid body inside the walkable union blocks movement, which is exactly what
-    // a bricked-up doorway should do. Obstacles layer so pathfinding treats it as a wall too.
     private void CreatePlug(Door door)
     {
         if (door == null || _plugs.ContainsKey(door)) return;
@@ -508,9 +455,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         // entry for this direction, which does not exist for a door the graph never planned.
         door.ConnectionType = GenerateRoom.ConnectionTypes.True;
 
-        // A door with no neighbor room in the current graph must not be walkable through -
-        // BiomeGenerator.ChangeRoom toward a missing room breaks. The barrier keeps it visual
-        // until the level-blueprint tier owns traversal.
         if (!HasGraphNeighbor(direction) && door.RoomLockController != null)
         {
             try
@@ -548,14 +492,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         };
     }
 
-    // Every blueprint carries all four doors, but the generated walk only connects some of them.
-    // Raising the barrier hides a dead end visually, yet the door's trigger keeps firing and
-    // sends the player to a room that does not exist - the error on walking into a door the
-    // room has no neighbour for. ConnectionTypes.False is vanilla's own inert setting:
-    // Door.OnTriggerEnter2D returns immediately on it, so the doorway simply does nothing.
-    //
-    // Only True/False doors are managed. Entrance, Exit and NextLayer doors mean something to
-    // the dungeon's own flow (leaving the level, descending a layer) and are left alone.
     public int SealDoorsWithoutNeighbours()
     {
         // Before the biome knows which room the player is in, "no neighbour" is meaningless and
@@ -751,10 +687,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         SyncGizmos();
     }
 
-    // Doors are moved through their yellow handle via EventSystem drag events, not by polling
-    // Input.GetMouseButton. The polled version moved the door on any held click, so pressing a
-    // toolbar button teleported the nearest door to the cursor - which is what made a door
-    // appear to vanish when switching tools.
     public void BeginDoorDrag(Door door, Vector3 pointerWorld)
     {
         if (door == null) return;
@@ -799,7 +731,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _editor.SetStatus($"Selected {door.direction} door ({door.ConnectionType}).");
     }
 
-
     public bool IsSelected(Door door) => ReferenceEquals(door, _selected);
 
     public void ContributeTo(CTNodeBlueprint map)
@@ -822,9 +753,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     }
 }
 
-// Drag grip on a door's yellow marker. Using EventSystem drag events means the door only moves
-// while this specific handle is being dragged, so clicks elsewhere - including on editor
-// buttons - can never move it.
 public class DoorDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerClickHandler
 {
     private DoorTool _tool;

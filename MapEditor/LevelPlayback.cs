@@ -10,25 +10,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Drives a CTLevelBlueprint run through CTLevelDungeon, following the F5 convention end to
-// end: EnterDungeon() reloads the scene, BiomeGenerator lays out NumRooms (from the level)
-// with its normal walk, doors and room changes are fully vanilla, and every generated room is
-// rebuilt from a node blueprint via the CustomDungeon.OnRoomGenerated hook.
-//
-// Presentation: the room hook fires inside the vanilla generation, while the door (or scene)
-// transition still covers the screen. The apply routine holds that black cover
-// (MMTransition.CanResume), waits for the room's own OnGenerated signal, swaps in the
-// blueprint behind the cover, and only then resumes - so the player never sees the vanilla
-// room and walks in exactly once.
-//
-// Slot mapping: every room slot resolves to one saved node blueprint up front (picked from
-// its pool, or from all saved nodes when the pool is empty). The first generated room takes
-// the Entrance slot, the room owning the exit (NextLayer) door takes the Exit slot, and other
-// rooms consume the middle slots in the order the player discovers them. Revisited rooms
-// regenerate vanilla content, so their remembered slot re-applies.
-//
-// All state is static: scene reloads destroy the editor host, and each fresh host re-binds
-// via OnEditorReady.
 public static class LevelPlayback
 {
     public static bool Active { get; private set; }
@@ -46,21 +27,8 @@ public static class LevelPlayback
     private static ApplyState _pendingApply;
     private static bool _holdingResume;
 
-    // True while a room is generating that we are about to rebuild from a blueprint. Vanilla's
-    // content phases are skipped for it: every object they produce is destroyed by the rebuild
-    // seconds later, and waiting for them is what made each room take the full apply timeout -
-    // DisableIslands blocks until every island's async InitIsland reports back, and those never
-    // completed behind the held fade. Rooms whose pool slot asks for vanilla never set this.
     public static bool SuppressVanillaContent { get; private set; }
 
-    // Captures one room-apply request, created synchronously inside the generation hook.
-    //
-    // Completion is detected by polling GeneratedPathing rather than by subscribing to the
-    // room's events: OnGenerated's delegate field is corrupted by other mods' reflection
-    // (observed holding a float[], making add_OnGenerated throw) and OnGenerateComplete's
-    // UnityEvent threw too. A flag we clear ourselves has no such dependency - and it has to
-    // be an edge we create, because the whole biome shares ONE GenerateRoom object that is
-    // re-generated per room, so its completion flags are already true from the room before.
     private class ApplyState
     {
         public GenerateRoom Room;
@@ -71,11 +39,6 @@ public static class LevelPlayback
         {
             if (Room == null) return;
             Room.GeneratedPathing = false;
-            // Vanilla raises GeneratedPathing from an async pathfinding callback and only then
-            // finishes the coroutine (backdrop, sprite shape init). Waiting on that flag alone
-            // let the rebuild start while generation was still adding objects, so vanilla
-            // content landed on top of an already-cleared room. `generated` is the last thing
-            // Generate() sets, so both together mean the room is genuinely finished.
             Room.generated = false;
         }
 
@@ -187,14 +150,8 @@ public static class LevelPlayback
         editor.StartCoroutine(ApplyRoomRoutine(pending, ++_applyToken));
     }
 
-    // CTLevelDungeon's per-room hook, via DungeonPatches' GenerateRoom.Generate postfix. Fires
-    // once per room entry (GenCheck), including revisits, which regenerate vanilla content.
-    // Runs synchronously inside the room's generation, behind the room-change transition.
     public static void OnRoomGenerated(GenerateRoom room, GenerateRoom.ConnectionTypes connectionType)
     {
-        // Harmony's enumerator patch hands us a null instance for the boot-time entrance
-        // room, which silently skipped it. GenerateRoom.Instance is the same object (OnEnable
-        // assigns it before Generate runs) and is always populated.
         if (room == null) room = SceneRefs.Room;
 
         if (!Active || room == null)
@@ -204,9 +161,6 @@ public static class LevelPlayback
             return;
         }
 
-        // CurrentRoom is still null while the scene boots and the FIRST room generates - that
-        // room is by definition the entrance. Its slot mapping is recorded later, once the
-        // apply routine can see CurrentRoom.
         var biomeRoom = BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
 
         int slot;
@@ -244,10 +198,6 @@ public static class LevelPlayback
             MMTransition.CanResume = false;
             _holdingResume = true;
 
-            // ChangeRoomRoutine stops the clock mid-fade and leaves the fade-OUT to restart it,
-            // and the transition pauses the simulation the same way. We are holding that
-            // fade-out, so both stay stopped unless we restore them - and generation runs on
-            // them. Costs nothing visually: the screen stays covered either way.
             if (Time.timeScale <= 0f) Time.timeScale = 1f;
             try
             {
@@ -300,10 +250,6 @@ public static class LevelPlayback
 
     private static IEnumerator ApplyRoomRoutine(ApplyState state, int token)
     {
-        // Wait for the flag armed at hook time to come back up: vanilla generation raises it
-        // in its final pathfinding step, so this is the room's real end-of-generation edge.
-        // With the content phases skipped this settles in a fraction of a second; the cap is a
-        // backstop, not the expected path.
         var startedAt = Time.unscaledTime;
         var deadline = startedAt + 8f;
         while (!state.GenerationDone && Time.unscaledTime < deadline)
@@ -365,9 +311,6 @@ public static class LevelPlayback
             yield return null;
         }
 
-        // Nothing gates a room the blueprint left empty: vanilla releases the door locks when
-        // the room's encounter is cleared, and with its content suppressed and no blueprint
-        // enemies there is no encounter to clear - so the locks would stay shut for good.
         if (bp.Enemies.Count == 0)
         {
             try
@@ -401,11 +344,6 @@ public static class LevelPlayback
         if (MMTransition.IsPlaying) MMTransition.ResumePlay();
     }
 
-    // Guarantees the next MMTransition.Play actually runs. Show() opens with
-    // "if (IsPlaying) { CallBack?.Invoke(); return; }", so a transition still marked playing -
-    // ours held mid-room-apply, or any transition orphaned by a coroutine dying with its
-    // scene - turns every later Play into a silent no-op: the scene never loads, which is how
-    // a level run left F5 (and itself) unable to enter a dungeon at all.
     private static void ForceTransitionIdle()
     {
         _holdingResume = false;
@@ -432,9 +370,6 @@ public static class LevelPlayback
         if (Time.timeScale <= 0f) Time.timeScale = 1f;
     }
 
-    // Every dungeon entry goes through here (F5's test dungeon, the exit door, Play Level), so
-    // it is the one place that can guarantee a fresh scene load and stop a run that the entry
-    // is leaving behind.
     [HarmonyPatch(typeof(CustomDungeon), nameof(CustomDungeon.EnterDungeon))]
     private static class CustomDungeon_EnterDungeon_Patch
     {
@@ -443,9 +378,6 @@ public static class LevelPlayback
             if (Active && __instance is not CTLevelDungeon) Stop();
             ForceTransitionIdle();
 
-            // The lighting override is global and outlives the room that set it. Entering a
-            // dungeon by any route - F5, Reset Room, Play Level, the exit door - starts from
-            // the biome's own lighting; a blueprint that wants its own re-applies it on load.
             Tools.LightingTool.ClearOverride();
         }
     }
@@ -455,9 +387,6 @@ public static class LevelPlayback
         yield break;
     }
 
-    // The island's own art and encounter spawn. DisableIslands starts one of these per island
-    // and blocks until every one calls back, so this is the phase that stalled each room.
-    // HideSprites is kept: it is what stops the island's flat placeholder fill from showing.
     [HarmonyPatch(typeof(IslandPiece), nameof(IslandPiece.InitIsland))]
     private static class IslandPiece_InitIsland_Patch
     {
