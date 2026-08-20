@@ -407,32 +407,71 @@ public class CultTweakerPanel : MonoBehaviour
         Note("F7 or Esc to close.");
 
         _ui.CreateHeader(_content, "- Extras -", 22);
-        _ui.CreateButton(_content, "Enter Editor Dungeon", EnterCustomDungeon);
+        BuildDungeonPicker();
         _ui.CreateButton(_content, "Dump Follower Spine Atlas", DumpFollowerSlots);
     }
 
-    private void EnterCustomDungeon()
+    // Every custom dungeon registered this session, not just the first one found: the map
+    // editor's level runner, whatever test dungeons the mod registers, and one per dungeon built
+    // with the dungeon builder. Read when the panel is built rather than cached, because saving
+    // a dungeon in the map editor registers it straight away - the list is different the next
+    // time the panel opens.
+    private void BuildDungeonPicker()
     {
-        CustomDungeon dungeon = null;
+        var dungeons = new List<CustomDungeon>();
         foreach (var entry in CustomDungeonManager.CustomDungeonList.Values)
-        {
-            // The first registered dungeon is the test one; the level runner's dungeon is
-            // registered after it and is entered through the map editor's level tool instead.
-            if (entry == null) continue;
-            dungeon = entry;
-            break;
-        }
+            if (entry != null) dungeons.Add(entry);
 
-        if (dungeon == null)
+        if (dungeons.Count == 0)
         {
-            Plugin.Log.LogWarning("CultTweaker: no custom dungeon is registered.");
+            Note("No custom dungeon is registered.");
             return;
         }
+
+        dungeons.Sort((a, b) => string.Compare(DungeonLabel(a), DungeonLabel(b),
+            System.StringComparison.OrdinalIgnoreCase));
+
+        var names = new List<string>(dungeons.Count);
+        foreach (var dungeon in dungeons) names.Add(DungeonLabel(dungeon));
+
+        // No preselection: the dropdown is an action, so its caption stays "Enter Dungeon" until
+        // something is picked, and picking is the whole gesture the button used to be.
+        _ui.CreateDropdown(_content, "Enter Dungeon", names, (index, _) =>
+        {
+            if (index < 0 || index >= dungeons.Count) return;
+            EnterCustomDungeon(dungeons[index]);
+        });
+    }
+
+    // What the dungeon calls itself in game. A dungeon with no name of its own falls back to the
+    // internal one, which is at least unique.
+    private static string DungeonLabel(CustomDungeon dungeon)
+    {
+        if (dungeon == null) return "";
+        return !string.IsNullOrWhiteSpace(dungeon.DungeonName) ? dungeon.DungeonName
+            : !string.IsNullOrWhiteSpace(dungeon.InternalName) ? dungeon.InternalName
+            : dungeon.Location.ToString();
+    }
+
+    private void EnterCustomDungeon(CustomDungeon dungeon)
+    {
+        if (dungeon == null) return;
+
+        Plugin.Log.LogInfo($"CultTweaker: entering custom dungeon '{DungeonLabel(dungeon)}' " +
+                           $"({dungeon.Location}).");
 
         // Closed FIRST: entering loads a scene, and the panel is holding the pause, the HUD and
         // the camera rig that the load would strand.
         Close();
-        dungeon.EnterDungeon();
+
+        try
+        {
+            dungeon.EnterDungeon();
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogError($"CultTweaker: entering '{DungeonLabel(dungeon)}' failed: {e}");
+        }
     }
 
     // The config flag does the same job, but only on the next follower the game happens to dress,

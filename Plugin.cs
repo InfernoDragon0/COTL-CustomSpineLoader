@@ -63,6 +63,11 @@ namespace CustomSpineLoader
             CustomTarotLoader.LoadAllCustomTarots();
             Log.LogInfo("Loading Custom Structures...");
             CustomStructureLoader.LoadAllCustomStructures();
+
+            // No loading to do - a cutscene is a file, read when it plays - but the folder is
+            // created here so it is there to drop videos into, and listed so the log says what
+            // the trigger tool will offer.
+            CustomCutsceneLoader.LogWhatIsThere();
             Log.LogInfo("Loading Custom Follower Overrides...");
             FollowerSpineLoader.LoadAllNonSpineSkins();
             Log.LogInfo("Loading Custom NPCs...");
@@ -108,6 +113,10 @@ namespace CustomSpineLoader
             // After the test dungeon: F5 enters CustomDungeonList[0], which must stay the
             // test dungeon. Level runs enter CTLevelDungeon through the Level tool instead.
             MapEditor.CTLevelDungeon.Register();
+
+            // Every saved dungeon map is a dungeon. Registering mints a FollowerLocation per
+            // map, so it happens once at startup rather than every time the tool lists them.
+            MapEditor.CTMapDungeon.RegisterAll();
         }
     
         public void Update()

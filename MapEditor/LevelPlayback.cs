@@ -58,30 +58,11 @@ public static class LevelPlayback
         if (level == null || editor == null) return "No level to play.";
         if (CTLevelDungeon.Instance == null) return "CTLevelDungeon is not registered.";
 
-        var saved = MapEditorSerialization.LoadAll();
-        if (saved.Count == 0) return "No node blueprints saved yet.";
+        var resolved = Resolve(level, out var error);
+        if (resolved == null) return error;
 
         // Starting on top of a previous run would carry its slot map and transition hold.
         if (Active) Stop();
-
-        var byName = new Dictionary<string, CTNodeBlueprint>();
-        foreach (var node in saved) byName[node.MapName] = node;
-
-        var resolved = new List<string>();
-        for (var i = 0; i < level.Rooms.Count; i++)
-        {
-            var pool = new List<string>();
-            foreach (var name in level.Rooms[i].NodePool)
-                if (name == CTLevelRoom.VanillaNode || byName.ContainsKey(name)) pool.Add(name);
-
-            if (level.Rooms[i].NodePool.Count > 0 && pool.Count == 0)
-                Plugin.Log.LogWarning($"MapEditor: level room {i + 1} pool has no existing blueprints; using any.");
-
-            if (pool.Count == 0)
-                foreach (var name in byName.Keys) pool.Add(name);
-
-            resolved.Add(pool[Random.Range(0, pool.Count)]);
-        }
 
         _level = level;
         _resolvedRooms = resolved;
@@ -112,9 +93,74 @@ public static class LevelPlayback
         return null;
     }
 
+    // Picks one node blueprint per level room up front, so a run never dead-ends mid-way on an
+    // empty pool. Null means the level cannot run, with the reason in `error`.
+    private static List<string> Resolve(CTLevelBlueprint level, out string error)
+    {
+        error = null;
+
+        var saved = MapEditorSerialization.LoadAll();
+        if (saved.Count == 0)
+        {
+            error = "No node blueprints saved yet.";
+            return null;
+        }
+
+        var byName = new Dictionary<string, CTNodeBlueprint>();
+        foreach (var node in saved) byName[node.MapName] = node;
+
+        var resolved = new List<string>();
+        for (var i = 0; i < level.Rooms.Count; i++)
+        {
+            var pool = new List<string>();
+            foreach (var name in level.Rooms[i].NodePool)
+                if (name == CTLevelRoom.VanillaNode || byName.ContainsKey(name)) pool.Add(name);
+
+            if (level.Rooms[i].NodePool.Count > 0 && pool.Count == 0)
+                Plugin.Log.LogWarning($"MapEditor: level room {i + 1} pool has no existing blueprints; using any.");
+
+            if (pool.Count == 0)
+                foreach (var name in byName.Keys) pool.Add(name);
+
+            resolved.Add(pool[Random.Range(0, pool.Count)]);
+        }
+
+        return resolved;
+    }
+
+    // Binds a level to the floor the adventure map is about to generate. Deliberately does not
+    // enter a dungeon the way Start does: MapManager.EnterNode has already queued a Regenerate of
+    // the floor in place, and re-entering would throw that run away.
+    public static string StartForMapNode(CTLevelBlueprint level)
+    {
+        if (level == null) return "No level bound to this node.";
+
+        var resolved = Resolve(level, out var error);
+        if (resolved == null) return error;
+
+        if (Active) Stop();
+
+        _level = level;
+        _resolvedRooms = resolved;
+        _roomSlots.Clear();
+        _normalCursor = 0;
+        _applyToken++;
+        _pendingApply = null;
+        Active = true;
+
+        Plugin.Log.LogInfo($"MapEditor: level '{level.LevelName}' bound to a dungeon-map node - " +
+                           $"rooms: {string.Join(", ", resolved)}.");
+        return null;
+    }
+
+    // The caller is named because a level run ending early is invisible otherwise: the symptom
+    // shows up rooms later, as a floor that generated vanilla content, with nothing in the log
+    // tying it to whoever ended the run.
     public static void Stop()
     {
-        if (Active) Plugin.Log.LogInfo($"MapEditor: level playback of '{_level.LevelName}' ended.");
+        if (Active)
+            Plugin.Log.LogInfo($"MapEditor: level playback of '{_level.LevelName}' ended, " +
+                               $"stopped by {Caller()}.");
         Active = false;
         SuppressVanillaContent = false;
         _level = null;
@@ -129,6 +175,30 @@ public static class LevelPlayback
         // The run's last room may have left a lighting override in place; it is global state,
         // so it would follow the player out of the level.
         Tools.LightingTool.ClearOverride();
+    }
+
+    private static string Caller()
+    {
+        try
+        {
+            // Frame 0 is Stop's own caller; two frames is enough to tell a deliberate stop from
+            // one that arrived through a patch.
+            var trace = new System.Diagnostics.StackTrace(2, false);
+            var names = new List<string>();
+
+            for (var i = 0; i < 2 && i < trace.FrameCount; i++)
+            {
+                var method = trace.GetFrame(i)?.GetMethod();
+                if (method == null) continue;
+                names.Add((method.DeclaringType != null ? method.DeclaringType.Name + "." : "") + method.Name);
+            }
+
+            return names.Count > 0 ? string.Join(" <- ", names.ToArray()) : "unknown";
+        }
+        catch
+        {
+            return "unknown";
+        }
     }
 
     // Called by every freshly created editor host (one per scene load). The entrance room's

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using CustomSpineLoader.SpineLoaderHelper;
 using CustomSpineLoader.MapEditor.Tools;
 using MMBiomeGeneration;
 using MMRoomGeneration;
@@ -121,6 +122,7 @@ public class BlueprintLoader
                 }
                 yield return structureTool.PlaceAt(type, s.IsCustom,
                     MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX, deferNav: true);
+                ApplySavedScale(structureTool.LastPlacedInstance, s.Scale);
             }
         }
 
@@ -161,23 +163,32 @@ public class BlueprintLoader
         if (enemyTool != null)
         {
             foreach (var e in bp.Enemies)
+            {
                 yield return enemyTool.SpawnEnemyRoutine(e.Key, e.IsCustom,
                     MapEditorSerialization.ToVector3(e.Position), withVfx: true);
+                ApplySavedScale(enemyTool.LastPlacedInstance, e.Scale);
+            }
         }
 
         // ---- Phase 6b: NPCs ----------------------------------------------------------------
         if (npcTool != null)
         {
             foreach (var n in bp.Npcs)
+            {
                 yield return npcTool.SpawnNpcRoutine(n.Key, MapEditorSerialization.ToVector3(n.Position),
                     n.IsCustom);
+                ApplySavedScale(npcTool.LastPlacedInstance, n.Scale);
+            }
         }
 
         // ---- Phase 7: podiums --------------------------------------------------------------
         if (podiumTool != null)
         {
             foreach (var p in bp.Podiums)
+            {
                 podiumTool.SpawnPodium(MapEditorSerialization.ToVector3(p.Position), p.Type, p.ClearAllOnEquip);
+                ApplySavedScale(podiumTool.LastPlacedInstance, p.Scale);
+            }
         }
 
         if (triggerTool != null)
@@ -542,6 +553,15 @@ public class BlueprintLoader
         while (pending > 0 && Time.unscaledTime < deadline) yield return null;
         if (pending > 0)
             Plugin.Log.LogWarning($"MapEditor: {pending} prop(s) still loading after timeout; they may appear late.");
+    }
+
+    // Props carry their scale inline; everything else is spawned by its own tool and scaled
+    // afterwards. Null means a blueprint written before resizing existed, and a zero X means a
+    // degenerate value that would make the object vanish - both leave the spawn as it came.
+    private static void ApplySavedScale(GameObject go, SerializableVector3 scale)
+    {
+        if (go == null || scale == null || scale.X == 0f) return;
+        go.transform.localScale = MapEditorSerialization.ToVector3(scale);
     }
 
     private static void ApplyPropTransform(GameObject go, MapPropData prop, GenerateRoom room)

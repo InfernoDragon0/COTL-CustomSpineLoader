@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -52,7 +53,7 @@ public class LevelTool : IMapEditorTool
     private void Rebuild()
     {
         foreach (var go in _dynamic)
-            if (go != null) Object.Destroy(go);
+            if (go != null) UnityEngine.Object.Destroy(go);
         _dynamic.Clear();
 
         if (_panel == null || _ui == null) return;
@@ -64,7 +65,6 @@ public class LevelTool : IMapEditorTool
     private void BuildChooser()
     {
         _dynamic.Add(_ui.CreateButton(_panel, "New Level Blueprint", CreateNew));
-        _dynamic.Add(_ui.CreateHeader(_panel, "Open Existing"));
 
         var levels = CTLevelSerialization.LoadAll();
         if (levels.Count == 0)
@@ -73,18 +73,31 @@ public class LevelTool : IMapEditorTool
             return;
         }
 
-        foreach (var level in levels)
+        var labels = new List<string>(levels.Count);
+        foreach (var level in levels) labels.Add($"{level.LevelName} ({level.Rooms.Count} rooms)");
+
+        AddDropdown("Open Existing Level", labels, index =>
         {
-            var captured = level;
-            _dynamic.Add(_ui.CreateButton(_panel, $"{captured.LevelName} ({captured.Rooms.Count} rooms)", () =>
-            {
-                _level = captured;
-                EnsureEndRooms(_level);
-                _selectedRoom = -1;
-                Rebuild();
-                _editor.SetStatus($"Opened level '{_level.LevelName}'.");
-            }));
-        }
+            if (index < 0 || index >= levels.Count) return;
+
+            _level = levels[index];
+            EnsureEndRooms(_level);
+            _selectedRoom = -1;
+            Rebuild();
+            _editor.SetStatus($"Opened level '{_level.LevelName}'.");
+        });
+    }
+
+    // Every list here is rebuilt from scratch after each pick, so a dropdown's Root has to join
+    // the dynamic set or the old widget is left sitting on top of the new one. Picking from a
+    // dropdown that Rebuild then destroys is safe: it closes its own overlay and reads nothing
+    // more once the handler returns.
+    private void AddDropdown(string caption, IList<string> options, Action<int> onPicked,
+        int selected = -1)
+    {
+        var dropdown = _ui.CreateDropdown(_panel, caption, options, (index, _) => onPicked(index));
+        dropdown.SetSelected(selected);
+        _dynamic.Add(dropdown.Root);
     }
 
     private void BuildLevelEditor()
@@ -116,64 +129,104 @@ public class LevelTool : IMapEditorTool
         _dynamic.Add(_ui.CreateButton(_panel, "Remove Room", RemoveRoom));
 
         _dynamic.Add(_ui.CreateHeader(_panel, "Rooms"));
+
+        var roomLabels = new List<string>(_level.Rooms.Count);
         for (var i = 0; i < _level.Rooms.Count; i++)
         {
-            var index = i;
             var room = _level.Rooms[i];
-            var marker = index == _selectedRoom ? " <" : "";
-            var pool = room.NodePool.Count == 0 ? "any" : room.NodePool.Count.ToString();
-            _dynamic.Add(_ui.CreateButton(_panel, $"{index + 1}: {room.Role} (pool: {pool}){marker}", () =>
-            {
-                _selectedRoom = index;
-                Rebuild();
-            }));
+            var pool = room.NodePool.Count == 0 ? "any" : room.NodePool.Count + " node(s)";
+            roomLabels.Add($"{i + 1}: {room.Role} (pool: {pool})");
         }
+
+        // Pre-selected, so after the rebuild the closed dropdown still names the room being
+        // edited - that is what the old "<" marker was for.
+        AddDropdown("Select a room", roomLabels, index =>
+        {
+            _selectedRoom = index;
+            Rebuild();
+        }, _selectedRoom);
 
         if (_selectedRoom < 0 || _selectedRoom >= _level.Rooms.Count) return;
 
         var selected = _level.Rooms[_selectedRoom];
 
-        _dynamic.Add(_ui.CreateButton(_panel, $"Modifier: {selected.Modifier}", () =>
+        // Labelled rather than bare values: a closed dropdown reading just "Combat" says nothing
+        // about what it sets.
+        var modifierLabels = new List<string>(Modifiers.Length);
+        foreach (var modifier in Modifiers) modifierLabels.Add("Modifier: " + modifier);
+
+        AddDropdown("Modifier", modifierLabels, index =>
         {
-            selected.Modifier = selected.Modifier switch
-            {
-                "None" => "Combat",
-                "Combat" => "Reward",
-                _ => "None"
-            };
+            if (index < 0 || index >= Modifiers.Length) return;
+
+            selected.Modifier = Modifiers[index];
             Rebuild();
             _editor.SetStatus($"Room {_selectedRoom + 1} modifier: {selected.Modifier}.");
-        }));
+        }, Array.IndexOf(Modifiers, selected.Modifier));
 
         _dynamic.Add(_ui.CreateLabel(_panel,
             $"Room {_selectedRoom + 1} pool\n(empty pool = any saved node)", 14, TextAlignmentOptions.Center));
 
+        BuildPoolControls(selected);
+    }
+
+    private static readonly string[] Modifiers = ["None", "Combat", "Reward"];
+
+    private const string VanillaLabel = "Vanilla generated room";
+
+    // The pool is a set the author builds up, so it takes the trigger tool's shape rather than a
+    // checkbox per saved blueprint: one dropdown offering what is not in the pool yet, and a row
+    // per member that removes it. The old list grew by a button for every map ever saved.
+    private void BuildPoolControls(CTLevelRoom room)
+    {
+        var candidateKeys = new List<string>();
+        var candidateLabels = new List<string>();
+
         // A pool can also offer the room the game would have generated, so a level mixes
         // authored rooms with vanilla ones.
-        var vanillaInPool = selected.NodePool.Contains(CTLevelRoom.VanillaNode);
-        _dynamic.Add(_ui.CreateButton(_panel, (vanillaInPool ? "[x] " : "[  ] ") + "Vanilla generated room", () =>
+        if (!room.NodePool.Contains(CTLevelRoom.VanillaNode))
         {
-            if (vanillaInPool) selected.NodePool.Remove(CTLevelRoom.VanillaNode);
-            else selected.NodePool.Add(CTLevelRoom.VanillaNode);
-            Rebuild();
-        }));
+            candidateKeys.Add(CTLevelRoom.VanillaNode);
+            candidateLabels.Add(VanillaLabel);
+        }
 
-        var nodes = MapEditorSerialization.LoadAll();
-        if (nodes.Count == 0)
+        foreach (var node in MapEditorSerialization.LoadAll())
         {
-            _dynamic.Add(_ui.CreateLabel(_panel, "No node blueprints saved yet.", 14, TextAlignmentOptions.Center));
+            if (room.NodePool.Contains(node.MapName)) continue;
+            candidateKeys.Add(node.MapName);
+            candidateLabels.Add(node.MapName);
+        }
+
+        if (candidateLabels.Count > 0)
+            AddDropdown("Add To Pool", candidateLabels, index =>
+            {
+                if (index < 0 || index >= candidateKeys.Count) return;
+
+                room.NodePool.Add(candidateKeys[index]);
+                Rebuild();
+                _editor.SetStatus($"Room {_selectedRoom + 1} pool: {room.NodePool.Count} node(s).");
+            });
+        else
+            _dynamic.Add(_ui.CreateLabel(_panel, "Everything saved is already in this pool.", 14,
+                TextAlignmentOptions.Center));
+
+        if (room.NodePool.Count == 0)
+        {
+            _dynamic.Add(_ui.CreateLabel(_panel, "Pool empty - any saved node can appear here.", 14,
+                TextAlignmentOptions.Center));
             return;
         }
 
-        foreach (var node in nodes)
+        // Copied: removing walks the list these rows were built from.
+        foreach (var entry in new List<string>(room.NodePool))
         {
-            var name = node.MapName;
-            var inPool = selected.NodePool.Contains(name);
-            _dynamic.Add(_ui.CreateButton(_panel, (inPool ? "[x] " : "[  ] ") + name, () =>
+            var captured = entry;
+            var label = captured == CTLevelRoom.VanillaNode ? VanillaLabel : captured;
+            _dynamic.Add(_ui.CreateButton(_panel, "X  " + label, () =>
             {
-                if (inPool) selected.NodePool.Remove(name);
-                else selected.NodePool.Add(name);
+                room.NodePool.Remove(captured);
                 Rebuild();
+                _editor.SetStatus($"Room {_selectedRoom + 1} pool: {room.NodePool.Count} node(s).");
             }));
         }
     }

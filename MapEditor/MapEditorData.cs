@@ -95,6 +95,11 @@ public class MapStructureData
     public SerializableVector3 Position;
     public float Rotation;
     public bool FlipX;
+
+    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
+    // written before resizing existed, which is why every reader treats null as "leave it".
+    public SerializableVector3 Scale;
+
 }
 
 // Door-to-next-node routing is NOT stored here: which blueprint a door leads to is level-scoped
@@ -117,6 +122,10 @@ public class MapEnemyData
     public string Key = "";          // vanilla: addressable prefab path; custom: CustomEnemy.InternalName
     public bool IsCustom;
     public SerializableVector3 Position;
+
+    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
+    // written before resizing existed, which is why every reader treats null as "leave it".
+    public SerializableVector3 Scale;
 }
 
 [Serializable]
@@ -125,6 +134,10 @@ public class MapNpcData
     public string Key = "";          // vanilla: addressable prefab path; custom: InternalName
     public bool IsCustom;
     public SerializableVector3 Position;
+
+    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
+    // written before resizing existed, which is why every reader treats null as "leave it".
+    public SerializableVector3 Scale;
 }
 
 // A box the player can step into, and the sequence of actions entering it plays. Id is how a
@@ -170,6 +183,14 @@ public class MapTriggerActionData
     // Animation actions: loop for Duration seconds instead of playing once.
     public bool Loop;
     public float Duration;
+
+    // A second number the action needs: a camera zoom, so far. Duration is already spoken for by
+    // waits, holds and fades.
+    public float Amount;
+
+    // The smaller line under a screen text's title. Empty is legitimate - a title on its own is
+    // a perfectly good caption.
+    public string Subtext = "";
 }
 
 [Serializable]
@@ -209,6 +230,10 @@ public class MapPodiumData
     // true = vanilla choose-one-of-N (equipping disables the room's other podiums);
     // false = only the equipped podium is consumed, the rest stay usable.
     public bool ClearAllOnEquip = true;
+
+    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
+    // written before resizing existed, which is why every reader treats null as "leave it".
+    public SerializableVector3 Scale;
 }
 
 // Node blueprints live as flat files: CustomNodeBlueprints/<mapname>.json.

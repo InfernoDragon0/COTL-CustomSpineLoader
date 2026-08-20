@@ -90,4 +90,14 @@ public static class MapEditorGizmos
         if (target == null) return Vector3.zero;
         return TryGetBounds(target, out var bounds) ? bounds.center : target.transform.position;
     }
+
+    // Where a resize node should sit: the top-right of the same footprint, so the node is on the
+    // corner of the outline the box already draws.
+    public static Vector3 CornerPosition(GameObject target)
+    {
+        if (target == null) return Vector3.zero;
+        return TryGetBounds(target, out var bounds)
+            ? new Vector3(bounds.max.x, bounds.max.y, bounds.center.z)
+            : target.transform.position;
+    }
 }

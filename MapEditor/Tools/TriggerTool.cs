@@ -495,16 +495,73 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     // The row the user clicked, whose target is outlined in the world.
     private TriggerAction _selectedAction;
 
-    // Index-aligned with TriggerActionType.
+    // The Add-action dropdown lists groups, not actions: there are enough actions now that one
+    // flat list was longer than the panel. Index-aligned with ActionGroups; a group holding a
+    // single action skips the submenu and starts it directly.
     private static readonly string[] ActionLabels =
     [
-        "Move players to trigger",
-        "Move players to object",
-        "Talk to custom NPC",
-        "Play animation on players",
-        "Apply lighting",
-        "Change music"
+        "Player actions",
+        "Camera actions",
+        "Screen text",
+        "Ambient actions",
+        "Wait for seconds"
     ];
+
+    private static readonly TriggerActionType[][] ActionGroups =
+    [
+        [
+            TriggerActionType.MovePlayersToTrigger,
+            TriggerActionType.MovePlayersToObject,
+            TriggerActionType.StartConversation,
+            TriggerActionType.PlayPlayerAnimation
+        ],
+        [
+            TriggerActionType.CameraLookAtObject,
+            TriggerActionType.CameraLookAtTrigger,
+            TriggerActionType.CameraOffset,
+            TriggerActionType.CameraOffsetReset,
+            TriggerActionType.CameraZoom,
+            TriggerActionType.CameraZoomReset,
+            TriggerActionType.CameraEffect,
+            TriggerActionType.PlayCutscene
+        ],
+        [
+            TriggerActionType.ShowCaption,
+            TriggerActionType.ShowTitleText,
+            TriggerActionType.ShowFullscreenText
+        ],
+        [
+            TriggerActionType.ApplyLighting,
+            TriggerActionType.ChangeMusic
+        ],
+        [
+            TriggerActionType.Wait
+        ]
+    ];
+
+    // What a group's submenu calls each action.
+    private static string ActionName(TriggerActionType type) => type switch
+    {
+        TriggerActionType.MovePlayersToTrigger => "Move players to trigger",
+        TriggerActionType.MovePlayersToObject => "Move players to object",
+        TriggerActionType.StartConversation => "Talk to custom NPC",
+        TriggerActionType.PlayPlayerAnimation => "Play animation on players",
+        TriggerActionType.ApplyLighting => "Apply lighting",
+        TriggerActionType.ChangeMusic => "Change music",
+        TriggerActionType.Wait => "Wait for seconds",
+        TriggerActionType.CameraOffset => "Set camera offset",
+        TriggerActionType.CameraOffsetReset => "Reset camera offset",
+        TriggerActionType.CameraZoom => "Set camera zoom",
+        TriggerActionType.CameraZoomReset => "Reset camera zoom",
+        TriggerActionType.CameraLookAtObject => "Look at object",
+        TriggerActionType.CameraLookAtTrigger => "Look at trigger",
+        TriggerActionType.CameraEffect => "Play camera effect",
+        TriggerActionType.PlayCutscene => "Play cutscene",
+        TriggerActionType.ShowCaption => "Caption (bottom right)",
+        TriggerActionType.ShowTitleText => "Title (top of screen)",
+        TriggerActionType.ShowFullscreenText => "Fullscreen text (centre)",
+        _ => type.ToString()
+    };
 
     // Which question the shared target dropdown is currently asking.
     private enum TargetStage
@@ -516,12 +573,47 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         AnimationMode,
         Lighting,
         LightingFade,
-        Music
+        Music,
+
+        // Which action inside the group the user picked.
+        Category,
+
+        // Shared by everything that ends with "for how long": waits, camera holds, text.
+        Seconds,
+        Zoom,
+        Effect,
+        LookTrigger,
+        Cutscene,
+        CutsceneSkip
     }
 
     private TargetStage _stage;
     private string _pendingAnimation;
     private string _pendingLighting;
+
+    // The half-finished action a Seconds or object-pick step is going to complete.
+    private TriggerActionType _pendingType;
+    private string _pendingText;
+    private string _pendingSubtext;
+    private string _pendingTarget;
+    private Vector3 _pendingPosition;
+
+    // The actions of the group currently open in the submenu, index-aligned with its labels.
+    private readonly List<TriggerActionType> _groupTypes = [];
+
+    private static readonly string[] SecondsLabels =
+        ["0.5 seconds", "1 second", "2 seconds", "3 seconds", "5 seconds", "8 seconds"];
+
+    private static readonly float[] SecondsValues = [0.5f, 1f, 2f, 3f, 5f, 8f];
+
+    // 10 is the rig's own resting distance, so the list reads as "how far in from normal".
+    private static readonly string[] CutsceneSkipModes =
+        ["Skippable (Esc)", "Cannot be skipped"];
+
+    private static readonly string[] ZoomLabels =
+    [
+        "1 (closest)", "2", "3", "4", "5", "6", "7", "8", "9", "10 (default)"
+    ];
 
     // Display names are what the dropdown shows; the ids that go into the action are kept
     // alongside, because an NPC's display name is not what the registry is keyed by.
@@ -740,6 +832,16 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 break;
             }
 
+            case TriggerActionType.CameraLookAtTrigger:
+            {
+                var trigger = TriggerActions.FindTrigger(action.Target);
+                if (trigger != null)
+                    into.Add(new Bounds(trigger.transform.position,
+                        new Vector3(trigger.Size.x, trigger.Size.y, 0.1f)));
+                break;
+            }
+
+            case TriggerActionType.CameraLookAtObject:
             case TriggerActionType.MovePlayersToObject:
             {
                 var go = TriggerActions.ResolveObject(action.Target);
@@ -809,7 +911,39 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             return;
         }
 
-        switch ((TriggerActionType)index)
+        if (index < 0 || index >= ActionGroups.Length) return;
+
+        var group = ActionGroups[index];
+
+        // A group of one is a category in name only; opening a submenu to show its single entry
+        // would be one click of nothing.
+        if (group.Length == 1)
+        {
+            StartAction(group[0]);
+            return;
+        }
+
+        _groupTypes.Clear();
+        var labels = new List<string>(group.Length);
+        foreach (var type in group)
+        {
+            _groupTypes.Add(type);
+            labels.Add(ActionName(type));
+        }
+
+        OpenTargets(TargetStage.Category, labels);
+    }
+
+    // Everything a chosen action needs before it can be added: a target to pick, a duration to
+    // choose, a caption to type, or nothing at all.
+    private void StartAction(TriggerActionType type)
+    {
+        _pendingType = type;
+        _pendingText = null;
+        _pendingSubtext = null;
+        _pendingTarget = null;
+
+        switch (type)
         {
             case TriggerActionType.MovePlayersToTrigger:
             {
@@ -835,6 +969,86 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             case TriggerActionType.MovePlayersToObject:
                 _pickingObject = true;
                 _editor.SetStatus("Click the object in the world to move the players to.");
+                break;
+
+            case TriggerActionType.CameraLookAtObject:
+                _pickingObject = true;
+                _editor.SetStatus("Click the object for the camera to look at.");
+                break;
+
+            case TriggerActionType.CameraLookAtTrigger:
+            {
+                _targetKeys.Clear();
+                foreach (var trigger in _triggers)
+                    if (trigger != null) _targetKeys.Add(trigger.Id);
+
+                if (_targetKeys.Count == 0)
+                {
+                    _editor.SetStatus("No triggers to look at.", StatusSeverity.Warning);
+                    return;
+                }
+
+                OpenTargets(TargetStage.LookTrigger, _targetKeys);
+                break;
+            }
+
+            case TriggerActionType.Wait:
+                OpenTargets(TargetStage.Seconds, SecondsLabels);
+                break;
+
+            case TriggerActionType.CameraZoom:
+                OpenTargets(TargetStage.Zoom, ZoomLabels);
+                break;
+
+            case TriggerActionType.CameraEffect:
+                OpenTargets(TargetStage.Effect, TriggerCameraActions.Effects);
+                break;
+
+            case TriggerActionType.PlayCutscene:
+            {
+                // The folder first, so a custom video of the same name as a vanilla one is the
+                // one offered; both are played the same way from here on.
+                _targetKeys.Clear();
+                var labels = new List<string>();
+
+                foreach (var custom in APIHelper.CustomCutsceneLoader.Names())
+                {
+                    _targetKeys.Add(custom);
+                    labels.Add(custom);
+                }
+
+                foreach (var vanilla in APIHelper.CustomCutsceneLoader.VanillaCutscenes)
+                {
+                    if (_targetKeys.Contains(vanilla)) continue;
+                    _targetKeys.Add(vanilla);
+                    labels.Add(vanilla + "  (vanilla)");
+                }
+
+                if (_targetKeys.Count == 0)
+                {
+                    _editor.SetStatus("No cutscenes: drop an .mp4 in the CustomCutscenes folder.",
+                        StatusSeverity.Warning);
+                    return;
+                }
+
+                OpenTargets(TargetStage.Cutscene, labels);
+                break;
+            }
+
+            // Nothing left to ask.
+            case TriggerActionType.CameraOffsetReset:
+            case TriggerActionType.CameraZoomReset:
+                AddAction(new TriggerAction { Type = type });
+                break;
+
+            case TriggerActionType.CameraOffset:
+                BeginOffsetCapture();
+                break;
+
+            case TriggerActionType.ShowCaption:
+            case TriggerActionType.ShowTitleText:
+            case TriggerActionType.ShowFullscreenText:
+                PromptForText(type);
                 break;
 
             case TriggerActionType.StartConversation:
@@ -1025,7 +1239,204 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                     Target = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value
                 });
                 break;
+
+            case TargetStage.Category:
+                if (index >= 0 && index < _groupTypes.Count) StartAction(_groupTypes[index]);
+                break;
+
+            case TargetStage.LookTrigger:
+                _pendingTarget = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value;
+                OpenTargets(TargetStage.Seconds, SecondsLabels);
+                break;
+
+            case TargetStage.Zoom:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.CameraZoom,
+                    Amount = index >= 0 ? index + 1f : 10f
+                });
+                break;
+
+            case TargetStage.Cutscene:
+                _pendingTarget = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value;
+                OpenTargets(TargetStage.CutsceneSkip, CutsceneSkipModes);
+                break;
+
+            case TargetStage.CutsceneSkip:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.PlayCutscene,
+                    Target = _pendingTarget ?? "",
+                    // Loop is the skippable flag for this action: a cutscene has nothing to loop.
+                    Loop = index == 0
+                });
+                _pendingTarget = null;
+                break;
+
+            case TargetStage.Effect:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.CameraEffect,
+                    Target = value,
+                    Duration = 1.5f
+                });
+                break;
+
+            case TargetStage.Seconds:
+                FinishTimedAction(index >= 0 && index < SecondsValues.Length
+                    ? SecondsValues[index]
+                    : 2f);
+                break;
         }
+    }
+
+    // The last step of every action that ends with a duration. What it builds depends on which
+    // action asked the question, which is what _pendingType is for.
+    private void FinishTimedAction(float seconds)
+    {
+        switch (_pendingType)
+        {
+            case TriggerActionType.Wait:
+                AddAction(new TriggerAction { Type = TriggerActionType.Wait, Duration = seconds });
+                break;
+
+            case TriggerActionType.CameraLookAtObject:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.CameraLookAtObject,
+                    Target = _pendingTarget ?? "",
+                    Position = _pendingPosition,
+                    Duration = seconds
+                });
+                break;
+
+            case TriggerActionType.CameraLookAtTrigger:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.CameraLookAtTrigger,
+                    Target = _pendingTarget ?? "",
+                    Duration = seconds
+                });
+                break;
+
+            case TriggerActionType.ShowCaption:
+            case TriggerActionType.ShowTitleText:
+            case TriggerActionType.ShowFullscreenText:
+                AddAction(new TriggerAction
+                {
+                    Type = _pendingType,
+                    Target = _pendingText ?? "",
+                    Subtext = _pendingSubtext ?? "",
+                    Duration = seconds
+                });
+                break;
+
+            default:
+                _editor.SetStatus("Nothing was waiting on a duration.", StatusSeverity.Warning);
+                break;
+        }
+
+        _pendingText = null;
+        _pendingSubtext = null;
+        _pendingTarget = null;
+    }
+
+    // ---- camera offset capture ----------------------------------------------------------------
+
+    private bool _capturingOffset;
+    private Vector3 _offsetOrigin;
+
+    // The offset is authored by eye: the view snaps back to where the camera normally sits (on
+    // the players), the author pans it to the framing they want, and V takes the difference. It
+    // is stored relative to the follow target, not as a world position, because at run time the
+    // players are somewhere else entirely.
+    private void BeginOffsetCapture()
+    {
+        var players = TriggerActions.LivePlayers();
+        _offsetOrigin = players.Count > 0
+            ? players[0].transform.position
+            : _selected != null ? _selected.transform.position : Vector3.zero;
+
+        _editor.MoveCameraTo(_offsetOrigin);
+        _capturingOffset = true;
+        _editor.SetStatus("Camera reset to the players. Pan with WASD, then press V to set the " +
+                          "offset (Esc cancels).");
+    }
+
+    private void TickOffsetCapture()
+    {
+        if (!_capturingOffset) return;
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            _capturingOffset = false;
+            _editor.SetStatus("Camera offset cancelled.");
+            return;
+        }
+
+        if (!Input.GetKeyDown(KeyCode.V)) return;
+
+        var offset = _editor.CameraFocus - _offsetOrigin;
+        offset.z = 0f;
+        _capturingOffset = false;
+
+        AddAction(new TriggerAction { Type = TriggerActionType.CameraOffset, Position = offset });
+    }
+
+    // ---- caption text ---------------------------------------------------------------------------
+
+    // The same dialog the map save uses, with its overwrite check disabled - there is nothing to
+    // collide with - and a longer limit, because a caption is a sentence rather than a name.
+    // Two dialogs, because the text is two lines of different sizes. The second can be left
+    // empty - a title on its own is a perfectly good caption.
+    private void PromptForText(TriggerActionType type)
+    {
+        var titled = false;
+
+        MapNamePrompt.Show(_editor, "", "TITLE TEXT",
+            title =>
+            {
+                if (string.IsNullOrWhiteSpace(title)) return;
+
+                titled = true;
+                _pendingText = title.Trim();
+                _pendingType = type;
+            },
+            // The second dialog opens from the first one's *close*, not its confirm: opening it
+            // from the confirm meant two of the game's name menus alive at once, with the one
+            // going away taking the editor's modal state with it - so the editor read WASD and
+            // tool shortcuts underneath the dialog still being typed into.
+            onClosed: () =>
+            {
+                if (!titled)
+                {
+                    _editor.SetStatus("No title entered; nothing was added.", StatusSeverity.Warning);
+                    return;
+                }
+
+                PromptForSubtext();
+            },
+            existsCheck: _ => false, existsNoun: "text", characterLimit: 60);
+    }
+
+    private void PromptForSubtext()
+    {
+        var answered = false;
+
+        MapNamePrompt.Show(_editor, "", "SUBTEXT (OPTIONAL)",
+            subtext =>
+            {
+                answered = true;
+                _pendingSubtext = string.IsNullOrWhiteSpace(subtext) ? "" : subtext.Trim();
+            },
+            // Cancelled is a legitimate answer here - a title on its own is a caption - so the
+            // duration question is asked either way.
+            onClosed: () =>
+            {
+                if (!answered) _pendingSubtext = "";
+                OpenTargets(TargetStage.Seconds, SecondsLabels);
+            },
+            existsCheck: _ => false, existsNoun: "text", characterLimit: 160);
     }
 
     private bool TryPickObject(Vector3 world)
@@ -1042,6 +1453,18 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             return false;
         }
 
+        _pickingObject = false;
+
+        // The camera asks a second question - how long to hold the shot - so it goes through the
+        // duration step; moving the players is complete as soon as the object is named.
+        if (_pendingType == TriggerActionType.CameraLookAtObject)
+        {
+            _pendingTarget = TriggerActions.PathOf(picked);
+            _pendingPosition = picked.transform.position;
+            OpenTargets(TargetStage.Seconds, SecondsLabels);
+            return true;
+        }
+
         AddAction(new TriggerAction
         {
             Type = TriggerActionType.MovePlayersToObject,
@@ -1050,7 +1473,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             Position = picked.transform.position
         });
 
-        _pickingObject = false;
         UpdateActionControls();
         return true;
     }
@@ -1066,6 +1488,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         ("LMB", "Place or select trigger"),
         ("Drag", "Centre moves, corner resizes"),
         ("Del", "Delete selected"),
+        ("V", "Set camera offset while framing"),
         ("Esc", "Cancel target pick")
     ];
 
@@ -1076,6 +1499,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         // Leaving the tool answers the question: the button must not still be armed on return.
         Disarm();
         _pickingObject = false;
+        _capturingOffset = false;
         _stage = TargetStage.None;
         ClearTargetHighlight();
         UpdateActionControls();
@@ -1088,6 +1512,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         if (Input.GetKeyDown(KeyCode.Delete)) DeleteSelected();
 
+        TickOffsetCapture();
+
         // Escape gets out of a mis-started object pick without placing anything.
         if (_pickingObject && Input.GetKeyDown(KeyCode.Escape))
         {
@@ -1097,7 +1523,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             _editor.SetStatus("Target pick cancelled.");
         }
 
-        if (Input.GetMouseButtonDown(0) && !_editor.PointerOverUi())
+        // While framing an offset the world is the viewfinder: a click there would drop a new
+        // trigger behind the shot being composed.
+        if (Input.GetMouseButtonDown(0) && !_capturingOffset && !_editor.PointerOverUi())
         {
             var world = _editor.MouseWorld();
 

@@ -28,7 +28,7 @@ camera would otherwise make the world appear to delete itself.
 - [Tools](#tools)
   - [Select](#select) · [Shape](#shape) · [Structure](#structure) · [Enemy](#enemy) · [NPC](#npc)
   - [Podium](#podium) · [Trigger](#trigger) · [Door](#door) · [Lighting](#lighting) · [Music](#music)
-  - [Clear](#clear) · [Load Map](#load-map) · [Level](#level)
+  - [Clear](#clear) · [Load Map](#load-map) · [Level](#level) · [Dungeon Builder](#dungeon-builder)
 - [Trigger actions](#trigger-actions)
 - [Custom NPCs and dialogue](#custom-npcs-and-dialogue)
 - [Saving and loading](#saving-and-loading)
@@ -80,8 +80,10 @@ whatever button was focused.
 
 ### Select
 
-Click an object to select it, then delete it individually. Ctrl-click-drag clones it. Also offers
-send-back / bring-front (Z nudge) and horizontal flip.
+Click an object to select it, then delete it individually. Ctrl-click-drag clones it. A selection
+carries two drag nodes, the same pair the trigger tool uses: a yellow one at the centre that moves
+it and a blue one on the top-right corner that resizes it (hold Shift to stretch a single axis).
+Also offers send-back / bring-front (Z nudge) and horizontal flip.
 
 **Notes**
 
@@ -98,6 +100,23 @@ send-back / bring-front (Z nudge) and horizontal flip.
   rotating a prop either tips it over or swings it through its own sorting plane. Doors refuse to
   flip — their pad, barrier and lock visuals are built from the direction they face. Structures
   serialise their own mirror flag, so the tracked value follows the transform.
+- Resize is uniform unless Shift is held: room dressing distorts badly when its axes are scaled
+  apart, so a stretch should be asked for rather than arrived at. Each drag scales from the size
+  captured on mouse-down, never from the previous frame, so a slow drag and a fast one land in the
+  same place.
+- Resizing grows the object about its *visible* centre, not its transform pivot — pivots sit
+  wherever the artist left them, often on a floor line, and scaling around one walks the object out
+  from under the cursor. The correction is applied every frame by measuring the bounds again.
+- Doors refuse to resize for the same reason they refuse to flip.
+- Scale round-trips for everything the editor can place. Props and kept authored objects always
+  carried it (`RoomSnapshot` captures `lossyScale`); structures, enemies, NPCs and podiums did not,
+  because each is written by its own tool's `ContributeTo` and those wrote position only — so a
+  resized NPC came back its original size. They now save `lossyScale` too and the loader applies it
+  after each spawn, through the `LastPlacedInstance` each tool exposes (the spawn routines are
+  coroutines and hand nothing back). A structure stores the *absolute* scale, because its mirror is
+  stored separately as `FlipX` and re-applied on load — a negative X here would cancel it out.
+  A null scale is a blueprint written before any of this existed, and means "leave the spawn as it
+  came".
 - Deleting needs no bookkeeping: a blueprint is a full snapshot, so a deleted object is simply
   absent from it.
 - Moving anything out of its culling area keeps culling suspended for the session, or it would be
@@ -173,9 +192,20 @@ Spawns enemies, vanilla and custom, from a thumbnailed grid grouped by catalog f
 
 **Notes**
 
-- There is no vanilla enemy factory or enum-to-prefab table — enemies are addressable prefabs under
-  `Assets/Prefabs/Enemies/**`, so the catalog is enumerated straight from the Addressables locators
-  (minus Dead Bodies and Weapons, which are corpses and projectiles).
+- There is no vanilla enemy factory or enum-to-prefab table — enemies are addressable prefabs, so
+  the catalog is enumerated straight from the Addressables locators (minus Dead Bodies and Weapons,
+  which are corpses and projectiles).
+- **Three address spaces, not one.** `Assets/Prefabs/Enemies/**` is only part of the roster;
+  `Assets/Resources_moved/Enemies/**` and a bare `Enemies/**` are left over from the pre-Addressables
+  Resources folder and were never re-addressed. They hold 103 further prefabs — Leshy, Heket,
+  Kallamar, the base Scamp/Archer/Swordsman/Brute roster and most of the Dungeon 1–4 enemies — with
+  no filename overlap with the first space, so all three are scanned and merged by folder.
+- Three bosses are aliased in the grid (`Leshy (Worm Boss)` and friends): the prefabs are named for
+  what the boss is, not who it is, so searching the list for a bishop's name found nothing.
+- **Shamura and Narinder have no enemy prefab at all.** Neither appears at any address; they are
+  authored inside their boss rooms (`Assets/_Rooms/…`) and wired to a `MiniBossController` /
+  `SpiderHeadManager` in that room. Reaching them means extracting from a room prefab the way the
+  NPC tool does, not a catalog fix.
 - Custom enemies come from COTL_API's `CustomEnemyManager`, keyed by `InternalName`, never the
   runtime-minted `Enemy` enum value. `CustomEnemyList` is internal to COTL_API, so it is read via
   Harmony `Traverse` rather than depending on a publicized build. The custom group is read live —
@@ -431,6 +461,16 @@ advance through the chain.
 
 - `Rooms[0]` is always the Entrance and `Rooms[^1]` always the Exit; added rooms go between them
   and neither end can be removed.
+- **Everything picked is a dropdown**, the same widget the other tools use: open a level, select the
+  room being edited (pre-selected on rebuild, which is what the old `<` marker did), set its
+  modifier, add to its pool. The panel used to be a stack of buttons that grew by one for every
+  level and every map ever saved.
+- The pool follows the trigger tool's add-and-remove shape rather than a checkbox per blueprint: the
+  dropdown offers only what is *not* in the pool, and each member gets an `X` row. So the panel
+  scales with the pool, not with the save folder.
+- The whole lower panel is destroyed and rebuilt after each pick, dropdowns included — picking from
+  one that is about to be destroyed is safe, since the widget closes its overlay before invoking the
+  handler and reads nothing afterwards.
 - A pool entry can be `<vanilla>`, meaning "leave this room as the game generated it", so a level
   can mix authored and vanilla rooms. An empty pool means "any saved node".
 - Playback follows the F5 convention end to end: `EnterDungeon()` reloads the scene,
@@ -445,11 +485,215 @@ advance through the chain.
 - All playback state is static: scene reloads destroy the editor host, and each fresh host re-binds
   via `OnEditorReady`.
 
+### Dungeon Builder
+
+Authors a **dungeon** as the Slay-the-Spire-style node graph the game shows between rooms: one node
+is one level blueprint, and the graph of them is the whole run. Saved to
+`CustomDungeonMaps/<name>.json`, and every saved file registers a custom dungeon at startup — so the
+map *is* the dungeon, and there is no second file to keep in step with it. **Enter Dungeon** runs it.
+
+Four buttons, because the others turned out to be the same job twice. **Save Dungeon** opens the
+game's name dialog — the same one the map save and the lighting profiles use — prefilled with the
+current name, so it is also the rename (confirming a different name writes a second dungeon and
+leaves the first alone) and it carries its own overwrite warning, which is what the old
+press-twice-to-confirm was for. A separate *Preview Map* button went too: the grid overlay already
+draws the graph with the game's own node icons, and the only thing the real selector added was the
+jitter it applies on top.
+
+The side panel keeps the usual shape (new / open / rename / save / enter / grid size); the graph is
+edited on its own **grid overlay** behind *Edit Nodes*. **Left click places or selects; right click
+links.** Left-clicking an empty cell places a node, left-clicking a node selects it (and again
+deselects), and right-clicking a second node links or unlinks it to the selected one. Placing a node
+one layer from the selected one links them straight away, which is how a path gets laid out in one
+click per step. The node type picker retypes the selected node, or sets what the next placed node
+will be.
+
+Left click deliberately never links: clicking a second node used to mean "join these" while a
+selection was live and "select that one" otherwise, which is the same gesture doing two things.
+Right click is polled from `Input.GetMouseButtonDown(1)` and hit-tested against the cell rects
+rather than taken from the EventSystem — this game installs Rewired's pointer module, which the
+editor already works around for left clicks, and a link gesture that silently never fired would be
+worse than a hit test of our own. The overlay canvas is `ScreenSpaceOverlay`, so the null camera
+passed to `RectangleContainsScreenPoint` is correct.
+
+**Where the game's map lives.** `MapManager` (namespace `Map`, an embedded copy of the open-source
+Slay-the-Spire map package: `MapConfig`, `MapGenerator`, `Map`, `Node`, `NodeBlueprint`, `NodeType`,
+`Point`) holds `CurrentMap`, and `UIAdventureMapOverlayController` renders it. `EnterNode` is what
+turns a node into rooms: it reads `node.blueprint.RoomPrefabs` and feeds `BiomeGenerator` — the same
+seam level playback rides.
+
+**Nodes play levels.** Each node is bound to a `CTLevelBlueprint` from the Level tool through the
+overlay's *Plays level* dropdown; bound nodes carry a green corner badge. Entering one generates
+that level's room chain instead of what the node's type would have produced. A node left on
+*Vanilla floor* behaves exactly as the game intended, so a run can mix both.
+
+**The bottom node is the first floor**, and there can only be one of it — the game does not let the
+player choose where to start: its renderer marks `GetFirstNode()` visited and offers that node's
+links, so a second bottom node would be drawn and never reachable. The exit door then decides:
+
+| Where the run is | What the exit door does |
+| --- | --- |
+| below the top layer | opens the map selector to pick the next floor |
+| on the top layer | shows the completion screen — the run is over |
+| map not playable / missing | shows the completion screen |
+
+**Notes on binding**
+
+- The binding hangs off `MapManager.EnterNode` as a **postfix**. The vanilla body sets the floor up;
+  the postfix adjusts it, and it is still early enough because `Regenerate` defers the entire
+  generation into an `MMTransition.Play` callback — nothing has read `OverrideRandomWalk` or
+  `NumberOfRooms` by the time the postfix returns.
+- A bound node forces `OverrideRandomWalk = false`, because only the floor types (`FirstFloor`,
+  `DungeonFloor`, `MiniBossFloor`, `Boss`, `FinalBoss`) generate a multi-room floor — every other
+  type is a single fixed room, which would show just the level's entrance. So binding a level to a
+  Treasure node turns it into a floor.
+- `BiomeGenerator.NumberOfRooms` is set to the level's room count and the biome's own value is put
+  back when a node without a level is entered. It is a field on the scene's `BiomeGenerator`, so a
+  level's length would otherwise stick to the rest of the run.
+- **The room hooks had to learn about vanilla dungeons.** Both `Door.OnTriggerEnter2D` and the
+  `GenerateRoom.Generate` postfix used to return early unless the current dungeon was a registered
+  custom one. A bound node plays inside the *vanilla* dungeon it was entered from, so both now also
+  run while `LevelPlayback.Active` — without the door half, `GenCheck` stays latched from the last
+  door and the next room's blueprint is never applied. The `NextLayer` exit-door branch stays
+  custom-only: on a real map that door is how the next node gets picked.
+- Entry from the map is not a door, so nothing resets the hand-off the room hook reads;
+  `DungeonPatches.ResetRoomHandoff()` does it when the level binds.
+- **The door prefix repeats vanilla's own opening conditions before it acts** (`IsPlayerUsingDoor`):
+  a `PlayerFarming` collider, not already `Used`, no transition playing, not `GoToAndStopping`, and
+  not a `False`/`LeaderBoss` door. It used to act on any collider touching any door trigger, which
+  produced two separate mysteries. Followers, thrown items and knocked-back enemies were setting
+  the room hand-off at arbitrary moments, so blueprints re-applied to rooms that were already built
+  and their doors jumped to another room's authored positions. And the player's own scripted
+  walk-in — `GoToAndStopping`, the thing vanilla checks precisely so an arrival cannot use a door —
+  reached the far door of a small single-room node (a Wood or Food room) and fired the exit, so the
+  dungeon map reopened the instant a node was entered. The `NextLayer` branch also marks the door
+  `Used` now: it never reaches vanilla, so nothing else would.
+- `LevelPlayback.StartForMapNode` deliberately skips the `EnterDungeon` that F5 playback does —
+  `EnterNode` has already queued a regenerate of the floor in place, and re-entering would throw
+  that run away. Both paths share one `Resolve` for picking a node blueprint per level room.
+- The map holds names, not blueprints: a level renamed or deleted after binding logs a warning and
+  the node falls back to a vanilla floor. Save and Enter both name it, since it is nearly always a
+  rename.
+
+**Notes on the dungeon**
+
+- The map is remembered **on entry** (`DungeonMapPlayback.UseMap`), not looked up on exit: by the
+  time the exit door asks, the thing that knew which map this dungeon uses is out of reach.
+- **A custom dungeon has to be told which encounter layer it is on.** `CustomDungeon.EnterDungeon`
+  calls vanilla's `Interaction_BaseDungeonDoor.GetFloor`, which reads the layer out of save data
+  keyed by location — and `DataManager.GetDungeonLayer` returns 0 for anything it does not
+  recognise, which every minted location is. `IslandPiece.AvailableOnLayer` has no case for layer
+  0, so *every* island encounter reported itself unavailable and a node without a level generated
+  rooms containing nothing: no enemies, no resources, and the generator logging that it had run
+  out of encounters. `CustomDungeon.DungeonLayer` (1–4, default 1) is clamped into
+  `GameManager.CurrentDungeonLayer` straight after that call.
+- Boss and MiniBoss nodes with no level bound still generate an *ordinary* floor: vanilla decides
+  whether a floor is a boss fight from `DataManager.DungeonBossFight`, which `GetFloor` computes
+  from the same save data a custom location has none of. Saving warns rather than refusing —
+  the map plays, the icon just promises more than the floor delivers. Bind a level to author what
+  happens there.
+- **The start node's level binds in `OnBiomeReady`, not in `EnterDungeon`.** A level run is static
+  state, and everything between the button press and the new scene can end it: the editor closing,
+  the old scene tearing down, the entry guard, a node-entry patch firing on somebody else's map.
+  Binding in `EnterDungeon` survived about three log lines. `CustomDungeon.OnBiomeReady` is called
+  from `BiomeGenerator.OnEnable`, in the dungeon's own scene, once per entry and before any room
+  generates — the first moment at which nothing left over from the old scene can undo the binding,
+  and still early enough that the entrance room's hook sees it.
+- `DungeonMapPlayback.OnNodeEntered` acts only on nodes from the graph *it* installed
+  (`ReferenceEquals(MapManager.CurrentMap, _built)`). The `EnterNode` patch fires for whatever map
+  the game is showing, and a node from the player's ordinary adventure map reads as "a node with no
+  level" — which ended the run this dungeon had just bound.
+- `LevelPlayback.Stop` logs its caller. A level run ending early is otherwise invisible: the
+  symptom appears rooms later as a floor that generated vanilla content, with nothing in the log
+  tying it to whoever ended the run.
+- A dungeon that binds a level before its scene loads must say so with
+  `CustomDungeon.DrivesLevelPlayback`. `BiomeGenerator.OnEnable` ends any level run whose dungeon
+  did not bring its own — otherwise a run's statics leak into an unrelated scene — and that guard
+  used to name `CTLevelDungeon` as the one exception.
+- Arriving in the dungeon plays the bottom node's level without showing the map. That lines up with
+  the game: the first time the selector opens it marks `GetFirstNode()` visited, so layer 0 is
+  already behind the player.
+- A scene load builds a fresh `MapManager` with no map of ours in it, so the graph is rebuilt and
+  re-installed on the first exit after entering. Node entry does *not* reload the scene
+  (`Regenerate` passes `MMTransition.NO_SCENE`), so progress along `Map.path` survives between
+  floors — which is what the top-layer check reads.
+- `CustomDungeonManager.Add` mints a `FollowerLocation` from `GuidManager` keyed by a name, and every
+  map dungeon shares the same `Location` seed — so `Add` now keys on `InternalName` when there is
+  one. Without that the second dungeon minted the first one's value and threw on insert.
+  Registration is idempotent: a map already registered keeps its minted location and only its graph
+  is refreshed, which is what lets *Save Dungeon* make it enterable without a restart.
+- `SceneName` is a json field with no control in the tool. The editor only knows `Dungeon1` is real,
+  and offering scene names that may not exist is worse than editing the file.
+- `CTLevelDungeon` (the Level tool's *Play Level*) clears the installed map on entry, so a map left
+  behind by a *Preview Map* press cannot turn a single level's exit into a node picker.
+
+--- | --- |
+| empty | shows the completion screen — a one-floor dungeon |
+| set, current node below the top layer | opens the map selector to pick the next floor |
+| set, current node on the top layer | shows the completion screen — the run is over |
+
+**Notes**
+
+- The map is remembered **on entry** (`DungeonMapPlayback.UseMap`), not looked up on exit: by the
+  time the exit door asks, the blueprint that named it is out of reach.
+- The first floor is the map's bottom layer. `ShowMap` marks `GetFirstNode()` visited and offers
+  its outgoing links, so arriving in the dungeon and then meeting the map lines up with layer 0
+  already being behind the player.
+- A scene load builds a fresh `MapManager` with no map of ours in it, so the graph is rebuilt and
+  re-installed on the first exit after entering. Node entry does *not* reload the scene
+  (`Regenerate` passes `MMTransition.NO_SCENE`), so progress along `Map.path` survives between
+  floors.
+- `CustomDungeonManager.Add` mints a `FollowerLocation` from `GuidManager` keyed by a name, and
+  every json dungeon shares the same `Location` seed — so `Add` now keys on `InternalName` when
+  there is one. Without that the second dungeon minted the first one's value and threw on insert.
+  Registration is idempotent: a dungeon already registered keeps its minted location and only its
+  blueprint is refreshed, which is what lets *Save Dungeon* make a dungeon enterable without a
+  restart.
+- `CTLevelDungeon` (the Level tool's *Play Level*) clears the installed map on entry, so a map left
+  behind by a *Test Map* press cannot turn a single level's exit into a node picker.
+
+**Notes**
+
+- **It is a grid because the renderer is.** `MakeMapNode` positions every node at
+  `new Vector2(point.x, point.y) * 300f + Random.insideUnitCircle * 50f` — the integer cell is the
+  position, `Node.position` is not read at all, and the jitter is re-rolled every time the map
+  opens. Authoring finer than a cell would be discarded on the first open.
+- Editing happens on the editor's own canvas rather than inside the vanilla overlay, which is a
+  `UIMenuBase` built in one pass in `OnShowStarted`, wired into the game's menu stack and Rewired
+  navigation, and which pauses the simulation and pulls the camera's far plane to 0.02 to hide the
+  world. The editor is deliberately outside that stack.
+- Layer 0 is the bottom row on screen and the start of the run, matching `point.y`. `outgoing`
+  points up the map (toward the end), `incoming` back down; the builder fills both from the single
+  authored `Outgoing` list, because two stored directions of one fact drift apart.
+- Links only join neighbouring layers. Traversal itself does not check — `GetNextAdventureMapNodes`
+  just walks `outgoing` — but the player moves one layer per step, so a longer link draws a line
+  nothing can use.
+- Save always writes, even when the map is not playable yet; the status bar says what is missing.
+  **Test** refuses, because each rule it checks is a crash or a blank screen in the game's own code:
+  a dangling link is an unchecked `NodeFromPoint` in `MakeLineConnection`; no node on layer 0 makes
+  `GetFirstNode()` (a `.First()`) throw; a node with no links at all is silently skipped by the
+  renderer; and every node has to be reachable from layer 0 or it is drawn but unenterable.
+- The node type list is only the types the loaded `MapConfig` has a blueprint for — a type without
+  one has no icon and no `RoomPrefabs`, so it would place a node that cannot be entered. Cell icons
+  are the blueprint's own sprite via `GetSprite`.
+- `Node`'s constructor hides one node in ten at random; authored nodes are built with
+  `Hidden = false, CanBeHidden = false` so the map shows what was drawn.
+- A hand-built map leaves `MapGenerator`'s static layer list empty, so the three tarot cards that
+  rewrite the map at runtime (shuffle, randomise-next, teleporter) no-op on custom maps. The other
+  readers of that state (`WorldManipulatorManager`, `DungeonLeaderMechanics`) already test for
+  `Nodes.Count == 0`.
+- Test closes the editor first (`ExitForPlayback`), as Play Level does: the selector is a real menu
+  and needs `timeScale`, the HUD and the camera handed back.
+
 ---
 
 ## Trigger actions
 
-Six action types, each authored through the trigger tool's dropdowns:
+Actions are authored through the trigger tool's dropdowns, grouped: *Add action* offers a category,
+the same dropdown then offers that category's actions, and after that whatever the chosen action
+still needs. A category holding one action skips its own submenu.
+
+**Player actions**
 
 | Action | Target | Behaviour |
 | --- | --- | --- |
@@ -457,8 +701,126 @@ Six action types, each authored through the trigger tool's dropdowns:
 | Move players to object | a clicked object | walks them to that object (falls back to the authored position) |
 | Talk to custom NPC | a registered `InternalName` | runs that NPC's dialogue tree and waits for it |
 | Play animation on players | an animation on the player skeleton | plays it once, or loops it for 2 / 5 / 10s |
+
+**Camera actions**
+
+| Action | Target | Behaviour |
+| --- | --- | --- |
+| Look at object | a clicked object | frames it for 0.5–8s, then hands the camera back |
+| Look at trigger | another trigger's Id | same, aimed at that volume's centre |
+| Set camera offset | framed in the editor | shifts the camera relative to whatever it follows |
+| Reset camera offset | — | back to centred on the players |
+| Set camera zoom | 1–10 | follow distance; smaller is closer, 10 is the rig's own resting value |
+| Reset camera zoom | — | back to whatever the rig was on before a trigger touched it |
+| Play camera effect | chromatic aberration, vignette, desaturate, shake, letterbox in/out | runs the effect and waits for it |
+| Play cutscene | a video in `CustomCutscenes`, or a vanilla one | plays fullscreen and waits for it to end |
+
+**Screen text**
+
+| Action | Target | Behaviour |
+| --- | --- | --- |
+| Caption (bottom left) | typed title + subtext | the pair, bottom left |
+| Title (top of screen) | typed title + subtext | the same pair, top centre |
+| Fullscreen text (centre) | typed title + subtext | the pair centred over a 75% dimmed screen |
+
+**Ambient actions**
+
+| Action | Target | Behaviour |
+| --- | --- | --- |
 | Apply lighting | a saved lighting profile, or "Vanilla lighting" | cross-fades the room's lighting over 1 / 2 / 4s (or instant), then moves on; vanilla restores the biome's own values |
 | Change music | an FMOD music event | starts the track and keeps it looping; does not wait for it |
+
+**Wait for seconds** stands on its own: 0.5–8 seconds of nothing, for pacing between two other
+actions. It waits in realtime, because a sequence is often running while the game is paused around
+a conversation and a scaled wait would never end there.
+
+### Camera
+
+Everything here drives `CameraFollowTarget`, the rig the game's own cutscenes push around, rather
+than moving the camera transform — which the rig would overwrite on the next frame.
+
+- **Offset** is `TargetOffset`, which the rig lerps towards, so the shift is a glide. It is stored
+  relative to the follow target rather than as a world position, because at run time the players
+  are somewhere else entirely. Authoring it is by eye: choosing the action snaps the editor view
+  back onto the players, you pan with `WASD` to the framing you want, and `V` takes the difference.
+- **Zoom** is `targetDistance`. The reset remembers what the rig was on before a trigger first
+  touched it, captured lazily — the rig's own value is only settled once the room has generated.
+- Both are global state on a rig that outlives the room, exactly like the lighting override, so
+  `TriggerCameraActions.ResetAll()` is called from the same place lighting is cleared
+  (`BiomeGenerator.OnEnable`). Without that, a room that zoomed in would hand the zoom to the next.
+- **Look at** swaps the rig's follow targets rather than teleporting: the move is the camera's
+  ordinary smoothed follow, and the players keep playing underneath. The anchor is parented to the
+  object so a moving target stays framed, target weights are restored exactly (co-op frames two
+  players by weight), and if everything it was following is gone by the end — a room reload during
+  the shot — the player's camera bone is put back, because the rig only updates while it has a
+  target.
+- **Effects** are `BiomeConstants`' own post-processing tweens (the ones the bosses and the winter
+  events use), `CameraManager.ShakeCameraForDuration`, and the cinematic `LetterBox`. The pulses run
+  out and back over the action's duration, so a sequence cannot leave the screen stuck in an effect
+  it forgot to undo; each tween is told where to start as well as where to end, so the return leg is
+  exact. The letterbox is the exception — bars are a state, which is why they are two actions.
+
+### Screen text
+
+Three actions, all drawing the same pair of lines: a **title** and an optional **subtext** under
+it, at two clearly different sizes. Each is typed into its own dialog when the action is added
+(title, then subtext, then how long it stays up) — the second can be left empty, since a title on
+its own is a perfectly good caption.
+
+| Action | Where |
+| --- | --- |
+| Caption | bottom left, left aligned |
+| Title | top centre |
+| Fullscreen text | centred, over a screen dimmed to 75% |
+
+**The canvas is ours, not the game's.** This started on `HUD_DisplayName` — the dungeon-name text —
+and that was wrong three ways: it forces `<uppercase>` on whatever it is given, it has exactly two
+positions (`BottomRight` and `Centre`) and neither is where a caption belongs, and it is a single
+line, so a title and its subtext could not be two sizes. Owning the canvas makes all three layout
+rather than obstacles, and authored text now appears exactly as typed.
+
+- The font is the game's own **FiraSans SDF**, the face the intro's "a game by Massive Monster" is
+  set in (`Intro Room 1/Canvas/Game by MM`). It is found among the font assets already in memory
+  rather than loaded or shipped — the HUD uses it, so it is always there — via
+  `Resources.FindObjectsOfTypeAll<TMP_FontAsset>()`, which reaches assets no live object happens to
+  reference. If it cannot be found, whatever the game's own UI is set in stands in.
+- The canvas is `ScreenSpaceOverlay` at sorting order 4000: above the HUD, below the editor's own
+  panels, which are only up while the game is paused for editing anyway. It has no
+  `GraphicRaycaster` and every element has `raycastTarget` off — this is scenery, and a raycaster
+  would eat clicks meant for the game.
+- A `CanvasScaler` at a fixed 1920×1080 reference means an authored font size means the same thing
+  on every display.
+- Fullscreen dims to 75%, not black, so the room stays readable behind the text. The dim fades
+  with the text rather than snapping.
+- Fades are **unscaled** throughout: a sequence often runs while the game is paused around a
+  conversation, and a scaled fade would sit at zero alpha until it resumed.
+- One overlay, reused. A second caption while the first is still up replaces it rather than
+  stacking. A scene load takes it with it, which is right — text from the last room has no
+  business in this one — so a missing overlay is rebuilt on the next call.
+- Text does not block the sequence, the same way music does not. Use *Wait* for pacing.
+- The true fullscreen quote screen (the Woolhaven intro) is a scene of its own,
+  `QuoteScreenController` plus a transition into the `QuoteScreen` scene, with text from
+  `QUOTE/<type>` localisation keys — using it mid-room would mean leaving the dungeon and coming
+  back. This draws the same idea in place instead.
+
+### Cutscenes
+
+`MMTools.MMVideoPlayer` is how the game plays its own — the prefab, the fullscreen surface, the
+skip prompt and the menu blocking are all vanilla, and *Play cutscene* uses them.
+
+Vanilla cutscenes are `VideoClip`s compiled into `Resources` (`Intro`, `DLC_Intro`, `Trailer`,
+`Update_Video`), and a `VideoClip` cannot be built at run time, so custom videos take Unity's other
+route: `VideoSource.Url` pointed at the file. Drop an `.mp4` (or `.webm`, `.mov`, `.m4v`) into
+`BepInEx/plugins/CultTweaker/CustomCutscenes` and it is a cutscene named after the file — there is
+no config.json and no registration step, and the folder is re-read every time the picker opens.
+
+`MMVideoPlayer.Play` starts the video the moment it is called, so a custom video cannot be set up
+by calling it and correcting the source afterwards: the start on a source that does not exist
+raises an error that ends the cutscene before the real one loads. `PlayFromFile` therefore repeats
+Play's setup with the url in place from the start, including the statics the vanilla component's
+own `Update` reads — without those the skip button does nothing and the end of the video is never
+noticed. The sequence waits for the cutscene, with a 15-minute ceiling so a video that never
+reports finishing cannot strand the run.
 
 **Apply lighting asks for a fade length** after the profile, the way the animation action asks for
 a loop length, and stores it in the same `Duration` field. The fade goes through the manager's own
@@ -608,6 +970,8 @@ half-open, visible and permanently unable to take a keystroke.
 | `CustomRoomPatches.cs` | Marks rooms whose contents a blueprint replaced |
 | `Tools/*.cs` | One file per tool, plus shared gizmos, ghosts and protection rules |
 | `Tools/TriggerActions.cs` | Trigger action model and the sequence runner |
+| `Tools/TriggerCameraActions.cs` | Camera offset/zoom/look-at, post-processing effects, cutscenes |
+| `Tools/TriggerScreenText.cs` | The caption / title / fullscreen text overlay |
 | `Npc/*.cs` | Custom NPC behaviour, dialogue schema and dialogue runner |
 
 Anything protected by `MapEditorProtection` is never destroyed by the clear or delete tools — doors

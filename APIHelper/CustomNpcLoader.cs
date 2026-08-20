@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using COTL_API.Helpers;
 using CustomSpineLoader.MapEditor.Npc;
+using CustomSpineLoader.SpineLoaderHelper;
 using UnityEngine;
 
 namespace CustomSpineLoader.APIHelper;
@@ -104,48 +105,19 @@ public class CustomNpcLoader : Loader<CustomNpcConfig>
         }
     }
 
-    // The FollowerSpines recipe: text assets from disk, textures named after their file (the
-    // atlas resolves pages by name), the Spine/Skeleton shader, scale 0.005. Null when the
-    // folder ships no spine - the NPC then wears its mimic's own skeleton, which is legitimate
-    // (a re-dialogued lost lamb needs no art).
+    // The shared folder recipe (SpineFolderLoader). Null when the folder ships no spine - the
+    // NPC then wears its mimic's own skeleton, which is legitimate (a re-dialogued lost lamb
+    // needs no art).
     private static Spine.Unity.SkeletonDataAsset BuildSpine(string folder, CustomNpcConfig config,
         string internalName)
     {
-        var skeletonFile = !string.IsNullOrEmpty(config.SkeletonPath)
-            ? Path.Combine(folder, config.SkeletonPath)
-            : Directory.GetFiles(folder, "*.json", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault(f => !Path.GetFileName(f).Equals("config.json", StringComparison.OrdinalIgnoreCase));
+        var data = SpineFolderLoader.Build(folder, internalName, config.SkeletonPath, config.AtlasPath,
+            config.TexturePaths);
 
-        var atlasFile = !string.IsNullOrEmpty(config.AtlasPath)
-            ? Path.Combine(folder, config.AtlasPath)
-            : Directory.GetFiles(folder, "*.atlas", SearchOption.TopDirectoryOnly).FirstOrDefault();
-
-        var textureFiles = config.TexturePaths is { Length: > 0 }
-            ? config.TexturePaths.Select(p => Path.Combine(folder, p)).ToArray()
-            : Directory.GetFiles(folder, "*.png", SearchOption.TopDirectoryOnly);
-
-        if (skeletonFile == null || atlasFile == null || textureFiles.Length == 0)
-        {
+        if (data == null)
             Plugin.Log.LogInfo($"Custom NPC '{internalName}': no spine assets in folder, " +
                                "using the mimic's own skeleton.");
-            return null;
-        }
 
-        var atlasText = new TextAsset(File.ReadAllText(atlasFile));
-        var skeletonText = new TextAsset(File.ReadAllText(skeletonFile));
-
-        var textures = new Texture2D[textureFiles.Length];
-        for (var i = 0; i < textureFiles.Length; i++)
-        {
-            var texture = TextureHelper.CreateTextureFromPath(textureFiles[i]);
-            // The atlas resolves its pages by texture NAME; without this the skeleton renders
-            // blank.
-            texture.name = Path.GetFileNameWithoutExtension(textureFiles[i]);
-            textures[i] = texture;
-        }
-
-        var material = new Material(Shader.Find("Spine/Skeleton"));
-        var atlas = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasText, textures, material, true);
-        return Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skeletonText, atlas, true, 0.005f);
+        return data;
     }
 }

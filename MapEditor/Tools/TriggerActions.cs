@@ -18,7 +18,34 @@ public enum TriggerActionType
     ApplyLighting,
 
     // Target is an FMOD music event path. Plays it and keeps it looping.
-    ChangeMusic
+    ChangeMusic,
+
+    // Duration seconds of nothing at all. A beat between two other actions.
+    Wait,
+
+    // Position is the offset from whatever the camera follows, captured in the editor.
+    CameraOffset,
+    CameraOffsetReset,
+
+    // Amount is the follow distance: smaller is closer.
+    CameraZoom,
+    CameraZoomReset,
+
+    // Frames the target for Duration seconds, then hands the camera back.
+    CameraLookAtObject,
+    CameraLookAtTrigger,
+
+    // Target names one of TriggerCameraActions.Effects; Duration is how long it runs.
+    CameraEffect,
+
+    // Target names a video in CustomCutscenes, or one of the game's own. Loop doubles as
+    // "skippable" here: a cutscene has nothing to loop.
+    PlayCutscene,
+
+    // Target is the text itself, Duration how long it stays up.
+    ShowCaption,
+    ShowFullscreenText,
+    ShowTitleText
 }
 
 // One step of a trigger's sequence. The runtime twin of MapTriggerActionData - the tool edits
@@ -36,6 +63,13 @@ public class TriggerAction
     public float Spread = 1.3f;
     public bool Loop;
     public float Duration;
+
+    // A second number, for actions whose Duration already means something else. Camera zoom
+    // is the only one so far.
+    public float Amount;
+
+    // Screen text is two lines of different sizes: Target is the title, this is the line under it.
+    public string Subtext = "";
 
     // A conversation hands input back to the player (the wheel needs a button press), so the
     // control lock is lifted around it. Everything else runs on rails.
@@ -60,8 +94,33 @@ public class TriggerAction
             (string.IsNullOrEmpty(Target) ? "Lighting: vanilla" : $"Lighting: {Target}") +
             (LightingFade > 0f ? $" ({LightingFade:0.#}s)" : " (instant)"),
         TriggerActionType.ChangeMusic => $"Music: {MusicTool.ShortName(Target)}",
+        TriggerActionType.Wait => $"Wait {Duration:0.#}s",
+        TriggerActionType.CameraOffset =>
+            $"Camera offset ({Position.x:0.#}, {Position.y:0.#})",
+        TriggerActionType.CameraOffsetReset => "Camera offset: reset",
+        TriggerActionType.CameraZoom => $"Camera zoom {Amount:0.#}",
+        TriggerActionType.CameraZoomReset => "Camera zoom: reset",
+        TriggerActionType.CameraLookAtObject =>
+            $"Camera looks at {ShortName(Target)} ({Duration:0.#}s)",
+        TriggerActionType.CameraLookAtTrigger =>
+            $"Camera looks at trigger {Target} ({Duration:0.#}s)",
+        TriggerActionType.CameraEffect => $"Effect: {Target} ({Duration:0.#}s)",
+        TriggerActionType.PlayCutscene =>
+            $"Cutscene: {Target}" + (Loop ? " (skippable)" : ""),
+        TriggerActionType.ShowCaption => $"Caption: {Quote(Target)}{SubtextNote()}",
+        TriggerActionType.ShowFullscreenText => $"Fullscreen: {Quote(Target)}{SubtextNote()}",
+        TriggerActionType.ShowTitleText => $"Title: {Quote(Target)}{SubtextNote()}",
         _ => Type.ToString()
     };
+
+    private string SubtextNote() => string.IsNullOrEmpty(Subtext) ? "" : " + subtext";
+
+    // Long captions would push every other row's wording off the panel.
+    private static string Quote(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return "\"\"";
+        return text.Length <= 22 ? $"\"{text}\"" : $"\"{text.Substring(0, 21)}...\"";
+    }
 
     private static string ShortName(string path)
     {
@@ -149,6 +208,71 @@ public static class TriggerActions
 
             case TriggerActionType.ChangeMusic:
                 ChangeMusic(action.Target);
+                break;
+
+            case TriggerActionType.Wait:
+                // Unscaled: a sequence that locks the players is often running while the game is
+                // paused around a conversation, and a scaled wait would never end there.
+                yield return new WaitForSecondsRealtime(Mathf.Max(0f, action.Duration));
+                break;
+
+            case TriggerActionType.CameraOffset:
+                TriggerCameraActions.SetOffset(action.Position);
+                break;
+
+            case TriggerActionType.CameraOffsetReset:
+                TriggerCameraActions.ResetOffset();
+                break;
+
+            case TriggerActionType.CameraZoom:
+                TriggerCameraActions.SetZoom(action.Amount);
+                break;
+
+            case TriggerActionType.CameraZoomReset:
+                TriggerCameraActions.ResetZoom();
+                break;
+
+            case TriggerActionType.CameraLookAtObject:
+            {
+                var go = ResolveObject(action.Target);
+                yield return TriggerCameraActions.LookAt(go, action.Position, action.Duration);
+                break;
+            }
+
+            case TriggerActionType.CameraLookAtTrigger:
+            {
+                var target = FindTrigger(action.Target);
+                if (target == null)
+                {
+                    Plugin.Log.LogWarning($"MapEditor: camera action targets missing trigger '{action.Target}'.");
+                    break;
+                }
+
+                yield return TriggerCameraActions.LookAt(null, target.transform.position, action.Duration);
+                break;
+            }
+
+            case TriggerActionType.CameraEffect:
+                yield return TriggerCameraActions.PlayEffect(action.Target, action.Duration);
+                break;
+
+            case TriggerActionType.PlayCutscene:
+                yield return TriggerCameraActions.PlayCutscene(action.Target, action.Loop);
+                break;
+
+            case TriggerActionType.ShowCaption:
+                TriggerScreenText.Show(TriggerScreenText.Mode.Caption, action.Target,
+                    action.Subtext, action.Duration);
+                break;
+
+            case TriggerActionType.ShowFullscreenText:
+                TriggerScreenText.Show(TriggerScreenText.Mode.Fullscreen, action.Target,
+                    action.Subtext, action.Duration);
+                break;
+
+            case TriggerActionType.ShowTitleText:
+                TriggerScreenText.Show(TriggerScreenText.Mode.Title, action.Target,
+                    action.Subtext, action.Duration);
                 break;
         }
     }
@@ -491,7 +615,9 @@ public static class TriggerActions
                 Position = MapEditorSerialization.ToVector3(entry.Position),
                 Spread = entry.Spread > 0f ? entry.Spread : 1.3f,
                 Loop = entry.Loop,
-                Duration = entry.Duration
+                Duration = entry.Duration,
+                Amount = entry.Amount,
+                Subtext = entry.Subtext ?? ""
             });
         }
 
@@ -513,7 +639,9 @@ public static class TriggerActions
                 Position = MapEditorSerialization.V3(action.Position),
                 Spread = action.Spread,
                 Loop = action.Loop,
-                Duration = action.Duration
+                Duration = action.Duration,
+                Amount = action.Amount,
+                Subtext = action.Subtext ?? ""
             });
         }
 

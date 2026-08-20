@@ -115,6 +115,7 @@ public class RuntimeMapEditor : MonoBehaviour
         _tools.Add(new ClearTool(this));
         _tools.Add(new LoadTool(this));
         _tools.Add(new LevelTool(this));
+        _tools.Add(new DungeonBuilderTool(this));
     }
 
     public T GetTool<T>() where T : class, IMapEditorTool => _tools.OfType<T>().FirstOrDefault();
@@ -477,6 +478,12 @@ public class RuntimeMapEditor : MonoBehaviour
     }
 
     public Vector3 MouseWorld() => ScreenToWorld(Input.mousePosition);
+
+    // Where the editor's view is pointed. The anchor rather than the camera transform: the
+    // camera sits back from it along the rig's own angle, which is not what an author means by
+    // "where the camera is looking".
+    public Vector3 CameraFocus =>
+        _cameraAnchor != null ? _cameraAnchor.transform.position : Vector3.zero;
 
     // Recentres the view. Moves the follow anchor rather than the camera, which the game's rig
     // would otherwise overwrite on the next frame.

@@ -18,7 +18,14 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     private readonly List<Color> _originalColors = [];
     private GameObject _outline;
     private GameObject _grip;
+    private GameObject _resizeNode;
     private Canvas _gripCanvas;
+
+    // Captured on mouse-down on the resize node: what the object measured before the drag, so
+    // every frame scales from that rather than compounding the previous frame's result.
+    private Vector3 _resizeStartScale;
+    private Vector3 _resizeStartCentre;
+    private Vector3 _resizeStartGrab;
 
     public SelectTool(RuntimeMapEditor editor)
     {
@@ -43,6 +50,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     [
         ("LMB", "Select object"),
         ("Ctrl", "+ drag to clone"),
+        ("Drag", "Yellow node moves, blue node resizes"),
+        ("Shift", "+ drag blue node to stretch one axis"),
         ("Del", "Delete selected")
     ];
 
@@ -144,12 +153,16 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         MapEditorGizmos.UpdateSelectionBox(_outline, _selected);
 
-        if (_grip == null) return;
         var cam = SceneRefs.Cam;
         if (cam == null) return;
 
-        _grip.GetComponent<RectTransform>().position =
-            cam.WorldToScreenPoint(MapEditorGizmos.GripPosition(_selected));
+        if (_grip != null)
+            _grip.GetComponent<RectTransform>().position =
+                cam.WorldToScreenPoint(MapEditorGizmos.GripPosition(_selected));
+
+        if (_resizeNode != null)
+            _resizeNode.GetComponent<RectTransform>().position =
+                cam.WorldToScreenPoint(MapEditorGizmos.CornerPosition(_selected));
     }
 
     private static string DescribeHit(Collider2D hit)
@@ -285,23 +298,28 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     private void DrawOutline(GameObject go)
     {
         _outline = MapEditorGizmos.CreateSelectionBox(go, "MapEditor_SelectionOutline");
-        _grip = CreateGrip();
+        _grip = CreateHandle("Grip", MapEditorGizmos.GripColour, SelectHandle.Mode.Move, 30f);
+        _resizeNode = CreateHandle("Resize", ResizeColour, SelectHandle.Mode.Resize, 24f);
     }
 
-    // Yellow grip at the selection's centre, matching the shape tool's move node.
-    private GameObject CreateGrip()
+    // The trigger tool's resize node in the same blue, so the two tools read alike.
+    private static readonly Color ResizeColour = new(0.25f, 0.85f, 1f, 0.95f);
+
+    // Yellow grip at the selection's centre, matching the shape tool's move node; blue node on
+    // the outline's top-right corner for resizing.
+    private GameObject CreateHandle(string name, Color colour, SelectHandle.Mode mode, float size)
     {
-        var go = new GameObject("MapEditor_SelectionGrip");
+        var go = new GameObject("MapEditor_Selection" + name);
         go.transform.SetParent(GripRoot(), false);
 
         var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(30f, 30f);
+        rt.sizeDelta = new Vector2(size, size);
 
         var img = go.AddComponent<Image>();
-        img.color = MapEditorGizmos.GripColour;
+        img.color = colour;
 
-        var handle = go.AddComponent<SelectMoveHandle>();
-        handle.Initialize(this, _editor);
+        var handle = go.AddComponent<SelectHandle>();
+        handle.Initialize(this, _editor, mode);
 
         _editor.RegisterUiBlocker(rt);
         return go;
@@ -335,6 +353,79 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         // Moving anything out of its culling area would otherwise see it deactivated when
         // culling resumes, exactly as happened with doors.
         _editor.KeepCullingSuspended = true;
+    }
+
+    // ---- resizing -------------------------------------------------------------------------
+
+    // Captures what the object measured before the drag. False when the selection cannot be
+    // resized, or when the grab landed on the centre - a footprint that small has no direction
+    // to scale along, and the ratio would be a division by nothing.
+    public bool BeginResize(Vector3 world)
+    {
+        if (_selected == null) return false;
+
+        if (_selected.GetComponentInChildren<Door>(true) != null ||
+            _selected.GetComponentInParent<Door>(true) != null)
+        {
+            _editor.SetStatus("Doors cannot be resized.", StatusSeverity.Warning);
+            return false;
+        }
+
+        _resizeStartScale = _selected.transform.localScale;
+        _resizeStartCentre = MapEditorGizmos.GripPosition(_selected);
+        _resizeStartGrab = world - _resizeStartCentre;
+        _resizeStartGrab.z = 0f;
+
+        if (_resizeStartGrab.magnitude < 0.05f)
+        {
+            _editor.SetStatus("This object is too small to resize by dragging.", StatusSeverity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    // Uniform by default: arbitrary room dressing distorts badly when its axes are scaled apart,
+    // so stretching one axis at a time is the deliberate choice (Shift), not the accident.
+    public void ResizeTo(Vector3 world, bool perAxis)
+    {
+        if (_selected == null) return;
+
+        var grab = world - _resizeStartCentre;
+        grab.z = 0f;
+
+        var scale = _resizeStartScale;
+        if (perAxis)
+        {
+            scale.x = AxisScale(_resizeStartScale.x, grab.x, _resizeStartGrab.x);
+            scale.y = AxisScale(_resizeStartScale.y, grab.y, _resizeStartGrab.y);
+        }
+        else
+        {
+            var factor = Mathf.Clamp(grab.magnitude / _resizeStartGrab.magnitude, 0.02f, 50f);
+            scale = _resizeStartScale * factor;
+        }
+
+        _selected.transform.localScale = scale;
+
+        // Grow about the visible centre. The transform's own pivot is wherever the artist put it,
+        // often a corner or a floor line, and scaling around that would walk the object out from
+        // under the cursor.
+        var centre = MapEditorGizmos.GripPosition(_selected);
+        var drift = _resizeStartCentre - centre;
+        var position = _selected.transform.position;
+        _selected.transform.position = new Vector3(position.x + drift.x, position.y + drift.y, position.z);
+
+        _editor.KeepCullingSuspended = true;
+        _editor.SetStatus($"{_selected.name} scale {scale.x:0.##} x {scale.y:0.##}");
+    }
+
+    // A grab that started with almost no reach along this axis leaves it alone: the ratio there
+    // is noise, and it would snap the axis to an extreme on the first pixel of movement.
+    private static float AxisScale(float startScale, float grab, float startGrab)
+    {
+        if (Mathf.Abs(startGrab) < 0.05f) return startScale;
+        return startScale * Mathf.Clamp(grab / startGrab, 0.02f, 50f);
     }
 
     private void NudgeZ(float delta)
@@ -389,6 +480,9 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         if (_grip != null) Object.Destroy(_grip);
         _grip = null;
+
+        if (_resizeNode != null) Object.Destroy(_resizeNode);
+        _resizeNode = null;
     }
 
     private void DeleteSelected()
@@ -428,29 +522,53 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     }
 }
 
-// Drags the whole selected object. Grab offset is captured on mouse-down so the object does not
-// snap its centre to the cursor.
-public class SelectMoveHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
+// Drags the selected object's centre or its corner, the same pair of nodes the trigger tool
+// uses. The move grab offset is captured on mouse-down so the object does not snap its centre to
+// the cursor; the resize drag captures the object's starting size for the same reason.
+public class SelectHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
 {
+    public enum Mode
+    {
+        Move,
+        Resize
+    }
+
     private SelectTool _tool;
     private RuntimeMapEditor _editor;
+    private Mode _mode;
     private Vector3 _grabOffset;
+    private bool _resizing;
 
-    public void Initialize(SelectTool tool, RuntimeMapEditor editor)
+    public void Initialize(SelectTool tool, RuntimeMapEditor editor, Mode mode)
     {
         _tool = tool;
         _editor = editor;
+        _mode = mode;
     }
 
     public void OnBeginDrag(PointerEventData eventData)
     {
         if (_tool == null || _editor == null || !_tool.HasSelection) return;
-        _grabOffset = _tool.SelectedPosition - _editor.ScreenToWorld(eventData.position);
+
+        if (_mode == Mode.Move)
+        {
+            _grabOffset = _tool.SelectedPosition - _editor.ScreenToWorld(eventData.position);
+            return;
+        }
+
+        // A refused resize latches off for the whole drag, so a door does not report its warning
+        // once per frame.
+        _resizing = _tool.BeginResize(_editor.ScreenToWorld(eventData.position));
     }
 
     public void OnDrag(PointerEventData eventData)
     {
         if (_tool == null || _editor == null) return;
-        _tool.SetSelectedPosition(_editor.ScreenToWorld(eventData.position) + _grabOffset);
+
+        var world = _editor.ScreenToWorld(eventData.position);
+
+        if (_mode == Mode.Move) _tool.SetSelectedPosition(world + _grabOffset);
+        else if (_resizing)
+            _tool.ResizeTo(world, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
     }
 }

@@ -3,6 +3,8 @@ using CustomSpineLoader.APIHelper;
 using HarmonyLib;
 using MMBiomeGeneration;
 using MMRoomGeneration;
+using MMTools;
+using UnityEngine;
 using static MMRoomGeneration.GenerateRoom;
 
 namespace CustomSpineLoader.Patches
@@ -16,18 +18,52 @@ namespace CustomSpineLoader.Patches
         // entry prefers the opposite side.
         public static string LastDoorDirection = null;
 
+        // Puts the door hand-off back to "arriving fresh". Doors normally do this; a floor
+        // entered from the adventure map has no door to do it, and a latched GenCheck would make
+        // the room hook skip the first room of the level.
+        public static void ResetRoomHandoff()
+        {
+            GenCheck = false;
+            NextRoomConnectionType = ConnectionTypes.Entrance;
+            LastDoorDirection = null;
+        }
+
+        // Every route into a floor from the adventure map goes through here, so it is where an
+        // authored node hands its level over. A postfix rather than a prefix because the vanilla
+        // body is what sets up the floor this then adjusts - and it is still early enough:
+        // Regenerate defers the whole generation into an MMTransition callback.
+        [HarmonyPatch(typeof(global::Map.MapManager), nameof(global::Map.MapManager.EnterNode))]
+        [HarmonyPostfix]
+        private static void MapManager_EnterNode(global::Map.Node mapNode)
+        {
+            if (!MapEditor.DungeonMapPlayback.Active || mapNode == null) return;
+
+            try
+            {
+                MapEditor.DungeonMapPlayback.OnNodeEntered(mapNode);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError("MapEditor: dungeon map node entry failed: " + e);
+            }
+        }
+
         [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.OnEnable))]
         [HarmonyPrefix]
         private static void BiomeGenerator_OnEnable(BiomeGenerator __instance)
         {
-            // A dungeon entry that is not the level run's own ends that run, so its statics
-            // never leak into the next scene. FollowerLocation.None means "no entry pending"
-            // (a later re-enable of the same biome), which must leave a run alone.
+            // A dungeon entry that does not bring its own level ends the run in progress, so its
+            // statics never leak into an unrelated scene. FollowerLocation.None means "no entry
+            // pending" (a later re-enable of the same biome), which must leave a run alone.
+            //
+            // Asking the dungeon rather than naming one: CTLevelDungeon used to be the only thing
+            // that bound a level, and hardcoding it here meant a map dungeon - which binds its
+            // start node's level before the scene loads - had that binding torn down on arrival.
             var entering = CustomDungeonManager.EnteringCustomDungeon;
-            var levelLocation = MapEditor.CTLevelDungeon.Instance != null
-                ? MapEditor.CTLevelDungeon.Instance.Location
-                : FollowerLocation.None;
-            if (entering != FollowerLocation.None && entering != levelLocation)
+            var bindsOwnLevel = CustomDungeonManager.CustomDungeonList.TryGetValue(entering, out var target) &&
+                                target.DrivesLevelPlayback;
+
+            if (entering != FollowerLocation.None && !bindsOwnLevel)
                 MapEditor.LevelPlayback.Stop();
 
             // Any biome coming up starts on its own lighting: the map editor's override is
@@ -36,6 +72,10 @@ namespace CustomSpineLoader.Patches
             // the biome looked like" is dropped first - the new biome's values are its own.
             MapEditor.Tools.LightingTool.ClearOverride();
             MapEditor.Tools.LightingTool.ForgetBiomeSnapshot();
+
+            // Same reasoning for the camera: a trigger's offset or zoom lives on a rig that
+            // outlives the room, so it would follow the player into the next one.
+            MapEditor.Tools.TriggerCameraActions.ResetAll();
 
             if (CustomDungeonManager.CustomDungeonList.ContainsKey(CustomDungeonManager.EnteringCustomDungeon))
             {
@@ -53,7 +93,33 @@ namespace CustomSpineLoader.Patches
                 LastDoorDirection = null;
 
                 CustomDungeonManager.EnteringCustomDungeon = FollowerLocation.None;
-                
+
+                // Last, and deliberately here rather than in EnterDungeon: this is the first
+                // moment in the new scene, so whatever the dungeon sets up now cannot be undone
+                // by the teardown of the scene it came from.
+                var entered = CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation];
+
+                try
+                {
+                    entered.OnBiomeReady(__instance);
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogError("Custom dungeon OnBiomeReady failed: " + e);
+                }
+
+                // Started here rather than from OnBiomeReady so an override that forgets to call
+                // base cannot lose it. The biome is the host because it lives for the scene the
+                // caption belongs to, and dies with it.
+                try
+                {
+                    if (!string.IsNullOrEmpty(entered.CaptionTitle))
+                        __instance.StartCoroutine(CustomDungeon.ShowCaptionWhenPlayable(entered));
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning("Custom dungeon caption failed: " + e.Message);
+                }
             }
             else
             {
@@ -74,14 +140,38 @@ namespace CustomSpineLoader.Patches
 
         [HarmonyPatch(typeof(Door), nameof(Door.OnTriggerEnter2D))] //*** THIS IS TEMPORARY, change to Health.DealDamage
         [HarmonyPrefix]
-        public static bool Door_OnTriggerEnter2D(Door __instance)
+        public static bool Door_OnTriggerEnter2D(Door __instance, Collider2D collision)
         {
             if (BiomeGenerator.Instance == null) return true;
-            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return true;
+
+            var customDungeon =
+                CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation);
+
+            // A dungeon-map node bound to a level plays inside the vanilla dungeon it was entered
+            // from, so the hand-off below has to be recorded there too - without it GenCheck stays
+            // latched from the last door and the next room's blueprint is never applied.
+            if (!customDungeon && !MapEditor.LevelPlayback.Active) return true;
+
+            // Vanilla's own filter, repeated here because this prefix used to skip it entirely and
+            // acted on whatever touched the trigger. A door is walked through by a player, once,
+            // while nothing else is going on; everything else - a follower, a thrown item, a
+            // knocked-back enemy, the player's own scripted walk-in on arrival - is not a door
+            // being used. Letting those through set the room hand-off at arbitrary moments, which
+            // re-applied blueprints to rooms already built (their doors visibly moving to another
+            // room's authored positions), and fired the exit door on arrival, which reopened the
+            // dungeon map the instant a node was entered.
+            if (!IsPlayerUsingDoor(__instance, collision)) return true;
+
             //check the roomtype
-            if (__instance.ConnectionType == MMRoomGeneration.GenerateRoom.ConnectionTypes.NextLayer)
+            if (customDungeon && __instance.ConnectionType == MMRoomGeneration.GenerateRoom.ConnectionTypes.NextLayer)
             {
                 Plugin.Log.LogInfo("Exit Door Triggered for custom dungeon " + BiomeGenerator.Instance.DungeonLocation);
+
+                // Vanilla marks the door spent as it takes it; this branch never reaches vanilla,
+                // so it marks it here. Otherwise every further overlap re-runs the exit - the map
+                // reopening on top of itself.
+                __instance.Used = true;
+
                 CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation].ExitDoor();
                 return false;
             }
@@ -90,6 +180,23 @@ namespace CustomSpineLoader.Patches
             LastDoorDirection = __instance.direction.ToString();
             GenCheck = false;
             return true;
+        }
+
+        // Door.OnTriggerEnter2D's own opening conditions, checked before this patch acts on the
+        // trigger. Kept in the same order as the original so the two cannot drift.
+        private static bool IsPlayerUsingDoor(Door door, Collider2D collision)
+        {
+            if (door == null || collision == null) return false;
+
+            var player = collision.gameObject.GetComponent<PlayerFarming>();
+            if (player == null) return false;
+
+            // GoToAndStopping is the scripted walk: vanilla's arrival animation, and the map
+            // editor's own entry routine, both drive the player through a doorway that way.
+            if (MMTransition.IsPlaying || door.Used || player.GoToAndStopping) return false;
+
+            return door.ConnectionType != MMRoomGeneration.GenerateRoom.ConnectionTypes.False &&
+                   door.ConnectionType != MMRoomGeneration.GenerateRoom.ConnectionTypes.LeaderBoss;
         }
 
         [HarmonyPatch(typeof(LocationManager), nameof(LocationManager.LocationIsDungeon))]
@@ -141,7 +248,19 @@ namespace CustomSpineLoader.Patches
         {
             if (BiomeGenerator.Instance == null) return;
             if (GenCheck) return;
-            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return;
+
+            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation))
+            {
+                // Not one of our dungeons - but a dungeon-map node can bind a level inside a
+                // vanilla one, and that level still needs its rooms built.
+                if (!MapEditor.LevelPlayback.Active) return;
+
+                GenCheck = true;
+                MapEditor.Tools.LightingTool.ClearOverride();
+                MapEditor.LevelPlayback.OnRoomGenerated(
+                    __instance != null ? __instance : GenerateRoom.Instance, NextRoomConnectionType);
+                return;
+            }
 
             GenCheck = true;
 

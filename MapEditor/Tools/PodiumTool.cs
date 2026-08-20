@@ -366,6 +366,11 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return _holder;
     }
 
+    // The instance the last placement produced, so a loader can finish setting it up without
+    // every spawn routine having to hand one back.
+    public GameObject LastPlacedInstance =>
+        _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
+
     public void ContributeTo(CTNodeBlueprint map)
     {
         map.Podiums.Clear();
@@ -375,6 +380,7 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             map.Podiums.Add(new MapPodiumData
             {
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
+                Scale = MapEditorSerialization.V3(placed.Instance.transform.lossyScale),
                 // The originally chosen type, not the post-roll runtime value, so Random
                 // round-trips as Random.
                 Type = placed.SavedType,
@@ -390,6 +396,7 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             map.Podiums.Add(new MapPodiumData
             {
                 Position = MapEditorSerialization.V3(podium.transform.position),
+                Scale = MapEditorSerialization.V3(podium.transform.lossyScale),
                 Type = podium.Type.ToString(),
                 ClearAllOnEquip = LiveClearAll(podium.gameObject, _clearAllOnEquip)
             });

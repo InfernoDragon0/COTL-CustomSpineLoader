@@ -667,6 +667,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return removed;
     }
 
+    // The instance the last placement produced, so a loader can finish setting it up without
+    // every spawn routine having to hand one back.
+    public GameObject LastPlacedInstance =>
+        _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
+
+    private static Vector3 Abs(Vector3 v) =>
+        new(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
+
     public void ContributeTo(CTNodeBlueprint map)
     {
         map.Structures.Clear();
@@ -681,7 +689,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 IsCustom = placed.IsCustom,
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
                 Rotation = placed.Rotation,
-                FlipX = placed.FlipX
+                FlipX = placed.FlipX,
+
+                // Absolute: the mirror is stored separately as FlipX and re-applied by the
+                // structure's own flip, so a negative X here would cancel it out on load.
+                Scale = MapEditorSerialization.V3(Abs(placed.Instance.transform.lossyScale))
             });
         }
     }

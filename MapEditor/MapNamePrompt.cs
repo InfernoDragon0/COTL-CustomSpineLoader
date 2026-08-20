@@ -12,11 +12,31 @@ public static class MapNamePrompt
     // Map names are paths, not cult names - the vanilla 16-character limit is too tight.
     private const int NameLimit = 40;
 
+    // How many of these are open at once. It is only ever 0 or 1 for most of the editor, but the
+    // trigger tool's screen text asks two questions in a row and opens the second from the
+    // first's confirm callback - so the second is opened while the first is still alive, and the
+    // first's own close then cleared the editor's modal flag out from under it a moment later.
+    // The dialog stayed on screen with the editor reading WASD and tool shortcuts underneath,
+    // which is what "controls go through while typing" was.
+    private static int _openCount;
+
+    private static void OpenModal(RuntimeMapEditor editor)
+    {
+        _openCount++;
+        editor.ModalOpen = true;
+    }
+
+    private static void CloseModal(RuntimeMapEditor editor)
+    {
+        if (_openCount > 0) _openCount--;
+        if (_openCount == 0) editor.ModalOpen = false;
+    }
+
     // existsCheck/existsNoun drive the overwrite warning; the default is the map store, because
     // that is what the prompt was built for. The lighting tool passes its own profile store.
     public static void Show(RuntimeMapEditor editor, string prefill, string title,
         Action<string> onConfirmed, Action onClosed = null,
-        Func<string, bool> existsCheck = null, string existsNoun = "map")
+        Func<string, bool> existsCheck = null, string existsNoun = "map", int characterLimit = NameLimit)
     {
         if (editor == null || onConfirmed == null) return;
 
@@ -28,7 +48,7 @@ public static class MapNamePrompt
             return;
         }
 
-        editor.ModalOpen = true;
+        OpenModal(editor);
 
         Time.timeScale = 1f;
 
@@ -37,11 +57,11 @@ public static class MapNamePrompt
             var task = uiManager.LoadCultNameAssets();
             editor.StartCoroutine(UIManager.LoadAssets(task,
                 () => Build(editor, uiManager, prefill, title, onConfirmed, onClosed,
-                    existsCheck ?? MapEditorSerialization.Exists, existsNoun)));
+                    existsCheck ?? MapEditorSerialization.Exists, existsNoun, characterLimit)));
         }
         catch (Exception e)
         {
-            editor.ModalOpen = false;
+            CloseModal(editor);
             Plugin.Log.LogWarning("MapEditor: name dialog failed to load: " + e.Message);
             editor.SetStatus("Name dialog unavailable, see log.", StatusSeverity.Error);
             onClosed?.Invoke();
@@ -49,7 +69,7 @@ public static class MapNamePrompt
     }
 
     private static void Build(RuntimeMapEditor editor, UIManager uiManager, string prefill, string title,
-        Action<string> onConfirmed, Action onClosed, Func<string, bool> existsCheck, string existsNoun)
+        Action<string> onConfirmed, Action onClosed, Func<string, bool> existsCheck, string existsNoun, int characterLimit)
     {
         UICultNameMenuController menu;
         try
@@ -58,7 +78,7 @@ public static class MapNamePrompt
         }
         catch (Exception e)
         {
-            editor.ModalOpen = false;
+            CloseModal(editor);
             Plugin.Log.LogWarning("MapEditor: name dialog failed to open: " + e.Message);
             editor.SetStatus("Name dialog unavailable, see log.", StatusSeverity.Error);
             onClosed?.Invoke();
@@ -67,7 +87,7 @@ public static class MapNamePrompt
 
         if (menu == null)
         {
-            editor.ModalOpen = false;
+            CloseModal(editor);
             editor.SetStatus("Name dialog unavailable.", StatusSeverity.Error);
             onClosed?.Invoke();
             return;
@@ -81,7 +101,7 @@ public static class MapNamePrompt
 
         try
         {
-            menu._nameInputField.characterLimit = NameLimit;
+            menu._nameInputField.characterLimit = characterLimit > 0 ? characterLimit : NameLimit;
         }
         catch (Exception)
         {
@@ -170,7 +190,7 @@ public static class MapNamePrompt
     {
         while (menu != null) yield return null;
 
-        editor.ModalOpen = false;
+        CloseModal(editor);
         onClosed?.Invoke();
     }
 }

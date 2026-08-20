@@ -98,6 +98,57 @@ name.
 Both settings apply per player and only while that spine is worn; other skins in the same file, and
 the vanilla lamb, are untouched.
 
+### Custom Structures
+
+Structures live in `BepInEx > plugins > CultTweaker > CustomStructures`, one folder each, with a
+`config.json`:
+
+```json
+{
+  "StructureName": "Custom Altar",
+  "StructureDescription": "A custom altar for your cult.",
+  "SpritePath": "icon.png",
+  "BuildDurationMinutes": 60,
+  "BuildOnlyOne": true,
+  "RequiresTempleToBuild": true,
+  "CanBeFlipped": false,
+  "Bounds": { "X": 2, "Y": 2 },
+  "ItemCost": { "LOG": 20, "STONE": 10 }
+}
+```
+
+#### Building a Spine structure instead of a sprite
+
+Add a `Spine` block and drop the Spine export (`.json` skeleton, `.atlas`, `.png` pages) into the
+same folder. The structure is then built as an animated skeleton rather than a flat sprite:
+
+```json
+  "Spine": {
+    "SkinName": "Marble",
+    "Animation": "idle",
+    "Loop": true,
+    "Offset": { "X": 0, "Y": 0, "Z": 0 },
+    "Scale": { "X": 1, "Y": 1, "Z": 1 }
+  }
+```
+
+Every field is optional:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `SkinName` | the skeleton's default skin | Which skin to dress the structure in. |
+| `Animation` | none | Which animation to play once placed. Empty holds the setup pose, which is what a static prop wants. |
+| `Loop` | `true` | Whether that animation loops. |
+| `Offset` / `Scale` | zero / one | Nudges the skeleton relative to the structure's tile. |
+| `SkeletonScale` | `0.005` | Spine's import scale, for art authored at a different unit size. |
+| `SkeletonPath`, `AtlasPath`, `TexturePaths` | auto-discovered | Set these only when the folder holds more than one export. |
+| `ShaderName` | `Spine/Skeleton` | The material shader used for the skeleton. |
+| `HideSprite` | `true` | Hides the flat sprite underneath. Set `false` to keep a painted base under an animated skeleton. |
+
+`SpritePath` is still used as the **build menu icon**, so keep a sprite for it; the icon PNG is
+skipped when the atlas pages are auto-discovered. Without one the structure falls back to a
+placeholder icon and still builds as the skeleton.
+
 ## Known Issues
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.
 

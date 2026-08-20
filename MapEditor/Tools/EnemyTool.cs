@@ -16,8 +16,22 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 {
     public string Name => "Enemies";
 
-    private const string VanillaPrefix = "Assets/Prefabs/Enemies/";
+    // Enemies sit in three address spaces, not one. The two below "Assets/Prefabs/Enemies/" are
+    // left over from the pre-Addressables Resources folder and were never re-addressed, so
+    // scanning only the first hid 103 prefabs - the bishops, and most of the Dungeon 1-4 roster.
+    private static readonly string[] VanillaPrefixes =
+        ["Assets/Prefabs/Enemies/", "Assets/Resources_moved/Enemies/", "Enemies/"];
+
     private static readonly string[] ExcludedFolders = ["Dead Bodies", "Weapons"];
+
+    // The bosses are addressed by what they are rather than who they are; nobody looking for
+    // Leshy searches for "Worm Boss". Only the bishops are aliased - the rest read fine.
+    private static readonly Dictionary<string, string> Aliases = new()
+    {
+        ["Enemy Forest Worm Boss"] = "Leshy (Worm Boss)",
+        ["Enemy Forest Frog Boss"] = "Heket (Frog Boss)",
+        ["Enemy Jellyfish Boss"] = "Kallamar (Jelly Boss)"
+    };
 
     private readonly RuntimeMapEditor _editor;
     private readonly List<PlacedEnemy> _placed = [];
@@ -295,10 +309,12 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (locator?.Keys == null) continue;
             foreach (var keyObj in locator.Keys)
             {
-                if (keyObj is not string key) continue;
-                if (!key.StartsWith(VanillaPrefix) || !key.EndsWith(".prefab")) continue;
+                if (keyObj is not string key || !key.EndsWith(".prefab")) continue;
 
-                var relative = key.Substring(VanillaPrefix.Length);
+                var prefix = VanillaPrefixes.FirstOrDefault(key.StartsWith);
+                if (prefix == null) continue;
+
+                var relative = key.Substring(prefix.Length);
                 var slash = relative.IndexOf('/');
                 var group = slash > 0 ? relative.Substring(0, slash) : "Misc";
                 if (ExcludedFolders.Contains(group)) continue;
@@ -307,6 +323,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
                     _catalog[group] = list = [];
 
                 var label = Path.GetFileNameWithoutExtension(key);
+                if (Aliases.TryGetValue(label, out var alias)) label = alias;
                 if (!list.Any(e => e.Item2 == key)) list.Add((label, key));
             }
         }
@@ -495,6 +512,11 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _previewKey = null;
     }
 
+    // The instance the last spawn produced, so a loader can finish setting it up without
+    // every spawn routine having to hand one back.
+    public GameObject LastPlacedInstance =>
+        _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
+
     public void ContributeTo(CTNodeBlueprint map)
     {
         map.Enemies.Clear();
@@ -505,7 +527,8 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             {
                 Key = placed.Key,
                 IsCustom = placed.IsCustom,
-                Position = MapEditorSerialization.V3(placed.Instance.transform.position)
+                Position = MapEditorSerialization.V3(placed.Instance.transform.position),
+                Scale = MapEditorSerialization.V3(placed.Instance.transform.lossyScale)
             });
         }
     }

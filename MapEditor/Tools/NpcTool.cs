@@ -766,6 +766,11 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return removed;
     }
 
+    // The instance the last spawn produced, so a loader can finish setting it up without
+    // every spawn routine having to hand one back.
+    public GameObject LastPlacedInstance =>
+        _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
+
     public void ContributeTo(CTNodeBlueprint map)
     {
         map.Npcs.Clear();
@@ -776,7 +781,8 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             {
                 Key = placed.Key,
                 IsCustom = placed.IsCustom,
-                Position = MapEditorSerialization.V3(placed.Instance.transform.position)
+                Position = MapEditorSerialization.V3(placed.Instance.transform.position),
+                Scale = MapEditorSerialization.V3(placed.Instance.transform.lossyScale)
             });
         }
     }
