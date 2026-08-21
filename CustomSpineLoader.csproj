@@ -29,6 +29,12 @@
         <PackageReference Include="CultOfTheLamb.GameLibs" Version="1.5.15.979-r.0" />
     </ItemGroup>
 
+    <!-- Decodes a cutscene's audio track through Windows' own codecs. Shipped alongside the
+         plugin (BepInEx resolves from the plugin folder), which is why it is not PrivateAssets. -->
+    <ItemGroup>
+        <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    </ItemGroup>
+
     <ItemGroup>
       <Reference Include="COTL_API" Private="false">
         <HintPath>lib\COTL_API.dll</HintPath>
@@ -47,5 +53,16 @@
     <ItemGroup>
       <Folder Include="APIHelper\" />
     </ItemGroup>
+
+    <!-- Only NAudio's own assemblies are copied out, by name: turning on
+         CopyLocalLockFileAssemblies would drop the Unity and BepInEx reference assemblies into
+         the plugin folder too, which is how a plugin ends up loading a second UnityEngine. -->
+    <Target Name="CopyNAudio" AfterTargets="Build">
+        <ItemGroup>
+            <NAudioAssemblies Include="@(ReferencePath)"
+                              Condition="$([System.String]::Copy('%(Filename)').StartsWith('NAudio'))" />
+        </ItemGroup>
+        <Copy SourceFiles="@(NAudioAssemblies)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    </Target>
 
 </Project>

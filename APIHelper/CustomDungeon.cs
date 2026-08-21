@@ -18,8 +18,8 @@ public class CustomDungeon
     internal string ModPrefix = "";
     public virtual string InternalName { get; } = "";
     public virtual string SceneName => "Dungeon1";
-    public virtual string DungeonName => "Meow Dungeon";
-    public virtual int Difficulty => 1;
+    public virtual string DungeonName => "Worldshaper";
+    public virtual int Difficulty => 0;
     public HUD_DisplayName.textBlendMode TitleTextBlendMode => HUD_DisplayName.textBlendMode.FrogBoss;
     public HUD_DisplayName.Positions TitleTextPosition => HUD_DisplayName.Positions.Centre;
     public virtual int NumRooms => 3;

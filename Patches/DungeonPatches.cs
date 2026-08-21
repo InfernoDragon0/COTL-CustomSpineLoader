@@ -66,12 +66,11 @@ namespace CustomSpineLoader.Patches
             if (entering != FollowerLocation.None && !bindsOwnLevel)
                 MapEditor.LevelPlayback.Stop();
 
-            // Any biome coming up starts on its own lighting: the map editor's override is
-            // global state and would otherwise follow the player into the next room or scene.
-            // A blueprint carrying lighting re-applies it when it loads. The snapshot of "what
-            // the biome looked like" is dropped first - the new biome's values are its own.
+            // Any biome coming up starts on its own lighting: the override is global state and
+            // would otherwise follow the player into the next room or scene. What each room of
+            // the old biome asked for goes with it - these are new rooms.
             MapEditor.Tools.LightingTool.ClearOverride();
-            MapEditor.Tools.LightingTool.ForgetBiomeSnapshot();
+            MapEditor.Tools.LightingTool.ForgetRoomLighting();
 
             // Same reasoning for the camera: a trigger's offset or zoom lives on a rig that
             // outlives the room, so it would follow the player into the next one.
@@ -256,7 +255,7 @@ namespace CustomSpineLoader.Patches
                 if (!MapEditor.LevelPlayback.Active) return;
 
                 GenCheck = true;
-                MapEditor.Tools.LightingTool.ClearOverride();
+                MapEditor.Tools.LightingTool.OnRoomEntered();
                 MapEditor.LevelPlayback.OnRoomGenerated(
                     __instance != null ? __instance : GenerateRoom.Instance, NextRoomConnectionType);
                 return;
@@ -264,11 +263,10 @@ namespace CustomSpineLoader.Patches
 
             GenCheck = true;
 
-            // Each new room starts on the biome's lighting. Walking from a room whose blueprint
-            // set its own mood into an ordinary generated room would otherwise keep that mood:
-            // the override lives on LightingManager, not on the room. A blueprint that carries
-            // lighting re-applies it further down, when it loads.
-            MapEditor.Tools.LightingTool.ClearOverride();
+            // Each room arrives on its own lighting: the one it asked for if it ever did, and
+            // the biome's otherwise. Both halves matter - a room that set its own mood must not
+            // go on lighting the next one, and walking back into it must not find it plain.
+            MapEditor.Tools.LightingTool.OnRoomEntered();
 
             // Harmony's enumerator patch supplies a null __instance in some invocations (seen
             // on the boot-time entrance room). GenerateRoom.Instance is the same object -

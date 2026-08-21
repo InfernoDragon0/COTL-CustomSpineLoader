@@ -1,0 +1,20 @@
+{
+  "EnemyName": "Test Brute",
+
+  "Mimic": "Assets/Prefabs/Enemies/DLC/Enemy Swordsman Wolf.prefab",
+
+  "Health": 24,
+  "Scale": 1.5,
+
+  "BossHealthBar": true,
+  "BossBarName": "THE BRUTE",
+
+  "SkinName": "",
+
+  "Tuning": {
+    "maxSpeed": 0.075,
+    "AttackWithinRange": 5.0,
+    "MaintainTargetDistance": 3.0,
+    "DoubleAttack": 1
+  }
+}

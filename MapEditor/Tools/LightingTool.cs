@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using MMBiomeGeneration;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -219,7 +220,54 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         data.FogSpread = current.FogSpread;
     }
 
+    // ---- which room owns which lighting -----------------------------------------------------
+    //
+    // A lighting override is global state on LightingManager; the room does not carry it, and
+    // walking through a door neither removes nor restores it. That cuts both ways - the room you
+    // left goes on lighting the room you walked into, and the room you come back to has lost its
+    // own - which is why both had to be handled here rather than left to whoever happens to run
+    // last on a room change.
+    //
+    // Rooms are stable objects for the length of a run (level playback keys its slot assignments
+    // off the same identity), so what each one asked for is remembered against it and asserted
+    // again on arrival.
+    private static readonly Dictionary<BiomeRoom, MapLightingData> _roomLighting = [];
+
+    // What the biome looked like before anything of ours touched it, captured once per biome.
+    // Restoring these is not the same as clearing inOverride: clearing it transitions to
+    // LightingManager's time-of-day target, which in a dungeon is not the biome's own lighting,
+    // and the room kept the custom mood.
     private static MapLightingData _biomeSnapshot;
+
+    private static BiomeRoom CurrentRoom =>
+        BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
+
+    // Called when a room is generated, which includes walking back into one already visited:
+    // the arriving room's own lighting, or none at all.
+    public static void OnRoomEntered()
+    {
+        var room = CurrentRoom;
+
+        if (room != null && _roomLighting.TryGetValue(room, out var data) && data is { Enabled: true })
+        {
+            Plugin.Log.LogInfo("MapEditor: re-applying this room's own lighting.");
+            Apply(data);
+            return;
+        }
+
+        ClearOverride();
+    }
+
+    // A new biome is a new set of rooms, and the old ones are gone along with anything they asked
+    // for. Called on biome start and when a level run ends.
+    public static void ForgetRoomLighting()
+    {
+        _roomLighting.Clear();
+
+        // The snapshot goes with them: a new biome's own values are its own, and restoring the
+        // last one over it is exactly the stale-mood bug this pair exists to avoid.
+        _biomeSnapshot = null;
+    }
 
     private static void SnapshotBiome(LightingManager manager)
     {
@@ -243,9 +291,16 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         Plugin.Log.LogInfo("MapEditor: captured the biome's own lighting before overriding it.");
     }
 
-    // A scene or biome change makes the snapshot meaningless - the next override captures the
-    // new biome's values instead.
-    public static void ForgetBiomeSnapshot() => _biomeSnapshot = null;
+    private static void Remember(MapLightingData data)
+    {
+        var room = CurrentRoom;
+        if (room == null) return;
+
+        // The live object rather than a copy: while a room is being edited its sliders write
+        // straight into this, and the room should keep showing what the sliders say.
+        if (data != null && data.Enabled) _roomLighting[room] = data;
+        else _roomLighting.Remove(room);
+    }
 
     // Public: the blueprint loader applies a loaded room's lighting the same way.
     public static void Apply(MapLightingData data) => Apply(data, 0f);
@@ -257,6 +312,14 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     {
         if (data == null || !data.Enabled) return;
 
+        Remember(data);
+        ApplyInternal(data, fadeSeconds);
+    }
+
+    // The push without the bookkeeping: restoring the biome's own values goes through here, so
+    // that a restore is not recorded as the room asking for that look.
+    private static void ApplyInternal(MapLightingData data, float fadeSeconds)
+    {
         var manager = LightingManager.Instance;
         if (manager == null) return;
 
@@ -304,6 +367,45 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         ApplyTo(manager, data, fadeSeconds);
     }
 
+    // One settings object, reused and rewritten, rather than a fresh ScriptableObject per apply.
+    //
+    // A slider drag applies on every frame it moves, and a room change applies again, so the old
+    // shape minted a ScriptableObject per frame and abandoned it - while LightingManager went on
+    // holding references to some of them through currentSettings and its lerp. Unity's asset
+    // garbage collector (the AssetGarbageCollectorHelper thread) walks exactly that graph during
+    // UnloadUnusedAssets, which a room change triggers.
+    //
+    // HideAndDontSave keeps this one out of that sweep entirely: it is ours, it lives as long as
+    // the process, and nothing should ever consider unloading it.
+    private static BiomeLightingSettings _overrideSettings;
+
+    private static BiomeLightingSettings OverrideSettings()
+    {
+        if (_overrideSettings != null) return _overrideSettings;
+
+        _overrideSettings = ScriptableObject.CreateInstance<BiomeLightingSettings>();
+        _overrideSettings.hideFlags = HideFlags.HideAndDontSave;
+
+        // Only the properties named here are taken from our settings; the rest keep coming from
+        // the biome's own time-of-day asset. Set once, with the object.
+        _overrideSettings.overrideLightingProperties = new OverrideLightingProperties
+        {
+            Enabled = true,
+            UnscaledTime = true,
+            AmbientColor = true,
+            DirectionalLightColor = true,
+            DirectionalLightIntensity = true,
+            ShadowStrength = true,
+            Exposure = true,
+            FogColor = true,
+            FogDist = true,
+            FogHeight = true,
+            FogSpread = true
+        };
+
+        return _overrideSettings;
+    }
+
     private static void ApplyTo(LightingManager manager, MapLightingData data, float fadeSeconds)
     {
         try
@@ -311,7 +413,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             SnapshotBiome(manager);
             PrepareManager(manager);
 
-            var settings = ScriptableObject.CreateInstance<BiomeLightingSettings>();
+            var settings = OverrideSettings();
             // Without this the transition below never finishes while the editor is open (see
             // PrepareManager), so the first slider drag would be the last one that did anything.
             settings.UnscaledTime = true;
@@ -324,23 +426,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             settings.FogDist = new Vector2(data.FogNear, data.FogFar);
             settings.FogHeight = data.FogHeight;
             settings.FogSpread = data.FogSpread;
-
-            // Only the properties below are taken from our settings; the rest keep coming from
-            // the biome's own time-of-day asset.
-            settings.overrideLightingProperties = new OverrideLightingProperties
-            {
-                Enabled = true,
-                UnscaledTime = true,
-                AmbientColor = true,
-                DirectionalLightColor = true,
-                DirectionalLightIntensity = true,
-                ShadowStrength = true,
-                Exposure = true,
-                FogColor = true,
-                FogDist = true,
-                FogHeight = true,
-                FogSpread = true
-            };
 
             manager.overrideSettings = settings;
             manager.inOverride = true;
@@ -374,6 +459,11 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     public static void ClearOverride(float fadeSeconds)
     {
+        // The room is giving up its lighting, not merely losing it for a moment - otherwise
+        // "Reset To Biome" would undo itself the next time the player walked back in.
+        var room = CurrentRoom;
+        if (room != null) _roomLighting.Remove(room);
+
         var manager = LightingManager.Instance;
         if (manager == null) return;
 
@@ -383,11 +473,10 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
         if (_biomeSnapshot != null)
         {
-            var snapshot = _biomeSnapshot;
-            // Apply() must not treat this restore as the first override and re-snapshot the
-            // custom values as if they were the biome's.
-            Apply(snapshot, fadeSeconds);
-            Plugin.Log.LogInfo("MapEditor: lighting restored to the biome's own values.");
+            // ApplyInternal, not Apply: this room is being handed the biome's look back, which
+            // is not the same as it asking for that look. Recording it would make the restore
+            // itself the room's lighting, and re-assert it on every return.
+            ApplyInternal(_biomeSnapshot, fadeSeconds);
             return;
         }
 

@@ -229,32 +229,94 @@ public static class TriggerCameraActions
         var path = APIHelper.CustomCutsceneLoader.PathFor(name);
         var finished = false;
 
+        // The HUD is not MMVideoPlayer's business - vanilla's callers hide it themselves before
+        // they play anything, which is why a cutscene started from a trigger came up with the
+        // health and XP bars still sitting on top of it.
+        // The room's own music and ambience are paused rather than stopped: a cutscene should not
+        // play over the top of them, and pausing puts the track back exactly where it was without
+        // needing to know what it was. Vanilla stops its music outright before a video, but it is
+        // changing scene afterwards and does not have to.
+        PauseRoomAudio();
+
+        var hudHidden = false;
         try
         {
-            if (path != null) PlayFromFile(name, path, skippable, () => finished = true);
+            if (HUD_Manager.Instance != null)
+            {
+                HUD_Manager.Instance.Hide(Snap: true, 0);
+                hudHidden = true;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not hide the HUD for the cutscene: " + e.Message);
+        }
+
+        try
+        {
+            if (path != null)
+            {
+                PlayFromFile(name, path, skippable, () => finished = true);
+            }
             else
+            {
+                // The player is brought up and set up first, because MMVideoPlayer.Play starts
+                // the video in the same call - there is no moment afterwards in which to
+                // configure the audio that is not already too late.
+                var host = EnsureVideoPlayer();
+                if (host != null)
+                {
+                    SilenceVideoTrack(host.GetComponent<UnityEngine.Video.VideoPlayer>());
+                    PrepareOverlay(host);
+                }
+
                 MMTools.MMVideoPlayer.Play(name, () => finished = true,
                     skippable ? MMTools.MMVideoPlayer.Options.ENABLE : MMTools.MMVideoPlayer.Options.DISABLE,
                     MMTools.MMVideoPlayer.Options.DISABLE);
+            }
         }
         catch (System.Exception e)
         {
             Plugin.Log.LogWarning($"MapEditor: cutscene '{name}' failed to start: {e.Message}");
+            if (hudHidden && HUD_Manager.Instance != null) HUD_Manager.Instance.Show(0);
+            ResumeRoomAudio();
             yield break;
         }
 
-        Plugin.Log.LogInfo($"MapEditor: playing {(path != null ? "custom" : "vanilla")} cutscene '{name}'.");
+        // The cached soundtrack next to the video, played through the game's own audio engine.
+        var audio = APIHelper.CustomCutsceneLoader.AudioPathFor(name);
+        PlayCompanionAudio(audio);
+
+        Plugin.Log.LogInfo($"MapEditor: playing {(path != null ? "custom" : "vanilla")} cutscene " +
+                           $"'{name}'{(audio != null ? " with sound" : " (no soundtrack file)")}.");
 
         // Realtime, and generous: a cutscene runs while the game is paused around it, and the
         // ceiling is only there so a video that never reports finishing cannot strand the run.
         var deadline = Time.unscaledTime + 900f;
-        while (!finished && Time.unscaledTime < deadline) yield return null;
+        while (!finished && Time.unscaledTime < deadline)
+        {
+            ApplySettingsVolume();
+            yield return null;
+        }
 
         if (!finished)
         {
             Plugin.Log.LogWarning($"MapEditor: cutscene '{name}' never reported finishing; moving on.");
             try { MMTools.MMVideoPlayer.ForceStopVideo(); }
             catch (System.Exception) { }
+        }
+
+        StopCompanionAudio();
+        ResumeRoomAudio();
+        RestoreVideoCamera();
+
+        try
+        {
+            if (hudHidden && HUD_Manager.Instance != null) HUD_Manager.Instance.Show(0);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not restore the HUD after the cutscene: " + e.Message);
         }
     }
 
@@ -264,23 +326,11 @@ public static class TriggerCameraActions
     // before the real one is loaded.
     private static void PlayFromFile(string name, string path, bool skippable, System.Action onDone)
     {
-        var instance = MMTools.MMVideoPlayer.Instance;
+        var instance = EnsureVideoPlayer();
         if (instance == null)
         {
-            instance = Object.Instantiate(Resources.Load("MMVideoPlayer/Video Player")) as GameObject;
-            if (instance == null)
-            {
-                Plugin.Log.LogWarning("MapEditor: the game's video player prefab could not be loaded.");
-                onDone?.Invoke();
-                return;
-            }
-
-            MMTools.MMVideoPlayer.Instance = instance;
-            MMTools.MMVideoPlayer.mmVideoPlayer = instance.GetComponent<MMTools.MMVideoPlayer>();
-        }
-        else
-        {
-            instance.SetActive(true);
+            onDone?.Invoke();
+            return;
         }
 
         var host = MMTools.MMVideoPlayer.mmVideoPlayer;
@@ -312,12 +362,374 @@ public static class TriggerCameraActions
         player.clip = null;
         player.source = UnityEngine.Video.VideoSource.Url;
         player.url = path;
+        player.aspectRatio = UnityEngine.Video.VideoAspectRatio.FitInside;
+        player.waitForFirstFrame = true;
+
+        SilenceVideoTrack(player);
+        ClearSurface(player);
+        PrepareOverlay(instance);
 
         player.loopPointReached += MMTools.MMVideoPlayer.EndReached;
         player.errorReceived += MMTools.MMVideoPlayer.HandleVideoPlayerError;
-        player.Play();
 
-        Plugin.Log.LogInfo($"MapEditor: cutscene '{name}' streaming from {path}.");
+        // Prepared first, then played: a url source that starts before it is open shows a black
+        // frame or two while it catches up.
+        void OnPrepared(UnityEngine.Video.VideoPlayer prepared)
+        {
+            prepared.prepareCompleted -= OnPrepared;
+            prepared.Play();
+        }
+
+        player.prepareCompleted += OnPrepared;
+        player.Prepare();
+    }
+
+    // The game's video player, brought up the way MMVideoPlayer.Play brings it up. Shared so
+    // both routes get the same setup applied before anything starts playing.
+    private static GameObject EnsureVideoPlayer()
+    {
+        var instance = MMTools.MMVideoPlayer.Instance;
+        if (instance != null)
+        {
+            instance.SetActive(true);
+            return instance;
+        }
+
+        instance = Object.Instantiate(Resources.Load("MMVideoPlayer/Video Player")) as GameObject;
+        if (instance == null)
+        {
+            Plugin.Log.LogWarning("MapEditor: the game's video player prefab could not be loaded.");
+            return null;
+        }
+
+        MMTools.MMVideoPlayer.Instance = instance;
+        MMTools.MMVideoPlayer.mmVideoPlayer = instance.GetComponent<MMTools.MMVideoPlayer>();
+        return instance;
+    }
+
+    // The line down the middle of every cutscene. The video prefab carries its own Camera with a
+    // Stylizer image effect on it, and that effect draws a seam at the centre of the frame here -
+    // the scenes vanilla plays cutscenes in never show it, because they are not this scene. The
+    // effect contributes nothing to a video that is already a finished image, so it is switched
+    // off for the duration and put back afterwards.
+    private static void PrepareOverlay(GameObject instance)
+    {
+        if (instance == null) return;
+
+        try
+        {
+            // By name rather than by type: Stylizer lives in an assembly the mod does not
+            // reference, and the only thing needed from it is the Behaviour switch every image
+            // effect has.
+            foreach (var component in instance.GetComponentsInChildren<Component>(true))
+            {
+                if (component == null || component.GetType().Name != "Stylizer") continue;
+                if (component is not Behaviour effect || !effect.enabled) continue;
+
+                effect.enabled = false;
+            }
+
+            IsolateVideoCamera(instance.GetComponentInChildren<Camera>(true));
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not disable the video Stylizer: " + e.Message);
+        }
+    }
+
+    // ---- companion audio ---------------------------------------------------------------------
+
+    // Unity's video player produces no audible sound in this build - the engine's own audio is
+    // not what this game runs on - so a cutscene's sound comes from a file played through FMOD,
+    // which is what everything else here is played through. Started at the same moment as the
+    // video, so the two run together; a long video and a short track simply end apart.
+    private static FMOD.Sound _companionSound;
+    private static FMOD.Channel _companionChannel;
+    private static bool _companionPlaying;
+
+    // True when the sound is inside the game's music bus and inherits its volume on its own.
+    // False when it is on the master group and this has to ride the slider itself.
+    private static bool _companionOnMusicBus;
+    private static FMOD.Studio.Bus _companionBus;
+
+    private static void PlayCompanionAudio(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+
+        StopCompanionAudio();
+
+        try
+        {
+            var core = FMODUnity.RuntimeManager.CoreSystem;
+
+            // Streamed rather than loaded: a cutscene's soundtrack is minutes long and there is
+            // no reason to hold it in memory. 2D, because it is not coming from anywhere.
+            var result = core.createSound(path,
+                FMOD.MODE.CREATESTREAM | FMOD.MODE._2D | FMOD.MODE.LOOP_OFF, out _companionSound);
+
+            if (result != FMOD.RESULT.OK)
+            {
+                Plugin.Log.LogWarning($"MapEditor: cutscene audio '{path}' could not be opened: {result}.");
+                return;
+            }
+
+            // Into the game's music bus if it will have us, so the music slider, the pause duck
+            // and anything else Studio does to that bus apply to a cutscene's soundtrack the same
+            // way they apply to the game's own. A raw core channel would sit outside all of it and
+            // play at full volume into a muted game.
+            var group = MusicChannelGroup();
+
+            result = core.playSound(_companionSound, group, false, out _companionChannel);
+            if (result != FMOD.RESULT.OK)
+            {
+                Plugin.Log.LogWarning($"MapEditor: cutscene audio '{path}' could not be played: {result}.");
+                _companionSound.release();
+                ReleaseMusicBus();
+                return;
+            }
+
+            _companionPlaying = true;
+            if (!_companionOnMusicBus) ApplySettingsVolume();
+
+            Plugin.Log.LogInfo(_companionOnMusicBus
+                ? "MapEditor: cutscene audio routed into the game's music bus."
+                : "MapEditor: cutscene audio on the master group, following the volume sliders.");
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: cutscene audio failed: " + e.Message);
+        }
+    }
+
+    private static void StopCompanionAudio()
+    {
+        if (!_companionPlaying) return;
+        _companionPlaying = false;
+
+        try
+        {
+            _companionChannel.stop();
+            _companionSound.release();
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: cutscene audio could not be stopped: " + e.Message);
+        }
+
+        ReleaseMusicBus();
+    }
+
+    // ---- the room underneath ------------------------------------------------------------------
+
+    private static bool _musicPaused;
+    private static bool _atmosPaused;
+
+    private static void PauseRoomAudio()
+    {
+        var audio = AudioManager.Instance;
+        if (audio == null) return;
+
+        try
+        {
+            var music = audio.CurrentMusicInstance;
+            if (music.isValid() && music.setPaused(true) == FMOD.RESULT.OK) _musicPaused = true;
+
+            // A paused instance still reports PLAYING, which is what keeps the blueprint music
+            // watchdog from deciding the track has ended and starting it again over the cutscene.
+            var atmos = audio.AtmosInstance;
+            if (atmos.isValid() && atmos.setPaused(true) == FMOD.RESULT.OK) _atmosPaused = true;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not pause the room's audio: " + e.Message);
+        }
+    }
+
+    private static void ResumeRoomAudio()
+    {
+        if (!_musicPaused && !_atmosPaused) return;
+
+        var audio = AudioManager.Instance;
+
+        try
+        {
+            if (audio != null)
+            {
+                if (_musicPaused)
+                {
+                    var music = audio.CurrentMusicInstance;
+                    if (music.isValid()) music.setPaused(false);
+                }
+
+                if (_atmosPaused)
+                {
+                    var atmos = audio.AtmosInstance;
+                    if (atmos.isValid()) atmos.setPaused(false);
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not resume the room's audio: " + e.Message);
+        }
+
+        _musicPaused = false;
+        _atmosPaused = false;
+    }
+
+    // A Studio bus only has a core channel group once something asks it to keep one, which is
+    // what locking it does; flushCommands waits for that to actually happen, because Studio
+    // processes its command queue on its own schedule.
+    private static FMOD.ChannelGroup MusicChannelGroup()
+    {
+        _companionOnMusicBus = false;
+
+        try
+        {
+            _companionBus = FMODUnity.RuntimeManager.GetBus("bus:/MusicBus");
+
+            if (_companionBus.lockChannelGroup() != FMOD.RESULT.OK) return new FMOD.ChannelGroup();
+
+            FMODUnity.RuntimeManager.StudioSystem.flushCommands();
+
+            if (_companionBus.getChannelGroup(out var group) != FMOD.RESULT.OK)
+            {
+                _companionBus.unlockChannelGroup();
+                return new FMOD.ChannelGroup();
+            }
+
+            _companionOnMusicBus = true;
+            return group;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: cutscene audio could not join the music bus " +
+                                  $"({e.Message}); it will follow the volume sliders directly.");
+            return new FMOD.ChannelGroup();
+        }
+    }
+
+    private static void ReleaseMusicBus()
+    {
+        if (!_companionOnMusicBus) return;
+        _companionOnMusicBus = false;
+
+        try
+        {
+            _companionBus.unlockChannelGroup();
+        }
+        catch (System.Exception)
+        {
+            // The bus went away with the banks; there is nothing left to unlock.
+        }
+    }
+
+    // The fallback when the bus is not available: master times music, the same two sliders the
+    // game's own music answers to. Re-applied while the cutscene runs so moving a slider mid-play
+    // does something, which is what the bus route gives for free.
+    public static void ApplySettingsVolume()
+    {
+        if (!_companionPlaying || _companionOnMusicBus) return;
+
+        try
+        {
+            var audio = SettingsManager.Settings?.Audio;
+            if (audio == null) return;
+
+            _companionChannel.setVolume(Mathf.Clamp01(audio.MasterVolume) * Mathf.Clamp01(audio.MusicVolume));
+        }
+        catch (System.Exception)
+        {
+            // A channel that has finished cannot take a volume; nothing to do about it.
+        }
+    }
+
+    // The video's own audio track is switched off rather than configured. Unity's audio engine
+    // is compiled out of this build - sample rate 0, no voices - so nothing routed through it can
+    // be heard, and leaving the track enabled only invites the backend to warn about output modes
+    // it does not support. The sound comes from the cached soundtrack instead, through FMOD.
+    private static void SilenceVideoTrack(UnityEngine.Video.VideoPlayer player)
+    {
+        if (player == null) return;
+
+        try
+        {
+            player.audioOutputMode = UnityEngine.Video.VideoAudioOutputMode.None;
+            player.controlledAudioTrackCount = 0;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: cutscene audio track could not be silenced: " + e.Message);
+        }
+    }
+
+    // The prefab's render texture still holds the last thing drawn into it, and a video that does
+    // not cover it exactly leaves that showing round the edges.
+    private static void ClearSurface(UnityEngine.Video.VideoPlayer player)
+    {
+        try
+        {
+            if (player.renderMode != UnityEngine.Video.VideoRenderMode.RenderTexture) return;
+            if (player.targetTexture == null) return;
+
+            var previous = RenderTexture.active;
+            RenderTexture.active = player.targetTexture;
+            GL.Clear(true, true, Color.black);
+            RenderTexture.active = previous;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: cutscene surface could not be cleared: " + e.Message);
+        }
+    }
+
+    // The video is drawn on the camera's near plane (renderMode CameraNearPlane), and that camera
+    // is a real camera - so as well as the video it renders whatever world geometry falls in its
+    // frustum. From where it sits, a room outline or an editor gizmo projects to a hairline,
+    // which is the line down the middle of every cutscene: not part of the video, and not a UI
+    // element either, which is why the canvas scan found nothing.
+    //
+    // Emptying its culling mask was the obvious answer and turned out to take the video with it -
+    // Unity draws the near-plane quad as part of the camera's ordinary rendering, so a camera
+    // culled down to nothing draws nothing at all. Moving the camera instead leaves it rendering
+    // exactly as before, with nothing but empty space in front of it. The video rides on the near
+    // plane, so it travels with the camera.
+    private static Transform _movedCamera;
+    private static Vector3 _cameraHome;
+
+    private static readonly Vector3 Nowhere = new(0f, 100000f, 0f);
+
+    private static void IsolateVideoCamera(Camera camera)
+    {
+        if (camera == null || _movedCamera != null) return;
+
+        try
+        {
+            _movedCamera = camera.transform;
+            _cameraHome = _movedCamera.position;
+            _movedCamera.position = Nowhere;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not isolate the video camera: " + e.Message);
+            _movedCamera = null;
+        }
+    }
+
+    private static void RestoreVideoCamera()
+    {
+        if (_movedCamera == null) return;
+
+        try
+        {
+            _movedCamera.position = _cameraHome;
+        }
+        catch (System.Exception)
+        {
+            // Gone with the scene; nothing to put back.
+        }
+
+        _movedCamera = null;
     }
 
 }

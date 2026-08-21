@@ -98,6 +98,56 @@ name.
 Both settings apply per player and only while that spine is worn; other skins in the same file, and
 the vanilla lamb, are untouched.
 
+### Custom Enemies
+
+Enemies live in `BepInEx > plugins > CultTweaker > CustomEnemies`, one folder each, with a
+`config.json`. **The AI is a vanilla enemy's**: an enemy here names one of the game's own enemy
+prefabs to mimic and keeps its brain wholesale — its states, attacks, animations and death — then
+changes what can be changed from outside.
+
+```json
+{
+  "EnemyName": "Test Brute",
+  "Mimic": "Assets/Prefabs/Enemies/DLC/Enemy Swordsman Wolf.prefab",
+  "Health": 24,
+  "Scale": 1.5,
+  "BossHealthBar": true,
+  "BossBarName": "THE BRUTE",
+  "SkinName": "",
+  "Tuning": {
+    "maxSpeed": 0.075,
+    "AttackWithinRange": 5.0,
+    "MaintainTargetDistance": 3.0,
+    "DoubleAttack": 1
+  }
+}
+```
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `EnemyName` | — | Required. The name it is listed under in the map editor. |
+| `Mimic` | a bat | The vanilla enemy prefab this one is built from, and whose AI it uses. |
+| `Health` | `5` | Total HP. |
+| `Scale` | `1` | Multiplies the spawned enemy's size. A brute is the same enemy at 1.6. |
+| `SkinName` | — | A skin on the skeleton — your own if the folder ships one, otherwise the mimic's. |
+| `BossHealthBar` | `false` | Shows the game's boss bar across the top of the screen while it is alive. |
+| `BossBarName` | `EnemyName` | What that bar is labelled. |
+| `Tuning` | — | Any public field or property on the mimic's own controller, by name. |
+| `SkeletonPath`, `AtlasPath`, `TexturePaths`, `SkeletonScale` | auto-discovered | Set only when the folder holds more than one Spine export. |
+
+Drop a Spine export (`.json` skeleton, `.atlas`, `.png` pages) in the folder to give it your own
+art; without one it wears the mimic's skeleton, and `SkinName` then picks a skin off *that*.
+
+**Tuning** is where the behaviour lives. Every vanilla enemy exposes its numbers as public fields —
+`EnemySwordsmanWolf` alone has around fifty — so `AttackWithinRange`, `MaintainTargetDistance`,
+`DoubleAttack`, `ChargeAndAttack`, `KnockbackModifier`, `Damage`, plus `maxSpeed` and
+`SpeedMultiplier` on every enemy, are all reachable by name. Values are numbers because a tuning
+table is numbers; a true/false field takes 0 or 1. A name that does not exist on that enemy is
+reported in the log rather than ignored silently, so a typo is findable.
+
+Custom enemies appear in the map editor's enemy tool under **Custom (mods)**, place like any other,
+and save into blueprints.
+
 ### Custom Structures
 
 Structures live in `BepInEx > plugins > CultTweaker > CustomStructures`, one folder each, with a
@@ -140,6 +190,7 @@ Every field is optional:
 | `Animation` | none | Which animation to play once placed. Empty holds the setup pose, which is what a static prop wants. |
 | `Loop` | `true` | Whether that animation loops. |
 | `Offset` / `Scale` | zero / one | Nudges the skeleton relative to the structure's tile. |
+| `Rotation` | matches the structure's sprite | The world is drawn on a tilt, so anything standing upright in it is rotated `-60` on X (`300` in the inspector). Left out, the skeleton copies whatever the structure's own sprite does, falling back to that tilt. Set it to `{ "X": 0, "Y": 0, "Z": 0 }` for a prop meant to lie flat on the ground. |
 | `SkeletonScale` | `0.005` | Spine's import scale, for art authored at a different unit size. |
 | `SkeletonPath`, `AtlasPath`, `TexturePaths` | auto-discovered | Set these only when the folder holds more than one export. |
 | `ShaderName` | `Spine/Skeleton` | The material shader used for the skeleton. |
@@ -148,6 +199,10 @@ Every field is optional:
 `SpritePath` is still used as the **build menu icon**, so keep a sprite for it; the icon PNG is
 skipped when the atlas pages are auto-discovered. Without one the structure falls back to a
 placeholder icon and still builds as the skeleton.
+
+A ready-made example is in `Templates/CustomStructures/ExampleSpineStructure` — an occultist scamp
+knelt in prayer, written against the same Spine export the `CustomNpcs/TestNpc` sample uses, so
+copying those four art files in beside it makes it work as-is.
 
 ## Known Issues
 - The Custom Player Spines may not have the correct color when attacking with certain weapons.

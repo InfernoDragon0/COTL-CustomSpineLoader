@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using COTL_API.CustomStructures;
+using CustomSpineLoader.SpineLoaderHelper;
 using Lamb.UI;
 using Lamb.UI.BuildMenu;
 using MMRoomGeneration;
@@ -489,7 +490,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     private IEnumerator BuildPreview(StructureBrain.TYPES type)
     {
         var isCustom = CustomStructureManager.CustomStructureList.ContainsKey(type);
-        var prefabPath = ResolvePrefabPath(type, isCustom);
+
+        // Not ResolvePrefabPath: a custom structure's "CustomBuildingPrefab_..." path is not a
+        // real addressable key. COTL_API patches InstantiateAsync and swaps the key for the
+        // wreath prefab there, but LoadAssetAsync is not on that path, so asking it for one
+        // throws InvalidKeyException and the preview drops to a flat icon lying on the ground.
+        // The preview loads the same prefab the game would have been handed and does the
+        // dressing - sprite, and skeleton if the structure has one - itself.
+        var prefabPath = isCustom ? CustomStructureBasePrefab : ResolvePrefabPath(type, false);
 
         GameObject prefab = null;
         if (!string.IsNullOrEmpty(prefabPath))
@@ -520,8 +528,12 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         GameObject ghost = null;
         if (prefab != null)
+        {
             ghost = MapEditorGhost.Create(prefab, _editor.transform, "CultTweaker_PlacementPreview",
                 disableBehaviours: true);
+
+            if (ghost != null && isCustom) DressCustomStructure(ghost, type, ghostAlpha: 0.6f);
+        }
 
         if (ghost == null)
         {
@@ -556,6 +568,43 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         var isCustom = CustomStructureManager.CustomStructureList.ContainsKey(type);
         _editor.StartCoroutine(PlaceAt(type, isCustom, position, 0f, false, deferNav: false));
+    }
+
+    // What COTL_API instantiates for every custom structure before swapping its sprite.
+    private const string CustomStructureBasePrefab =
+        "Assets/Prefabs/Structures/Buildings/Decoration Wreath Stick.prefab";
+
+    // The two things COTL_API's InstantiateAsync patch does on the way past, for the preview,
+    // which does not go through it: paint the structure's sprite on, and (ours) add the skeleton.
+    private static void DressCustomStructure(GameObject go, StructureBrain.TYPES type, float ghostAlpha)
+    {
+        if (!CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom)) return;
+
+        try
+        {
+            var renderer = go.GetComponentInChildren<SpriteRenderer>(true);
+            var sprite = custom.Sprite;
+
+            // Pivot at the bottom centre, the same re-pivot COTL_API does: a structure stands on
+            // its tile rather than being centred on it.
+            if (renderer != null && sprite != null)
+                renderer.sprite = Sprite.Create(sprite.texture, sprite.rect, new Vector2(0.5f, 0f));
+
+            StructureSpineHelper.TryAttach(go, type);
+
+            // The ghost fades by tinting sprite renderers, and a skeleton is a mesh, so it is not
+            // one of them; Spine carries its own colour.
+            if (ghostAlpha < 1f)
+            {
+                var spine = go.GetComponentInChildren<Spine.Unity.SkeletonAnimation>(true);
+                if (spine?.Skeleton != null) spine.Skeleton.A = ghostAlpha;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: custom structure {type} preview could not be " +
+                                  $"dressed: {e.Message}");
+        }
     }
 
     private static string ResolvePrefabPath(StructureBrain.TYPES type, bool isCustom)
@@ -613,6 +662,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         var go = handle.Result;
         go.transform.position = position;
         go.name = $"CultTweaker_Placed_{type}";
+
+        // The spine patch hangs off LocationManager.PlaceStructure, which is how the base game
+        // builds structures. The editor instantiates its own, so it has to ask for the skeleton
+        // itself or a spine structure stays a flat sprite in here.
+        if (isCustom) StructureSpineHelper.TryAttach(go, type);
 
         if (Mathf.Abs(rotation) > 0.001f)
             go.transform.eulerAngles = new Vector3(0f, rotation, 0f);

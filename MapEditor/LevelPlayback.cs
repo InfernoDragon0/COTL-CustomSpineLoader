@@ -173,8 +173,9 @@ public static class LevelPlayback
         if (_editor != null) _editor.SetMusicLoop(null);
 
         // The run's last room may have left a lighting override in place; it is global state,
-        // so it would follow the player out of the level.
+        // so it would follow the player out of the level. The run's rooms are done with too.
         Tools.LightingTool.ClearOverride();
+        Tools.LightingTool.ForgetRoomLighting();
     }
 
     private static string Caller()
@@ -341,8 +342,9 @@ public static class LevelPlayback
         {
             Plugin.Log.LogInfo($"MapEditor: slot {state.Slot + 1} is a vanilla room; left as generated.");
             // A previous room's lighting override is global and outlives the room that set it,
-            // so a vanilla room has to drop it or it keeps that room's mood.
-            Tools.LightingTool.ClearOverride();
+            // so a vanilla slot falls back to whatever this room itself asked for - usually
+            // nothing, which drops the override.
+            Tools.LightingTool.OnRoomEntered();
             ReleaseHold();
             yield break;
         }

@@ -65,8 +65,17 @@ public static class SpineFolderLoader
         {
             var texture = TextureHelper.CreateTextureFromPath(textureFiles[i]);
             texture.name = Path.GetFileNameWithoutExtension(textureFiles[i]);
+
+            // These pages are built from disk and have no asset backing to be reloaded from, so
+            // an UnloadUnusedAssets sweep that decides nothing references them cannot be undone -
+            // the skeleton wearing them is left pointing at freed memory. Room changes run that
+            // sweep, and it is what the crash-time asset collector thread walks.
+            Keep(texture);
             textures[i] = texture;
         }
+
+        Keep(atlasText);
+        Keep(skeletonText);
 
         var shader = Shader.Find(string.IsNullOrEmpty(shaderName) ? DefaultShader : shaderName);
         if (shader == null)
@@ -77,8 +86,22 @@ public static class SpineFolderLoader
         }
 
         var material = new Material(shader);
+        Keep(material);
+
         var atlas = SpineAtlasAsset.CreateRuntimeInstance(atlasText, textures, material, true);
-        return SkeletonDataAsset.CreateRuntimeInstance(skeletonText, atlas,
+        Keep(atlas);
+
+        var data = SkeletonDataAsset.CreateRuntimeInstance(skeletonText, atlas,
             true, scale > 0f ? scale : DefaultScale);
+        Keep(data);
+        return data;
+    }
+
+    // Everything above is a runtime asset with no file behind it: once unloaded it is gone for
+    // the session, so it is marked as not-unloadable rather than left to the asset sweep's
+    // judgement about whether anything still points at it.
+    private static void Keep(UnityEngine.Object asset)
+    {
+        if (asset != null) asset.hideFlags |= HideFlags.DontUnloadUnusedAsset;
     }
 }

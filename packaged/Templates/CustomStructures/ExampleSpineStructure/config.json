@@ -1,0 +1,25 @@
+{
+  "StructureName": "Occultist Effigy",
+  "StructureDescription": "A scamp of the Old Faith, knelt in endless prayer. It does not look up when you pass.",
+  "SpritePath": "icon.png",
+  "Overrides": [],
+
+  "BuildDurationMinutes": 45,
+  "BuildOnlyOne": false,
+  "RequiresTempleToBuild": true,
+  "CanBeFlipped": true,
+  "Bounds": { "X": 1, "Y": 1 },
+
+  "ItemCost": { "LOG": 15, "STONE": 5 },
+
+  "Spine": {
+    "SkinName": "SF_Occultist_Scamp",
+    "Animation": "_idles/pray",
+    "Loop": true,
+
+    "SkeletonScale": 0.005,
+    "Offset": { "X": 0, "Y": 0, "Z": 0 },
+    "Scale": { "X": 1, "Y": 1, "Z": 1 },
+    "HideSprite": true
+  }
+}

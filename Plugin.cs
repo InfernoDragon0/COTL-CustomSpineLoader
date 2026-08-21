@@ -68,6 +68,15 @@ namespace CustomSpineLoader
             // created here so it is there to drop videos into, and listed so the log says what
             // the trigger tool will offer.
             CustomCutsceneLoader.LogWhatIsThere();
+
+            // A video's soundtrack has to be its own file to be audible; this pulls it out with
+            // ffmpeg when one is missing, in the background, so a new .mp4 only has to be
+            // dropped in the folder.
+            CustomCutsceneLoader.ConvertMissingAudio();
+
+            // Enemies are registered here but their prefabs load asynchronously, which is why
+            // this takes the plugin as a coroutine host the way the NPC loader does.
+            CustomEnemyLoader.LoadAllCustomEnemies(this);
             Log.LogInfo("Loading Custom Follower Overrides...");
             FollowerSpineLoader.LoadAllNonSpineSkins();
             Log.LogInfo("Loading Custom NPCs...");

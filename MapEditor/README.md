@@ -408,6 +408,12 @@ by a trigger's *Apply lighting* action.
 - Resetting restores the **captured** biome values rather than just clearing `inOverride`: clearing
   it transitions to `LightingManager`'s time-of-day target, which in a dungeon is not the biome's
   own lighting, and the room kept the custom mood.
+- The override is global state on `LightingManager`, and a room does not carry it — so walking
+  through a door neither removes nor restores anything on its own. Each room's lighting is
+  therefore remembered against the room itself (`BiomeRoom`, the same identity level playback keys
+  its slots off, and stable across revisits) and asserted again whenever that room is generated.
+  Without this, the room you left went on lighting the room you walked into, and the room you came
+  back to had lost its own. The table is dropped when a new biome starts and when a level run ends.
 - A blueprint that never captured anything starts from what the room actually looks like, so the
   first slider drag is a nudge rather than a jump to black.
 
@@ -813,6 +819,41 @@ Vanilla cutscenes are `VideoClip`s compiled into `Resources` (`Intro`, `DLC_Intr
 route: `VideoSource.Url` pointed at the file. Drop an `.mp4` (or `.webm`, `.mov`, `.m4v`) into
 `BepInEx/plugins/CultTweaker/CustomCutscenes` and it is a cutscene named after the file — there is
 no config.json and no registration step, and the folder is re-read every time the picker opens.
+
+**Sound comes from a companion file.** Unity's video player produces nothing audible in this
+build — it reports *"Direct audio output mode not yet supported for this VideoPlayer backend"*, and
+routing it through an `AudioSource` instead is equally silent, because the engine's own audio is
+not what this game runs on. The game's own cutscenes work around exactly this: the intro is a
+**silent video** with `event:/music/intro/intro_video` fired alongside it. So a sound file next to
+the video with the same name — `test2.mp4` and `test2.ogg` — is played through FMOD when the video
+starts and stopped when it ends. `.ogg`, `.mp3`, `.wav`, `.flac` and `.aiff` work; the mp4's own
+AAC track does not, since FMOD only decodes AAC on Apple platforms. The name is matched for vanilla
+cutscenes too, so `Intro.ogg` gives the game's own intro a soundtrack.
+
+**Extracting that file is automated, with nothing to install.** On startup every video without a
+matching sound file is decoded through **Media Foundation** — the Windows codec stack behind every
+video thumbnail in Explorer, reached via NAudio (`NAudio.Core` + `NAudio.Wasapi`, about 360KB
+shipped beside the plugin). It reads the mp4's AAC track, which FMOD cannot, and writes a 16-bit
+PCM `.wav` next to the video, which FMOD reads without thinking about it. It runs on a background
+thread, writes under a temporary name and moves the file into place when finished, so a decode
+that dies halfway leaves nothing to be found. It happens once per video and never again.
+
+The decode is COM interop and Mono's support for it is not guaranteed; a runtime that cannot do it
+fails on the first attempt, is not asked again that session, and the ffmpeg path below takes over.
+
+**ffmpeg is the fallback.** When Media Foundation is unusable, a video without a matching sound
+file is handed to ffmpeg — `-vn -c:a libvorbis -q:a 4` — in the background, and the `.ogg` lands next to
+the `.mp4` where the player already looks for it. ffmpeg is looked for in `CultTweaker/Tools/ffmpeg.exe`, then beside the plugin, then on PATH; when
+neither route is available the log names the cutscene and says what to drop in the folder.
+Conversions either way are fire-and-forget: a long video transcodes while the game runs and is
+picked up the next time that cutscene plays.
+
+**The line down the middle** of every cutscene was the video camera drawing the room. The video is
+rendered `CameraNearPlane` on a camera the prefab brings with it, and that camera has a culling
+mask — so along with the video it drew whatever world geometry sat in front of it, which from where
+it sits projects to a hairline. Not part of the video, and not a UI element either, which is why a
+scan of every canvas graphic on screen found nothing. Its mask is emptied for the duration and put
+back afterwards; the near-plane blit is a command buffer and is not affected by culling.
 
 `MMVideoPlayer.Play` starts the video the moment it is called, so a custom video cannot be set up
 by calling it and correcting the source afterwards: the start on a source that does not exist

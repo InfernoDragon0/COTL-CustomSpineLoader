@@ -43,11 +43,13 @@ public static class StructureSpineHelper
     {
         var config = custom.SpineConfig;
 
-        // The first sprite renderer is also the sorting reference: the skeleton has to land in
-        // the same sorting layer as the building it replaces, or it draws behind the ground.
+        // The first sprite renderer is the reference for everything the skeleton has to match:
+        // the sorting layer (or it draws behind the ground) and the rotation (or it lies flat in
+        // it - see WorldRotationFor).
         var haveSorting = false;
         var sortingLayer = 0;
         var sortingOrder = 0;
+        var spriteRotation = Quaternion.identity;
 
         foreach (var sprite in root.GetComponentsInChildren<SpriteRenderer>(true))
         {
@@ -56,6 +58,7 @@ public static class StructureSpineHelper
             {
                 sortingLayer = sprite.sortingLayerID;
                 sortingOrder = sprite.sortingOrder;
+                spriteRotation = sprite.transform.rotation;
                 haveSorting = true;
             }
 
@@ -68,6 +71,7 @@ public static class StructureSpineHelper
         go.SetActive(false);
         go.transform.SetParent(root.transform, false);
         go.transform.localPosition = config.Offset?.ToVector3() ?? Vector3.zero;
+        go.transform.rotation = WorldRotationFor(config, haveSorting, spriteRotation);
 
         var scale = config.Scale?.ToVector3() ?? Vector3.one;
         if (scale.sqrMagnitude < 0.0001f) scale = Vector3.one;
@@ -106,6 +110,29 @@ public static class StructureSpineHelper
         Plugin.Log.LogInfo($"Structure '{custom.InternalName}': spine attached" +
                            (string.IsNullOrEmpty(config.SkinName) ? "" : $" (skin '{config.SkinName}')") +
                            (string.IsNullOrEmpty(config.Animation) ? "" : $" playing '{config.Animation}'") + ".");
+    }
+
+    // Cult of the Lamb is drawn on a tilt: the camera looks down at sixty degrees, and everything
+    // that stands upright in the world is authored rotated -60 on X to meet it (300 in the
+    // inspector, which is the same angle). Grass, projectiles and one-shot spine effects all do
+    // this to themselves in the game's own code.
+    //
+    // A GameObject created from nothing has no rotation at all, so an unrotated skeleton lies flat
+    // on the ground like a decal. The structure's own sprite is the better reference wherever
+    // there is one - whatever the building does to face the camera, the skeleton then does too -
+    // and the game's tilt only stands in when there is nothing to copy or the sprite was left
+    // unrotated. Rotation in the config overrides both.
+    private const float WorldTilt = -60f;
+
+    private static Quaternion WorldRotationFor(StructureSpineConfig config, bool haveSprite,
+        Quaternion spriteRotation)
+    {
+        if (config.Rotation != null) return Quaternion.Euler(config.Rotation.ToVector3());
+
+        if (haveSprite && Quaternion.Angle(spriteRotation, Quaternion.identity) > 0.5f)
+            return spriteRotation;
+
+        return Quaternion.Euler(WorldTilt, 0f, 0f);
     }
 
     // An empty animation name is a legitimate answer: the structure then holds its setup pose,

@@ -266,6 +266,11 @@ public class StructureSpineConfig
     public SerializableVector3 Offset;
     public SerializableVector3 Scale;
 
+    // Absent = the skeleton is turned to face the camera the way the structure's own sprite is,
+    // falling back to the world's -60 tilt. Set it to take that decision over, e.g. a prop that
+    // should lie flat on the ground: { "X": 0, "Y": 0, "Z": 0 }.
+    public SerializableVector3 Rotation;
+
     // The sprite COTL_API paints onto the building prefab is switched off once the skeleton is
     // up. Set false to keep it, e.g. a painted base under an animated skeleton.
     public bool HideSprite = true;
