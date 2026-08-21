@@ -18,6 +18,25 @@ public static class SpineFolderLoader
     public const float DefaultScale = 0.005f;
     public const string DefaultShader = "Spine/Skeleton";
 
+    // Shader.Find can return null (a build that stripped the shader), and new Material(null)
+    // throws - inside Plugin.Awake that aborts the whole mod load. Found once, cached, and
+    // fallen back to a shader every build ships rather than left to crash.
+    private static Shader _spineShader;
+
+    public static Shader SpineShader()
+    {
+        if (_spineShader != null) return _spineShader;
+
+        _spineShader = Shader.Find(DefaultShader);
+        if (_spineShader == null)
+        {
+            Plugin.Log.LogWarning($"Shader '{DefaultShader}' was not found; spine materials fall " +
+                                  "back to Sprites/Default and will render flat.");
+            _spineShader = Shader.Find("Sprites/Default");
+        }
+        return _spineShader;
+    }
+
     // Null when the folder ships no spine - that is a legitimate answer (a config that only
     // renames things), so the caller decides whether to complain.
     public static SkeletonDataAsset Build(string folder, string owner, string skeletonPath = null,
@@ -100,7 +119,7 @@ public static class SpineFolderLoader
     // Everything above is a runtime asset with no file behind it: once unloaded it is gone for
     // the session, so it is marked as not-unloadable rather than left to the asset sweep's
     // judgement about whether anything still points at it.
-    private static void Keep(UnityEngine.Object asset)
+    public static void Keep(UnityEngine.Object asset)
     {
         if (asset != null) asset.hideFlags |= HideFlags.DontUnloadUnusedAsset;
     }

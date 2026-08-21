@@ -94,6 +94,18 @@ namespace CustomSpineLoader
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
 
             SceneManager.sceneLoaded += OnSceneLoaded;
+
+            // Fired by ChangeRoomRoutine right after its fire-and-forget asset unload; the level
+            // loader sequences its room rebuild behind it (see LevelPlayback.NoteBiomeRoomChanged).
+            MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.LevelPlayback.NoteBiomeRoomChanged;
+
+            // The one arrival signal a RE-ACTIVATED room also fires - the generation hooks only
+            // see a room's first build, which is why a revisited room's lighting went missing.
+            MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.Tools.LightingTool.OnBiomeRoomChanged;
+
+            // Custom enemies (and so their corpses) belong to the room they spawned in; the
+            // game's own teardown never sees them because COTL_API spawns at the scene root.
+            MMBiomeGeneration.BiomeGenerator.OnBiomeLeftRoom += CustomEnemyDressing.OnBiomeLeftRoom;
             TryCreateRuntimeEditor(SceneManager.GetActiveScene());
 
             var panelHost = new GameObject("CultTweakerPanelHost");
@@ -177,7 +189,9 @@ namespace CustomSpineLoader
                 else
                 {
                     Log.LogInfo("F5 Pressed - Test Custom Dungeon");
-                    CustomDungeonManager.CustomDungeonList.Values.ElementAt(0).EnterDungeon();
+                    var editorDungeon = CustomDungeonManager.CustomDungeonList.Values.FirstOrDefault();
+                    if (editorDungeon != null) editorDungeon.EnterDungeon();
+                    else Log.LogWarning("No custom dungeon is registered; nothing to enter.");
                 }
             }
 
@@ -231,6 +245,13 @@ namespace CustomSpineLoader
             else
             {
                 DestroyRuntimeEditor();
+
+                // Only the suppression flag is cleared here, never the run: entering a custom
+                // level passes through intermediate scene loads (the transition, the dungeon
+                // map's selector) with the run already bound, and stopping it here handed every
+                // custom level to the vanilla generator. The flag alone is the thing that must
+                // not outlive its room - and OnRoomGenerated re-arms it per room.
+                MapEditor.LevelPlayback.ClearContentSuppression();
             }
         }
 

@@ -76,6 +76,17 @@ namespace CustomSpineLoader.Patches
             // outlives the room, so it would follow the player into the next one.
             MapEditor.Tools.TriggerCameraActions.ResetAll();
 
+            // A trigger sequence whose coroutine died with the previous scene would leave the
+            // global owner set - and every trigger in every later room silently blocked.
+            MapEditor.Tools.CTMapTrigger.ResetSequenceState();
+
+            // The room hand-off statics reset for every biome, not only ours: entering a vanilla
+            // dungeon after a custom run otherwise starts with the last custom door still latched
+            // (a stale direction, and GenCheck in whatever state the last room left it).
+            GenCheck = false;
+            NextRoomConnectionType = ConnectionTypes.Entrance;
+            LastDoorDirection = null;
+
             if (CustomDungeonManager.CustomDungeonList.ContainsKey(CustomDungeonManager.EnteringCustomDungeon))
             {
                 Plugin.Log.LogInfo("Entering Custom Dungeon ONENABLE " + CustomDungeonManager.EnteringCustomDungeon);
@@ -84,12 +95,6 @@ namespace CustomSpineLoader.Patches
                 Plugin.Log.LogInfo("Custom Room Count for " + __instance.DungeonLocation + ": " + CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation].NumRooms);
                 __instance.NumberOfRooms = CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation].NumRooms;
                 // __instance.StartWithBossRoomDoor = true;
-
-                // Statics survive from the previous run; without this the entrance room's
-                // Generate hook is skipped (GenCheck stuck true from the last door used).
-                GenCheck = false;
-                NextRoomConnectionType = ConnectionTypes.Entrance;
-                LastDoorDirection = null;
 
                 CustomDungeonManager.EnteringCustomDungeon = FollowerLocation.None;
 
@@ -240,6 +245,37 @@ namespace CustomSpineLoader.Patches
             return true;
         }
 
+        // Room lighting is global state on LightingManager, so every arrival has to re-assert what
+        // the arriving room asked for. Generation is the wrong signal on its own: the game builds a
+        // room once and only re-activates it afterwards, so walking back into one announced nothing
+        // and its lighting never changed - the symptom being a custom mood that follows the player
+        // out of the room that set it and a revisited room that comes back plain.
+        //
+        // Both arrival points are hooked because they answer different halves of it: SetRoom is the
+        // moment the current room changes, which is early enough that the swap happens behind the
+        // transition's fade, while RoomBecameActive covers arrivals that do not go through it.
+        // LightingTool ignores the second announcement of the same arrival, so the pair is safe.
+        [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.SetRoom))]
+        [HarmonyPostfix]
+        public static void BiomeGenerator_SetRoom() => AssertRoomLighting();
+
+        [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.RoomBecameActive))]
+        [HarmonyPostfix]
+        public static void BiomeGenerator_RoomBecameActive() => AssertRoomLighting();
+
+        // A lighting slip is not worth taking a room change down with it.
+        private static void AssertRoomLighting()
+        {
+            try
+            {
+                MapEditor.Tools.LightingTool.OnRoomEntered();
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("MapEditor: room-change lighting failed: " + e.Message);
+            }
+        }
+
         [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.Generate), MethodType.Enumerator)]
         [HarmonyPatch([])]
         [HarmonyPostfix]
@@ -263,9 +299,24 @@ namespace CustomSpineLoader.Patches
 
             GenCheck = true;
 
-            // Each room arrives on its own lighting: the one it asked for if it ever did, and
-            // the biome's otherwise. Both halves matter - a room that set its own mood must not
-            // go on lighting the next one, and walking back into it must not find it plain.
+            // Everything below runs inside GenerateRoom.Generate's own MoveNext: an uncaught
+            // throw kills the generation coroutine and leaves a black, soft-locked room. Bad
+            // content (a blueprint that fails to apply, an enemy that fails to spawn) is worth a
+            // broken room's worth of logging, never a broken run.
+            try
+            {
+                GenerateForCustomDungeon(__instance);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError("Custom dungeon room content failed; the room generates empty: " + e);
+            }
+        }
+
+        private static void GenerateForCustomDungeon(GenerateRoom __instance)
+        {
+            // The earliest a freshly generated room can be put on its own lighting. Revisits come
+            // through the arrival hooks above instead; this one only ever sees a first arrival.
             MapEditor.Tools.LightingTool.OnRoomEntered();
 
             // Harmony's enumerator patch supplies a null __instance in some invocations (seen
@@ -274,10 +325,13 @@ namespace CustomSpineLoader.Patches
             var room = __instance != null ? __instance : GenerateRoom.Instance;
 
             Plugin.Log.LogInfo("GenerateRoom_Generate for custom dungeon " + BiomeGenerator.Instance.DungeonLocation);
-            //TODO: this seems to run once for every room instance which makes it run multiple times. 
-            Plugin.Log.LogInfo("Room complete status: " + BiomeGenerator.Instance.CurrentRoom.Completed);
+
+            // CurrentRoom can lag the generation hook by a step on the boot-time entrance.
+            var currentRoom = BiomeGenerator.Instance.CurrentRoom;
+            var completed = currentRoom != null && currentRoom.Completed;
+            Plugin.Log.LogInfo("Room complete status: " + completed);
             // if not completed, then spawn monsters
-            if (!BiomeGenerator.Instance.CurrentRoom.Completed)
+            if (!completed)
             {
                 switch (NextRoomConnectionType)
                 {

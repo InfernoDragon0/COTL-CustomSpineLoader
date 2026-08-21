@@ -20,6 +20,9 @@ namespace CustomSpineLoader.APIHelper;
 // happens on the first run and never again.
 public static class CutsceneAudioExtractor
 {
+    // One decode thread is spawned per video, and they all read and write these - so they sit
+    // behind one gate. Startup() in particular must not run twice concurrently.
+    private static readonly object Gate = new();
     private static bool _started;
     private static bool _unavailable;
 
@@ -63,10 +66,28 @@ public static class CutsceneAudioExtractor
     {
         error = null;
 
-        if (_unavailable)
+        lock (Gate)
         {
-            error = "Media Foundation is not usable in this runtime.";
-            return false;
+            if (_unavailable)
+            {
+                error = "Media Foundation is not usable in this runtime.";
+                return false;
+            }
+
+            if (!_started)
+            {
+                try
+                {
+                    MediaFoundationApi.Startup();
+                    _started = true;
+                }
+                catch (Exception e)
+                {
+                    _unavailable = true;
+                    error = e.GetType().Name + ": " + e.Message;
+                    return false;
+                }
+            }
         }
 
         // Written under a temporary name and moved into place, so a decode that dies halfway
@@ -75,12 +96,6 @@ public static class CutsceneAudioExtractor
 
         try
         {
-            if (!_started)
-            {
-                MediaFoundationApi.Startup();
-                _started = true;
-            }
-
             using (var reader = new MediaFoundationReader(videoPath))
             {
                 if (reader.WaveFormat == null)
@@ -113,7 +128,7 @@ public static class CutsceneAudioExtractor
                 or NotSupportedException or PlatformNotSupportedException
                 or TypeInitializationException or System.IO.FileNotFoundException)
             {
-                _unavailable = true;
+                lock (Gate) _unavailable = true;
                 error = e.GetType().Name + ": " + e.Message;
             }
 

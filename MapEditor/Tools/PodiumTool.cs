@@ -94,7 +94,9 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             __instance.otherWeaponOptions = new Interaction_WeaponSelectionPodium[0];
         }
 
-        private static void Postfix(Interaction_WeaponSelectionPodium __instance, SwapState __state)
+        // A finalizer rather than a postfix: postfixes are skipped when the original throws,
+        // and that would leave the podium permanently stripped of its sibling options.
+        private static void Finalizer(Interaction_WeaponSelectionPodium __instance, SwapState __state)
         {
             if (__state != null) __instance.otherWeaponOptions = __state.Original;
         }

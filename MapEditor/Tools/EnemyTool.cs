@@ -337,15 +337,21 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     }
 
     // CustomEnemyList is internal to COTL_API, so it is read via Harmony's traverse rather than
-    // depending on a publicized COTL_API build.
+    // depending on a publicized COTL_API build. The dictionary object itself is stable for the
+    // session (COTL_API mutates it in place), so the traverse runs once, not per spawn and per
+    // thumbnail.
+    private static Dictionary<Enemy, CustomEnemy> _customEnemies;
+
     private static Dictionary<Enemy, CustomEnemy> CustomEnemies()
     {
+        if (_customEnemies != null) return _customEnemies;
+
         try
         {
             var dict = Traverse.Create(typeof(CustomEnemyManager))
                 .Property("CustomEnemyList")
                 .GetValue<Dictionary<Enemy, CustomEnemy>>();
-            return dict ?? [];
+            return _customEnemies = dict ?? [];
         }
         catch (System.Exception e)
         {
@@ -491,15 +497,8 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var unit = ghost.GetComponentInChildren<UnitObject>(true);
         if (unit != null)
         {
-            try
-            {
-                var fromField = Traverse.Create(unit).Field("Spine").GetValue<SkeletonAnimation>();
-                if (fromField != null) return fromField;
-            }
-            catch (System.Exception)
-            {
-                // Controller has no Spine field; fall through.
-            }
+            var fromField = APIHelper.CustomEnemyDressing.SkeletonField(unit);
+            if (fromField != null) return fromField;
         }
 
         return ghost.GetComponentInChildren<SkeletonAnimation>(true);

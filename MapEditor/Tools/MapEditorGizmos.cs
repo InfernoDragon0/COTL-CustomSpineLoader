@@ -7,9 +7,24 @@ public static class MapEditorGizmos
     public static readonly Color BoxColour = new(0.1f, 1f, 1f, 1f);
     public static readonly Color GripColour = new(1f, 0.82f, 0.15f, 0.95f);
 
+    // One-entry per-frame memo: the per-frame gizmo syncs ask for the same object's bounds two
+    // or three times a frame (box, grip, corner), and each ask walked the child renderers. Keyed
+    // by object AND frame, so nothing can ever be stale for longer than the frame it was
+    // computed in.
+    private static GameObject _memoTarget;
+    private static int _memoFrame = -1;
+    private static bool _memoFound;
+    private static Bounds _memoBounds;
+
     // Combined bounds of every visible renderer under `go`.
     public static bool TryGetBounds(GameObject go, out Bounds bounds)
     {
+        if (ReferenceEquals(go, _memoTarget) && _memoFrame == Time.frameCount)
+        {
+            bounds = _memoBounds;
+            return _memoFound;
+        }
+
         bounds = new Bounds();
         var found = false;
 
@@ -31,6 +46,10 @@ public static class MapEditorGizmos
             }
         }
 
+        _memoTarget = go;
+        _memoFrame = Time.frameCount;
+        _memoFound = found;
+        _memoBounds = bounds;
         return found;
     }
 
@@ -45,6 +64,24 @@ public static class MapEditorGizmos
         return go;
     }
 
+    // One material for every gizmo line in the editor. Sprites/Default renders vertex colour,
+    // so each line still tints itself through startColor/endColor - and gizmos are created per
+    // selection, per door and per overlay path, so a material per line was a monotonic leak
+    // (explicitly-assigned materials are not destroyed with their renderer).
+    private static Material _lineMaterial;
+
+    public static Material LineMaterial()
+    {
+        if (_lineMaterial == null)
+        {
+            _lineMaterial = new Material(Shader.Find("Sprites/Default"))
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+        }
+        return _lineMaterial;
+    }
+
     // A box with no target of its own, for callers that know their own bounds - the trigger tool
     // marks an action's target this way, and a trigger volume has no renderer to measure.
     public static GameObject CreateBox(string name, Color colour)
@@ -57,7 +94,7 @@ public static class MapEditorGizmos
         line.positionCount = 4;
         line.startWidth = line.endWidth = 0.1f;
         line.numCapVertices = 2;
-        line.material = new Material(Shader.Find("Sprites/Default"));
+        line.sharedMaterial = LineMaterial();
         line.startColor = line.endColor = colour;
         line.sortingOrder = 32000;
         return go;

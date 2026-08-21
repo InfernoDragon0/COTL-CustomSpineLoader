@@ -40,7 +40,7 @@ public class CustomColorHelper
 
     public static float GetCustomScale(int id)
     {
-        return CustomColors.TryGetValue(id,out _) ? CustomColors[id].scale : -1f;
+        return CustomColors.TryGetValue(id, out var color) ? color.scale : -1f;
     }
 
     public static void SetCustomColor(int id, float r, float g, float b, float a, float scale = 1f)

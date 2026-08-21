@@ -32,6 +32,11 @@ public static class MapNamePrompt
         if (_openCount == 0) editor.ModalOpen = false;
     }
 
+    // A scene change kills TrackLifetime before it can close its dialog, and the count is
+    // static - the next scene's editor would start with ModalOpen latched and every input
+    // ignored. The editor host calls this from OnDestroy.
+    public static void ResetModalState() => _openCount = 0;
+
     // existsCheck/existsNoun drive the overwrite warning; the default is the map store, because
     // that is what the prompt was built for. The lighting tool passes its own profile store.
     public static void Show(RuntimeMapEditor editor, string prefill, string title,

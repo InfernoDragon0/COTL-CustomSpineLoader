@@ -19,9 +19,62 @@ public static class CustomEnemyDressing
     private const BindingFlags Members =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
 
+    // Every custom enemy that came through Spawn this room. COTL_API instantiates at the scene
+    // root, so nothing about the room's own teardown ever touches them - and custom rooms skip
+    // the scenery recycle sweep entirely - which is how a corpse (or a straggler) followed the
+    // player through doors. Swept when the biome announces the room is being left.
+    private static readonly System.Collections.Generic.List<GameObject> TrackedSpawns = [];
+
+    // Fires at the top of ChangeRoomRoutine, while the departing room is still current: its
+    // custom spawns and their corpses are removed. The bodies live at the scene root, where no
+    // room teardown ever reaches them - without this they followed the player through doors.
+    // (A per-room stash-and-restore was tried so corpses would reappear on revisit, vanilla
+    // style, but the restore never landed reliably; removed in favour of the simple rule.)
+    public static void OnBiomeLeftRoom()
+    {
+        for (var i = 0; i < TrackedSpawns.Count; i++)
+        {
+            var go = TrackedSpawns[i];
+            if (go == null) continue;
+
+            try
+            {
+                UnityEngine.Object.Destroy(go);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("Custom enemy: could not clean up a spawn on room change: " + e.Message);
+            }
+        }
+        TrackedSpawns.Clear();
+
+        // The visible skeleton is not the enemy: on death, SpawnDeadBodyOnDeath drops a separate
+        // DeadBodySliding prefab that inherits the enemy's parent - the scene root, for anything
+        // COTL_API spawned. Vanilla corpses are parented under their room and are left alone
+        // here; only the rootless ones are ours.
+        try
+        {
+            foreach (var body in UnityEngine.Object.FindObjectsOfType<DeadBodySliding>())
+                if (body != null && body.transform.parent == null)
+                    UnityEngine.Object.Destroy(body.gameObject);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("Custom enemy: could not clean up dead bodies on room change: " + e.Message);
+        }
+    }
+
     public static void Apply(Enemy type, UnitObject unit)
     {
         if (unit == null) return;
+
+        TrackedSpawns.Add(unit.gameObject);
+
+        // For every custom enemy that comes through Spawn, ours or not: when COTL_API swaps in
+        // its own controller it destroys the prefab's original UnitObject, and anything on the
+        // prefab that serialized a reference to it is left pointing at a corpse.
+        RepairControllerReferences(unit);
+
         if (!CustomEnemyLoader.Registered.TryGetValue(type, out var enemy) || enemy == null) return;
 
         var go = unit.gameObject;
@@ -49,6 +102,37 @@ public static class CustomEnemyDressing
         ApplyTuning(unit, enemy);
 
         if (enemy.BossHealthBar) AttachBossBar(go, unit, enemy);
+    }
+
+    // COTL_API's Spawn, when a custom enemy brings its own EnemyController, copies every
+    // UnitObject field onto the new controller and then DESTROYS the original - but the mimic
+    // prefab's helper components still hold serialized references to it. Cower is the one that
+    // bites: its death-knockback coroutine's first statement is AIScriptToDisable.enabled =
+    // false, which throws on the destroyed controller AFTER DestroyOnDeath has already been
+    // switched off - so the corpse never finishes dying and stands frozen mid-animation.
+    //
+    // Only the known offenders, by type: a generic "re-point every UnitObject field" sweep would
+    // also rewrite legitimate cross-unit references (BarrierEnemy.barrierPartner points at a
+    // DIFFERENT unit). Destroy is deferred, so the stale value does not read as null this frame -
+    // anything not already pointing at the live controller is re-pointed unconditionally, which
+    // is a no-op for enemies that never had their controller swapped.
+    private static void RepairControllerReferences(UnitObject unit)
+    {
+        try
+        {
+            foreach (var cower in unit.GetComponentsInChildren<Cower>(true))
+                if (!ReferenceEquals(cower.AIScriptToDisable, unit)) cower.AIScriptToDisable = unit;
+
+            foreach (var stealth in unit.GetComponentsInChildren<EnemyStealth>(true))
+                if (!ReferenceEquals(stealth.AIScriptToDisable, unit)) stealth.AIScriptToDisable = unit;
+
+            foreach (var detect in unit.GetComponentsInChildren<DetectStealth>(true))
+                if (!ReferenceEquals(detect.unitObject, unit)) detect.unitObject = unit;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("Custom enemy: could not repair its controller references: " + e.Message);
+        }
     }
 
     // Unconditional, unlike COTL_API's: an enemy that keeps its mimic's brain still wants its own
@@ -112,18 +196,30 @@ public static class CustomEnemyDressing
     // (a mount, a weapon), and the field is the one the AI animates.
     private static SkeletonAnimation FindSkeleton(GameObject go, UnitObject unit)
     {
+        var fromField = SkeletonField(unit);
+        if (fromField != null) return fromField;
+
+        return go.GetComponentInChildren<SkeletonAnimation>(true);
+    }
+
+    // Shared with the map editor's enemy tool, which needs the same "which skeleton does the AI
+    // animate" answer for its ghosts and thumbnails - through the same memoised lookup.
+    internal static SkeletonAnimation SkeletonField(UnitObject unit)
+    {
+        if (unit == null) return null;
+
         try
         {
-            var field = unit.GetType().GetField("Spine", Members);
-            if (field != null && field.GetValue(unit) is SkeletonAnimation fromField && fromField != null)
-                return fromField;
+            if (FindMember(unit.GetType(), "Spine") is System.Reflection.FieldInfo field &&
+                field.GetValue(unit) is SkeletonAnimation spine && spine != null)
+                return spine;
         }
         catch (Exception)
         {
-            // Not every mimic names it that; the search below is the fallback.
+            // Not every mimic names it that; the caller has a fallback.
         }
 
-        return go.GetComponentInChildren<SkeletonAnimation>(true);
+        return null;
     }
 
     // The tuning table, by member name, against the controller itself - which is the UnitObject,
@@ -152,12 +248,28 @@ public static class CustomEnemyDressing
         }
     }
 
+    // Memoised per (type, member): the lookups run on every spawn, and a room of eight enemies
+    // with a six-entry tuning table used to do ~100 uncached reflection walks. Misses are cached
+    // too (as null) - a typo'd name asks once, not once per spawn.
+    private static readonly System.Collections.Generic.Dictionary<(Type, string), System.Reflection.MemberInfo>
+        MemberCache = [];
+
+    private static System.Reflection.MemberInfo FindMember(Type type, string name)
+    {
+        var key = (type, name);
+        if (MemberCache.TryGetValue(key, out var cached)) return cached;
+
+        System.Reflection.MemberInfo member = type.GetField(name, Members);
+        member ??= type.GetProperty(name, Members);
+        MemberCache[key] = member;
+        return member;
+    }
+
     private static bool TrySet(object target, string name, float value)
     {
-        var type = target.GetType();
+        var member = FindMember(target.GetType(), name);
 
-        var field = type.GetField(name, Members);
-        if (field != null && !field.IsInitOnly)
+        if (member is System.Reflection.FieldInfo field && !field.IsInitOnly)
         {
             var converted = Convert(field.FieldType, value);
             if (converted == null) return false;
@@ -165,8 +277,7 @@ public static class CustomEnemyDressing
             return true;
         }
 
-        var property = type.GetProperty(name, Members);
-        if (property != null && property.CanWrite)
+        if (member is System.Reflection.PropertyInfo property && property.CanWrite)
         {
             var converted = Convert(property.PropertyType, value);
             if (converted == null) return false;

@@ -19,7 +19,9 @@ public class CustomColorCommand : CustomFollowerCommand
 {
     public override string InternalName => "CustomColor_Command";
 
-    public override Sprite CommandIcon => TextureHelper.CreateSpriteFromPath(Path.Combine(Plugin.PluginPath, "Assets/colorwheel.png"));
+    private static Sprite _icon;
+    public override Sprite CommandIcon =>
+        _icon ??= TextureHelper.CreateSpriteFromPath(Path.Combine(Plugin.PluginPath, "Assets/colorwheel.png"));
     public override List<FollowerCommandCategory> Categories { get; } = [FollowerCommandCategory.DEFAULT_COMMAND];
 
     public UIFollowerSummaryMenuController _followerSummaryMenuController;

@@ -87,8 +87,13 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
     private readonly string _description = cfg.Description ?? "This is a custom meal created with CultTweaker.";
 
     public override string InternalName => _internalName;
-    public override Sprite InventoryIcon => TextureHelper.CreateSpriteFromPath(_spritePath);
-    public override Sprite Sprite => TextureHelper.CreateSpriteFromPath(_spritePath);
+    // Cached: these getters are read on every UI redraw, and each call used to decode the
+    // PNG from disk into a fresh texture that nothing ever destroyed.
+    private Sprite _cachedSprite;
+    private Sprite CachedSprite => _cachedSprite ??= TextureHelper.CreateSpriteFromPath(_spritePath);
+
+    public override Sprite InventoryIcon => CachedSprite;
+    public override Sprite Sprite => CachedSprite;
 
     public override string Name() => _mealName;
     public override string Lore() => _lore;
@@ -113,10 +118,17 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
         }
     }
 
+    // The parsed lists are cached for the same reason as the sprite: the cooking UI reads
+    // these repeatedly, and the enum parsing and list building are the same every time.
+    private List<List<InventoryItem>> _cachedRecipe;
+    private CookingData.MealEffect[] _cachedEffects;
+
     public override List<List<InventoryItem>> Recipe
     {
         get
         {
+            if (_cachedRecipe != null) return _cachedRecipe;
+
             var list = new List<List<InventoryItem>>();
             var innerList = new List<InventoryItem>();
             foreach (var kv in _recipe)
@@ -132,7 +144,7 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
                 }
             }
             list.Add(innerList);
-            return list;
+            return _cachedRecipe = list;
         }
     }
 
@@ -140,6 +152,8 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
     {
         get
         {
+            if (_cachedEffects != null) return _cachedEffects;
+
             var outList = new List<CookingData.MealEffect>();
             foreach (var kv in _effects)
             {
@@ -154,7 +168,7 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
                 }
             }
 
-            return [.. outList];
+            return _cachedEffects = [.. outList];
         }
     }
 }

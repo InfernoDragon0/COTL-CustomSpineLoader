@@ -193,7 +193,13 @@ public class MapEditorUI
         {
             I2.Loc.LocalizationManager.GetLaptureRegularFont(font =>
             {
-                if (font == null) return;
+                if (font == null)
+                {
+                    // No font is ever coming; the headers stay on the fallback. Without this the
+                    // static list kept accumulating destroyed TMP_Texts, one per header, forever.
+                    _pendingHeaders.Clear();
+                    return;
+                }
                 _headingFont = font;
 
                 for (var i = _pendingHeaders.Count - 1; i >= 0; i--)

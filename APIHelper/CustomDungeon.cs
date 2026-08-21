@@ -169,6 +169,15 @@ public class CustomDungeon
                     var pos = GetRandomWalkablePosition();
                     var spawned = CustomEnemyManager.Spawn(enemy, pos);
 
+                    // COTL_API returns null while the enemy's prefab is still loading - which is
+                    // exactly this mod's own async build path. A throw here would kill the room's
+                    // generation coroutine; a missing enemy is the lesser harm.
+                    if (spawned == null || spawned.health == null)
+                    {
+                        Plugin.Log.LogWarning($"Enemy '{enemy}' could not be spawned yet (prefab still building?); skipped.");
+                        continue;
+                    }
+
                     //TODO: destroy the script controller, and spine components
                     // then, apply a new spine component and the script controller from the enemy
 

@@ -280,6 +280,10 @@ public static class TriggerCameraActions
             Plugin.Log.LogWarning($"MapEditor: cutscene '{name}' failed to start: {e.Message}");
             if (hudHidden && HUD_Manager.Instance != null) HUD_Manager.Instance.Show(0);
             ResumeRoomAudio();
+            // PrepareOverlay may already have moved the camera off the room before the throw -
+            // and _movedCamera is static, so leaving it set blocks every later cutscene's
+            // isolate AND leaves the world invisible.
+            RestoreVideoCamera();
             yield break;
         }
 
@@ -292,31 +296,42 @@ public static class TriggerCameraActions
 
         // Realtime, and generous: a cutscene runs while the game is paused around it, and the
         // ceiling is only there so a video that never reports finishing cannot strand the run.
-        var deadline = Time.unscaledTime + 900f;
-        while (!finished && Time.unscaledTime < deadline)
-        {
-            ApplySettingsVolume();
-            yield return null;
-        }
-
-        if (!finished)
-        {
-            Plugin.Log.LogWarning($"MapEditor: cutscene '{name}' never reported finishing; moving on.");
-            try { MMTools.MMVideoPlayer.ForceStopVideo(); }
-            catch (System.Exception) { }
-        }
-
-        StopCompanionAudio();
-        ResumeRoomAudio();
-        RestoreVideoCamera();
-
+        //
+        // The teardown lives in a finally: a scene change or room reload kills this coroutine
+        // mid-video (finally is the only block Unity still runs in that case), and without it
+        // the FMOD stream stayed open, the music bus stayed locked - global engine state - and
+        // the video camera stayed parked off the room for the rest of the session.
         try
         {
-            if (hudHidden && HUD_Manager.Instance != null) HUD_Manager.Instance.Show(0);
+            var deadline = Time.unscaledTime + 900f;
+            while (!finished && Time.unscaledTime < deadline)
+            {
+                ApplySettingsVolume();
+                yield return null;
+            }
+
+            if (!finished)
+            {
+                Plugin.Log.LogWarning($"MapEditor: cutscene '{name}' never reported finishing; moving on.");
+                try { MMTools.MMVideoPlayer.ForceStopVideo(); }
+                catch (System.Exception) { }
+            }
         }
-        catch (System.Exception e)
+        finally
         {
-            Plugin.Log.LogWarning("MapEditor: could not restore the HUD after the cutscene: " + e.Message);
+            StopCompanionAudio();
+            ResumeRoomAudio();
+            RestoreVideoCamera();
+            MMTools.MMVideoPlayer.Callback = null;
+
+            try
+            {
+                if (hudHidden && HUD_Manager.Instance != null) HUD_Manager.Instance.Show(0);
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning("MapEditor: could not restore the HUD after the cutscene: " + e.Message);
+            }
         }
     }
 
@@ -369,7 +384,12 @@ public static class TriggerCameraActions
         ClearSurface(player);
         PrepareOverlay(instance);
 
+        // The player object is the game's persistent instance, reused across cutscenes; -= first
+        // keeps this a single subscription rather than one more per play (after N cutscenes the
+        // end-of-video handler fired N times).
+        player.loopPointReached -= MMTools.MMVideoPlayer.EndReached;
         player.loopPointReached += MMTools.MMVideoPlayer.EndReached;
+        player.errorReceived -= MMTools.MMVideoPlayer.HandleVideoPlayerError;
         player.errorReceived += MMTools.MMVideoPlayer.HandleVideoPlayerError;
 
         // Prepared first, then played: a url source that starts before it is open shows a black

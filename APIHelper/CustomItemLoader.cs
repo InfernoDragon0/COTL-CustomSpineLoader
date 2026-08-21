@@ -135,8 +135,13 @@ public class CultTweakerCustomItem(
     public override int RefineryInputQty => _refineryInputQty;
     public override float CustomRefineryDuration => _customRefineryDuration;
 
-    public override Sprite InventoryIcon => TextureHelper.CreateSpriteFromPath(_spritePath);
-    public override Sprite Sprite => TextureHelper.CreateSpriteFromPath(_spritePath);
+    // Cached: these getters are read on every UI redraw, and each call used to decode the
+    // PNG from disk into a fresh texture that nothing ever destroyed.
+    private Sprite _cachedSprite;
+    private Sprite CachedSprite => _cachedSprite ??= TextureHelper.CreateSpriteFromPath(_spritePath);
+
+    public override Sprite InventoryIcon => CachedSprite;
+    public override Sprite Sprite => CachedSprite;
     public override int FuelWeight => _fuelWeight;
     public override int FoodSatitation => _foodSatitation;
 

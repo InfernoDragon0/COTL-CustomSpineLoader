@@ -172,6 +172,14 @@ public class RuntimeMapEditor : MonoBehaviour
         MapEditorIcons.ClearSceneScopedCache();
         EnemyThumbnails.ClearSceneScopedCache();
 
+        // Static state whose owner just died with the scene. Each of these, left set, silently
+        // bricks something in the next session: a latched modal count eats all editor input, a
+        // stranded sequence owner blocks every trigger in the game, and the lighting table would
+        // re-apply a dead session's values to rooms that happen to share identities.
+        MapNamePrompt.ResetModalState();
+        Tools.CTMapTrigger.ResetSequenceState();
+        if (!LevelPlayback.Active) Tools.LightingTool.ForgetRoomLighting();
+
         if (Active == this) Active = null;
     }
 
@@ -278,7 +286,11 @@ public class RuntimeMapEditor : MonoBehaviour
         }
         catch (System.Exception e)
         {
-            Plugin.Log.LogError("MapEditor: camera controls failed: " + e);
+            if (Time.unscaledTime >= _nextUpdateErrorAt)
+            {
+                _nextUpdateErrorAt = Time.unscaledTime + 5f;
+                Plugin.Log.LogError("MapEditor: camera controls failed: " + e);
+            }
         }
 
         try
@@ -287,9 +299,17 @@ public class RuntimeMapEditor : MonoBehaviour
         }
         catch (System.Exception e)
         {
-            Plugin.Log.LogError($"MapEditor: tool '{_activeTool?.Name}' update failed: " + e);
+            // Throttled: a tool broken in OnUpdate throws again next frame, and a full
+            // exception log at 60Hz buries everything else in the file.
+            if (Time.unscaledTime >= _nextUpdateErrorAt)
+            {
+                _nextUpdateErrorAt = Time.unscaledTime + 5f;
+                Plugin.Log.LogError($"MapEditor: tool '{_activeTool?.Name}' update failed: " + e);
+            }
         }
     }
+
+    private float _nextUpdateErrorAt;
 
     private void HandleCameraControls()
     {
@@ -1137,8 +1157,11 @@ public class RuntimeMapEditor : MonoBehaviour
         {
             var full = ScreenCapture.CaptureScreenshotAsTexture();
 
+            // Downscale returns its input unchanged when the screen is already narrow enough,
+            // so destroying both blindly would destroy the same texture twice - and encode it
+            // after the first Destroy.
             var scaled = Downscale(full, SnapshotWidth);
-            Destroy(full);
+            if (!ReferenceEquals(scaled, full)) Destroy(full);
 
             png = scaled.EncodeToPNG();
             Destroy(scaled);
@@ -1231,7 +1254,8 @@ public class RuntimeMapEditor : MonoBehaviour
         DisarmReset();
         SetStatus("Resetting room...");
         ExitEditorMode();
-        CustomDungeonManager.CustomDungeonList.Values.ElementAt(0).EnterDungeon();
+        var editorDungeon = CustomDungeonManager.CustomDungeonList.Values.FirstOrDefault();
+        if (editorDungeon != null) editorDungeon.EnterDungeon();
     }
 
     private void DisarmReset() => _resetArmed = false;

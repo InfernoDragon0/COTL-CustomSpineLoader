@@ -50,10 +50,24 @@ public class StructureBuildingOverrideHelper
         }
     }
     
+    // The converted list is built once per building and cached: this is called from a postfix
+    // on Structure.Start, which fires for every matching structure on every location load, and
+    // each call used to decode every override PNG from disk again - a fresh texture per call
+    // that nothing ever destroyed.
+    private static readonly Dictionary<string, List<CustomStructureBuildingData>> _converted = [];
+
     public static List<CustomStructureBuildingData> GetOverridesForBuilding(string buildingName)
     {
+        if (_converted.TryGetValue(buildingName, out var cached)) return cached;
+
         var convertibleFormat = StructureBuildingOverrides.TryGetValue(buildingName, out var overrides) ? overrides : null;
-        if (convertibleFormat == null) return null;
+        if (convertibleFormat == null)
+        {
+            // Negative answers are cached too - most structures have no overrides, and they all
+            // ask on every location load.
+            _converted[buildingName] = null;
+            return null;
+        }
 
         //convert this list into a list of StructureBuildingOverrideData
         var result = new List<CustomStructureBuildingData>();
@@ -66,10 +80,13 @@ public class StructureBuildingOverrideHelper
                 Rotation = item.Rotation.ToVector3(),
                 Sprite = TextureHelper.CreateSpriteFromPath(Path.Combine(Plugin.PluginPath, "BuildingOverrides/" + buildingName + "/" + item.SpriteImageName))
             };
+            data.Sprite.texture.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+            data.Sprite.hideFlags |= HideFlags.DontUnloadUnusedAsset;
             result.Add(data);
             Plugin.Log.LogInfo($"Custom Spine Loader: Loaded override with sprite {item.SpriteImageName} for building {buildingName}: offset {data.Offset}, scale {data.Scale}, rotation {data.Rotation}.");
         }
 
+        _converted[buildingName] = result;
         return result;
     }
 }

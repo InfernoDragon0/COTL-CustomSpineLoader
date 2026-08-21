@@ -619,7 +619,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         line.loop = loop;
         line.positionCount = points.Length;
         line.startWidth = line.endWidth = 0.08f;
-        line.material = new Material(Shader.Find("Sprites/Default"));
+        line.sharedMaterial = MapEditorGizmos.LineMaterial();
         line.startColor = line.endColor = colour;
         line.sortingOrder = 32000;
 

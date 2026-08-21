@@ -140,9 +140,14 @@ public class CultTweakerCustomTarot(string internalName, CustomTarotConfig cfg, 
 
     public override TarotCards.CardCategory Category => _category;
 
-    public override Sprite CustomSprite => TextureHelper.CreateSpriteFromPath(_spritePath);
+    // Cached: the tarot pick screen shows several cards at once and re-reads these per draw;
+    // each call used to decode the PNG from disk into a texture nothing ever destroyed.
+    private Sprite _cachedFront;
+    private Sprite _cachedBack;
 
-    public override Sprite CustomBackSprite => TextureHelper.CreateSpriteFromPath(_backSpritePath);
+    public override Sprite CustomSprite => _cachedFront ??= TextureHelper.CreateSpriteFromPath(_spritePath);
+
+    public override Sprite CustomBackSprite => _cachedBack ??= TextureHelper.CreateSpriteFromPath(_backSpritePath);
 
     public override string Skin => "Custom";
 

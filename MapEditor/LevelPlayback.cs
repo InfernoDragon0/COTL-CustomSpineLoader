@@ -29,11 +29,34 @@ public static class LevelPlayback
 
     public static bool SuppressVanillaContent { get; private set; }
 
+    // The narrow escape hatch for a suppression flag left set with nothing around to clear it:
+    // it drops the flag WITHOUT ending the run. A level run legitimately spans scene loads (the
+    // dungeon map's selector, the transition before Dungeon1 comes up), so "not in Dungeon1" is
+    // never by itself a reason to Stop() - doing that is exactly what once killed every custom
+    // level on arrival. The flag is re-armed per room by OnRoomGenerated, so clearing it between
+    // scenes costs nothing.
+    public static void ClearContentSuppression() => SuppressVanillaContent = false;
+
+    // Ticks when BiomeGenerator fires OnBiomeChangeRoom - which it does immediately AFTER its
+    // fire-and-forget Resources.UnloadUnusedAssets() call in ChangeRoomRoutine. That call is the
+    // repeat crash-to-desktop: its asset sweep runs on a worker thread while this loader floods
+    // the scene with a couple hundred addressable spawns and mass-releases the previous room's
+    // instances, and the two collide inside Mono's heap walk. Waiting for this tick, then for a
+    // sweep of our own to finish, is what keeps the rebuild strictly AFTER the game's sweep.
+    private static int _roomChangeTick;
+
+    public static void NoteBiomeRoomChanged() => _roomChangeTick++;
+
     private class ApplyState
     {
         public GenerateRoom Room;
         public int Slot;
         public string EntryDirection;
+
+        // True when this apply came through a door, i.e. the game's ChangeRoomRoutine is running
+        // alongside and will fire its own asset unload partway through. The boot-time entrance
+        // has no such routine and must not wait for a signal that never comes.
+        public bool AwaitRoomChange;
 
         public void ArmCompletionFlag()
         {
@@ -211,7 +234,10 @@ public static class LevelPlayback
         if (!Active || _pendingApply == null)
         {
             // A hold whose apply routine died with the previous scene would otherwise keep
-            // MMTransition marked playing forever.
+            // MMTransition marked playing forever. Same for the suppression flag: it is set
+            // before the coroutine that clears it is guaranteed to start, and three prefixes
+            // keep skipping vanilla content for as long as it stays true.
+            SuppressVanillaContent = false;
             if (_holdingResume) ReleaseHold();
             return;
         }
@@ -258,7 +284,10 @@ public static class LevelPlayback
             Slot = slot,
             // Enter through the side the player came out of: opposite the used door. The
             // first room has no prior door and uses the blueprint's own entrance.
-            EntryDirection = Opposite(DungeonPatches.LastDoorDirection)
+            EntryDirection = Opposite(DungeonPatches.LastDoorDirection),
+            // A prior door means ChangeRoomRoutine is running and will fire its asset unload;
+            // the boot-time entrance has no door behind it and no routine to wait for.
+            AwaitRoomChange = DungeonPatches.LastDoorDirection != null
         };
         state.ArmCompletionFlag();
 
@@ -322,6 +351,7 @@ public static class LevelPlayback
     private static IEnumerator ApplyRoomRoutine(ApplyState state, int token)
     {
         var startedAt = Time.unscaledTime;
+        var tickAtStart = _roomChangeTick;
         var deadline = startedAt + 8f;
         while (!state.GenerationDone && Time.unscaledTime < deadline)
         {
@@ -358,6 +388,28 @@ public static class LevelPlayback
         {
             if (_editor == null) ReleaseHold();
             yield break;
+        }
+
+        // Strictly after the game's own unload. ChangeRoomRoutine calls UnloadUnusedAssets
+        // without yielding on it and announces OnBiomeChangeRoom right after; once that has
+        // fired, a sweep of our own is queued behind the in-flight one and waited out, so the
+        // clear-and-respawn below never overlaps an asset sweep. The cap covers door types that
+        // skip ChangeRoomRoutine - proceeding is then no worse than it ever was.
+        if (state.AwaitRoomChange)
+        {
+            var signalDeadline = Time.unscaledTime + 4f;
+            while (_roomChangeTick == tickAtStart && Time.unscaledTime < signalDeadline)
+            {
+                if (Abort(token)) yield break;
+                yield return null;
+            }
+        }
+
+        var sweep = Resources.UnloadUnusedAssets();
+        while (sweep != null && !sweep.isDone)
+        {
+            if (Abort(token)) yield break;
+            yield return null;
         }
 
         // The boot-time entrance had no CurrentRoom to key its slot under; record it now so a

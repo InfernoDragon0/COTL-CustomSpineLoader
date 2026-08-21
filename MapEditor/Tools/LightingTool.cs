@@ -47,6 +47,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         ui.CreateButton(panel, "Reset To Biome", () =>
         {
             Data.Enabled = false;
+            ForgetCurrentRoom();
             ClearOverride();
             UpdateStateLabel();
             _editor.SetStatus("Lighting reset to biome.");
@@ -228,10 +229,11 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     // own - which is why both had to be handled here rather than left to whoever happens to run
     // last on a room change.
     //
-    // Rooms are stable objects for the length of a run (level playback keys its slot assignments
-    // off the same identity), so what each one asked for is remembered against it and asserted
-    // again on arrival.
-    private static readonly Dictionary<BiomeRoom, MapLightingData> _roomLighting = [];
+    // Keyed by grid coordinates rather than the BiomeRoom object: coordinates are stable for
+    // the whole run no matter how the generator reuses or rebuilds its room objects, and a
+    // revisit whose BiomeRoom identity changed was exactly the lookup miss that left a
+    // re-entered room plain.
+    private static readonly Dictionary<(int x, int y), MapLightingData> _roomLighting = [];
 
     // What the biome looked like before anything of ours touched it, captured once per biome.
     // Restoring these is not the same as clearing inOverride: clearing it transitions to
@@ -242,19 +244,61 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     private static BiomeRoom CurrentRoom =>
         BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
 
-    // Called when a room is generated, which includes walking back into one already visited:
-    // the arriving room's own lighting, or none at all.
-    public static void OnRoomEntered()
+    // The room whose lighting was asserted last. An arrival is announced by more than one hook -
+    // see the pair in DungeonPatches - and without this the same arrival would start two lighting
+    // transitions on top of each other.
+    private static (int x, int y)? _assertedRoom;
+
+    private static (int x, int y)? CurrentRoomKey()
     {
         var room = CurrentRoom;
+        return room != null ? (room.x, room.y) : null;
+    }
 
-        if (room != null && _roomLighting.TryGetValue(room, out var data) && data is { Enabled: true })
+    // Subscribed to BiomeGenerator.OnBiomeChangeRoom: the one signal that fires on EVERY door
+    // change - a re-activated room never runs the generation or SetRoom paths the other hooks
+    // ride on, which is why a revisited room's lighting used to stay un-applied. Wrapped so a
+    // lighting slip can never break the other subscribers on the game's event.
+    public static void OnBiomeRoomChanged()
+    {
+        try
         {
-            Plugin.Log.LogInfo("MapEditor: re-applying this room's own lighting.");
+            OnRoomEntered();
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: room-change lighting failed: " + e.Message);
+        }
+    }
+
+    // Called on arrival in a room: the arriving room's own lighting, or none at all.
+    //
+    // Generation alone was not enough to hang this on. The game builds a room once and merely
+    // re-activates it on every later visit, so a revisit never announced itself - the room walked
+    // out of went on lighting the one walked into, and a room with its own mood came back plain.
+    // Both are the failure this exists to prevent, so the arrival hooks feed it instead.
+    public static void OnRoomEntered()
+    {
+        var key = CurrentRoomKey();
+
+        // Nothing of ours has ever touched the lighting, so there is nothing to assert or undo.
+        // Also keeps a hook that now runs on every room change free in ordinary play.
+        if (_roomLighting.Count == 0 && _biomeSnapshot == null) return;
+
+        // The same arrival, announced a second time.
+        if (key != null && key.Equals(_assertedRoom)) return;
+        _assertedRoom = key;
+
+        var where = key != null ? $"room {key}" : "an unknown room";
+
+        if (key != null && _roomLighting.TryGetValue(key.Value, out var data) && data is { Enabled: true })
+        {
+            Plugin.Log.LogInfo($"MapEditor: re-applying the lighting {where} asked for.");
             Apply(data);
             return;
         }
 
+        Plugin.Log.LogInfo($"MapEditor: {where} has no lighting of its own; back to the biome.");
         ClearOverride();
     }
 
@@ -267,6 +311,10 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         // The snapshot goes with them: a new biome's own values are its own, and restoring the
         // last one over it is exactly the stale-mood bug this pair exists to avoid.
         _biomeSnapshot = null;
+
+        // The room it names is one of the ones just forgotten, and a new biome's first arrival
+        // must not be mistaken for a repeat of it.
+        _assertedRoom = null;
     }
 
     private static void SnapshotBiome(LightingManager manager)
@@ -293,13 +341,13 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     private static void Remember(MapLightingData data)
     {
-        var room = CurrentRoom;
-        if (room == null) return;
+        var key = CurrentRoomKey();
+        if (key == null) return;
 
         // The live object rather than a copy: while a room is being edited its sliders write
         // straight into this, and the room should keep showing what the sliders say.
-        if (data != null && data.Enabled) _roomLighting[room] = data;
-        else _roomLighting.Remove(room);
+        if (data != null && data.Enabled) _roomLighting[key.Value] = data;
+        else _roomLighting.Remove(key.Value);
     }
 
     // Public: the blueprint loader applies a loaded room's lighting the same way.
@@ -457,13 +505,18 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     public static void ClearOverride() => ClearOverride(0f);
 
+    // The explicit "this room gives up its lighting": the tool's Reset To Biome button, and a
+    // loaded blueprint that declares no lighting. Deliberately NOT part of ClearOverride - that
+    // runs on every unlit-room arrival, and deleting whatever room happens to be current at that
+    // moment is how a lit room's memory used to vanish.
+    public static void ForgetCurrentRoom()
+    {
+        var key = CurrentRoomKey();
+        if (key != null) _roomLighting.Remove(key.Value);
+    }
+
     public static void ClearOverride(float fadeSeconds)
     {
-        // The room is giving up its lighting, not merely losing it for a moment - otherwise
-        // "Reset To Biome" would undo itself the next time the player walked back in.
-        var room = CurrentRoom;
-        if (room != null) _roomLighting.Remove(room);
-
         var manager = LightingManager.Instance;
         if (manager == null) return;
 

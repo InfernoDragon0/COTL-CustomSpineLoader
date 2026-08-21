@@ -163,7 +163,7 @@ public class CTMapTrigger : MonoBehaviour
         _outline.positionCount = 4;
         _outline.startWidth = _outline.endWidth = 0.09f;
         _outline.numCapVertices = 2;
-        _outline.material = new Material(Shader.Find("Sprites/Default"));
+        _outline.sharedMaterial = MapEditorGizmos.LineMaterial();
         _outline.startColor = _outline.endColor = Idle;
         _outline.sortingOrder = 31991;
 
@@ -817,6 +817,28 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             if (_targetBoxes[i] != null && _targetBoxes[i].activeSelf) _targetBoxes[i].SetActive(false);
     }
 
+    // The resolved target for the selected row, re-resolved at most twice a second: the resolve
+    // itself is a scene-wide sweep on a miss (ResolveObject falls back to every Transform in the
+    // scene, the NPC case to every CustomNpcBehaviour), and it used to run per frame. Bounds are
+    // still read live each frame so a dragged target tracks; only the lookup is throttled.
+    private static TriggerAction _resolvedFor;
+    private static string _resolvedTarget;
+    private static GameObject _resolvedObject;
+    private static float _nextResolveAt;
+
+    private static GameObject ResolveTargetCached(TriggerAction action, System.Func<GameObject> resolve)
+    {
+        var stale = _resolvedFor != action || _resolvedTarget != action.Target;
+        if (!stale && _resolvedObject != null) return _resolvedObject;
+        if (!stale && Time.unscaledTime < _nextResolveAt) return _resolvedObject;
+
+        _resolvedFor = action;
+        _resolvedTarget = action.Target;
+        _resolvedObject = resolve();
+        _nextResolveAt = Time.unscaledTime + 0.5f;
+        return _resolvedObject;
+    }
+
     private static void CollectTargetBounds(TriggerAction action, List<Bounds> into)
     {
         switch (action.Type)
@@ -844,7 +866,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             case TriggerActionType.CameraLookAtObject:
             case TriggerActionType.MovePlayersToObject:
             {
-                var go = TriggerActions.ResolveObject(action.Target);
+                var go = ResolveTargetCached(action, () => TriggerActions.ResolveObject(action.Target));
                 if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
                 // The object is not in this room; the authored position is still where the players
                 // would be sent, so it is marked instead of showing nothing.
@@ -854,13 +876,16 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.StartConversation:
             {
-                foreach (var npc in Object.FindObjectsOfType<Npc.CustomNpcBehaviour>())
+                var go = ResolveTargetCached(action, () =>
                 {
-                    if (npc == null || npc.Definition == null) continue;
-                    if (npc.Definition.InternalName != action.Target) continue;
-                    if (MapEditorGizmos.TryGetBounds(npc.gameObject, out var bounds)) into.Add(bounds);
-                    break;
-                }
+                    foreach (var npc in Object.FindObjectsOfType<Npc.CustomNpcBehaviour>())
+                    {
+                        if (npc == null || npc.Definition == null) continue;
+                        if (npc.Definition.InternalName == action.Target) return npc.gameObject;
+                    }
+                    return null;
+                });
+                if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
                 break;
             }
 

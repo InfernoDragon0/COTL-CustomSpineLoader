@@ -330,9 +330,14 @@ public static class ScreenTextFont
     public static TMP_FontAsset Get()
     {
         if (_font != null) return _font;
-        if (_searched) return _font;
+
+        // The latch only holds while the failed answer is still current: a font that WAS found
+        // and has since been unloaded reads as fake-null above, and deserves a fresh search
+        // rather than a lifetime of captions in the fallback font.
+        if (_searched && ReferenceEquals(_font, null)) return null;
 
         _searched = true;
+        _font = null;
 
         try
         {

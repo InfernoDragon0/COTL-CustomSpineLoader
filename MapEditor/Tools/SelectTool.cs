@@ -76,13 +76,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
                 var world = _editor.MouseWorld();
                 var picked = PickAtMouse();
 
-                // Reported either way: a click that finds nothing is the main thing to diagnose.
-                Plugin.Log.LogInfo($"MapEditor select: click at world {world}, " +
-                                   $"physics hit={DescribeHit(Physics2D.OverlapPoint(world))}, " +
-                                   $"picked={(picked != null ? picked.name : "<none>")}");
-
                 if (picked == null)
-                    _editor.SetStatus($"Nothing at {world.x:0.0}, {world.y:0.0}. See log for details.");
+                    _editor.SetStatus($"Nothing at {world.x:0.0}, {world.y:0.0}.");
                 else
                     Select(picked);
             }
@@ -163,13 +158,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         if (_resizeNode != null)
             _resizeNode.GetComponent<RectTransform>().position =
                 cam.WorldToScreenPoint(MapEditorGizmos.CornerPosition(_selected));
-    }
-
-    private static string DescribeHit(Collider2D hit)
-    {
-        if (hit == null) return "<none>";
-        var hasRenderer = hit.GetComponentInChildren<Renderer>(true) != null;
-        return $"{hit.gameObject.name} (renderer={hasRenderer}, protected={MapEditorProtection.IsProtected(hit.gameObject)})";
     }
 
     private GameObject PickAtMouse() => PickWorldObject(_editor.MouseWorld());
@@ -280,16 +268,36 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     // Tinting alone was too subtle to read against the busy biome art, so the selection also gets
     // a bright box drawn around the combined bounds of every renderer under it.
+    //
+    // The tint is applied per renderer without touching materials: SpriteRenderer has its own
+    // per-renderer colour, and everything else takes a MaterialPropertyBlock. The old
+    // renderer.material.color write cloned the material per renderer, and the clone survived
+    // deselection - every selection permanently traded a batched shared material for a private
+    // copy that nothing ever destroyed.
     private void ApplyHighlight(GameObject go)
     {
         foreach (var renderer in go.GetComponentsInChildren<Renderer>())
         {
-            if (renderer == null || renderer.material == null) continue;
-            if (!renderer.material.HasProperty("_Color")) continue;
+            if (renderer == null) continue;
+
+            if (renderer is SpriteRenderer sprite)
+            {
+                _highlighted.Add(renderer);
+                _originalColors.Add(sprite.color);
+                sprite.color = Color.Lerp(sprite.color, Color.cyan, 0.45f);
+                continue;
+            }
+
+            var shared = renderer.sharedMaterial;
+            if (shared == null || !shared.HasProperty("_Color")) continue;
 
             _highlighted.Add(renderer);
-            _originalColors.Add(renderer.material.color);
-            renderer.material.color = Color.Lerp(renderer.material.color, Color.cyan, 0.45f);
+            _originalColors.Add(shared.color);
+
+            var block = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(block);
+            block.SetColor("_Color", Color.Lerp(shared.color, Color.cyan, 0.45f));
+            renderer.SetPropertyBlock(block);
         }
 
         DrawOutline(go);
@@ -469,8 +477,11 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     {
         for (var i = 0; i < _highlighted.Count; i++)
         {
-            if (_highlighted[i] == null || _highlighted[i].material == null) continue;
-            _highlighted[i].material.color = _originalColors[i];
+            var renderer = _highlighted[i];
+            if (renderer == null) continue;
+
+            if (renderer is SpriteRenderer sprite) sprite.color = _originalColors[i];
+            else renderer.SetPropertyBlock(null);
         }
         _highlighted.Clear();
         _originalColors.Clear();

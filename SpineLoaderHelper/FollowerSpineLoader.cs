@@ -69,12 +69,18 @@ public class FollowerSpineLoader
                     Plugin.Log.LogInfo("Reading texture from " + textureFile);
                     Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
                     tex.name = Path.GetFileNameWithoutExtension(textureFile);
+                    // Same unload protection the folder loader has: runtime textures freed by an
+                    // UnloadUnusedAssets sweep never come back.
+                    SpineFolderLoader.Keep(tex);
                     textures[Array.IndexOf(spineTextures, textureFile)] = tex;
                 }
 
-                var mat = material ?? new Material(Shader.Find("Spine/Skeleton")); //TODO: find out what shader cotl uses
+                var mat = material ?? new Material(SpineFolderLoader.SpineShader());
+                SpineFolderLoader.Keep(mat);
                 var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
+                SpineFolderLoader.Keep(runtimeAtlasAsset);
                 var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
+                SpineFolderLoader.Keep(runtimeSkeletonAsset);
                 Plugin.Log.LogInfo("Creating skeleton for " + followerSpineName);
                 Plugin.Log.LogInfo("Using material name " + mat.name);
                 CustomSkinManager.AddFollowerSpine(followerSpineName, runtimeSkeletonAsset);
@@ -266,10 +272,12 @@ public class FollowerSpineLoader
             {
                 //build atlas per image provided
                 skinOverride.Item3.name = skinVariantName + "_" + skinOverride.Item2;
-                Material mat = new(Shader.Find("Spine/Skeleton"))
+                Material mat = new(SpineFolderLoader.SpineShader())
                 {
                     mainTexture = skinOverride.Item3
                 };
+                SpineFolderLoader.Keep(mat);
+                SpineFolderLoader.Keep(skinOverride.Item3);
 
                 Material[] mats = [mat];
                 var atlasAsset = SpineAtlasAsset.CreateRuntimeInstance( //TODO: build this first, then cache
@@ -418,7 +426,9 @@ public class FollowerSpineLoader
             .Where(p => p.ColorChoices?.Any() == true)
             .ToList();
 
-        int count = parts.Min(p => p.ColorChoices.Count);
+        // Min() on an empty sequence throws, and this runs during startup skin loading - a
+        // config with no colour choices anywhere must fall through to the default set below.
+        int count = parts.Count == 0 ? 0 : parts.Min(p => p.ColorChoices.Count);
 
         if (count == 0)
         {

@@ -190,14 +190,27 @@ public class PlayerSpineLoader
 
     // Driven from Plugin.Update: handing the parsed data to the asset is a Unity-side write, so it
     // belongs on the main thread even though the work that produced it did not.
+    // True once every queued job has landed - the per-frame pump stops taking the lock then.
+    // Volatile-free by design: _warmApplied only moves on the main thread, and a stale read of
+    // _warmQueued just means one extra harmless pump.
+    private static bool _warmDrained;
+
     public static void PumpWarmUp()
     {
+        // Warm-up is a startup job, but this is called from Plugin.Update every frame forever -
+        // once the queue has drained there is nothing left to take a lock for.
+        if (_warmDrained) return;
+
         while (true)
         {
             WarmUpJob job;
             lock (WarmLock)
             {
-                if (WarmFinished.Count == 0) return;
+                if (WarmFinished.Count == 0)
+                {
+                    if (_warmApplied >= _warmQueued) _warmDrained = true;
+                    return;
+                }
                 job = WarmFinished.Dequeue();
             }
 
@@ -645,20 +658,27 @@ public class PlayerSpineLoader
                     textureBytes += new FileInfo(textureFile).Length;
                     Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
                     tex.name = Path.GetFileNameWithoutExtension(textureFile);
+                    // Runtime-built, no asset backing: an UnloadUnusedAssets sweep (every room
+                    // change runs one) that decides nothing references it frees it for good, and
+                    // the skeleton wearing it is left pointing at dead memory.
+                    SpineFolderLoader.Keep(tex);
                     textures[Array.IndexOf(spineTextures, textureFile)] = tex;
                 }
 
                 var textureMs = stage.ElapsedMilliseconds;
 
                 stage.Restart();
-                var mat = material ?? new Material(Shader.Find("Spine/Skeleton")); //TODO: find out what shader cotl uses
+                var mat = material ?? new Material(SpineFolderLoader.SpineShader());
                 var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
+                SpineFolderLoader.Keep(mat);
+                SpineFolderLoader.Keep(runtimeAtlasAsset);
                 var atlasMs = stage.ElapsedMilliseconds;
 
                 // initialize:false - the third argument is what used to parse the whole skeleton
                 // JSON here on the main thread. The warm-up thread does it instead.
                 stage.Restart();
                 var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, false, SkeletonScale);
+                SpineFolderLoader.Keep(runtimeSkeletonAsset);
                 QueueWarmUp(playerSpineName, runtimeSkeletonAsset, runtimeAtlasAsset, skeletonText);
                 var parseMs = stage.ElapsedMilliseconds;
 

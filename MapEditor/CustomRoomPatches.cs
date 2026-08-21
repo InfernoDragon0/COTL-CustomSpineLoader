@@ -27,6 +27,28 @@ public static class CustomRoomPatches
         return false;
     }
 
+    // Re-activating an already-built room runs RegenerateDecorationsWithPool -> SpawnDecorations,
+    // which iterates room.Pieces asking each island for its collider. The blueprint loader adds
+    // its respawned islands to that list (pathfinding needs them known) but a later room swap
+    // destroys them - and vanilla never expects destroyed entries, so its decoration coroutine
+    // died on the first one. Everything it had not scattered yet - the perlin noise trees over
+    // the room's shapes - simply never spawned on a revisit.
+    [HarmonyPatch(typeof(GenerateRoom), "OnEnable")]
+    private static class GenerateRoom_OnEnable_Patch
+    {
+        private static void Prefix(GenerateRoom __instance)
+        {
+            try
+            {
+                __instance.Pieces?.RemoveAll(p => p == null);
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning("MapEditor: could not prune the room's island list: " + e.Message);
+            }
+        }
+    }
+
     [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.SpawnHeavyAssets))]
     private static class GenerateRoom_SpawnHeavyAssets_Patch
     {

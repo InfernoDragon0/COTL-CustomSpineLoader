@@ -247,7 +247,7 @@ public class BlueprintLoader
         // Lighting and fog are values rather than objects, so they are applied here rather than
         // rebuilt with the room. A blueprint that never set them leaves the biome alone.
         if (bp.Lighting != null && bp.Lighting.Enabled) LightingTool.Apply(bp.Lighting);
-        else LightingTool.ClearOverride();
+        else { LightingTool.ForgetCurrentRoom(); LightingTool.ClearOverride(); }
 
         yield return PlayerEntryRoutine(room, bp, doorTool, preferredEntryDirection);
 

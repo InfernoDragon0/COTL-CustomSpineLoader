@@ -46,7 +46,7 @@ public class BaseCustomEnemy : CustomEnemy
             textures[Array.IndexOf(spineTexturePaths, textureFile)] = tex;
         }
 
-        var mat = new Material(Shader.Find("Spine/Skeleton")); //TODO: find out what shader cotl uses
+        var mat = new Material(SpineLoaderHelper.SpineFolderLoader.SpineShader());
         var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
         var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
         SpineOverride = runtimeSkeletonAsset;

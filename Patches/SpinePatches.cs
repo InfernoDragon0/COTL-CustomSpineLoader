@@ -1,4 +1,4 @@
-﻿using COTL_API.CustomStructures;
+using COTL_API.CustomStructures;
 using CustomSpineLoader.Commands;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
@@ -30,10 +30,14 @@ namespace CustomSpineLoader.Patches
         private static void SkeletonData_FindSkin(ref Skin? __result, SkeletonData __instance, string skinName)
         {
             if (__result != null) return;
+            if (FollowerSpineLoader.CustomFollowerSkins.Count == 0) return;
             if (FollowerSpineLoader.CustomFollowerSkins.TryGetValue(skinName, out var skin))
             {
                 __result = skin;
-                DataManager.SetFollowerSkinUnlocked(skinName);
+                // A save-data write from inside a lookup accessor - only when it changes
+                // something, not on every hit.
+                if (!DataManager.GetFollowerSkinUnlocked(skinName))
+                    DataManager.SetFollowerSkinUnlocked(skinName);
             }
         }
 
@@ -198,11 +202,19 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         public static void Follower_FacePosition(Follower __instance)
         {
-            var followerId = __instance.Brain.Info.ID;
-            var scale = CustomColorHelper.GetCustomScale(followerId);
+            // Runs per follower per frame, and a follower mid-spawn or mid-despawn legitimately
+            // has a null Brain/Info/Spine for a few frames - an unguarded throw here surfaces out
+            // of Follower.Update once per frame per broken follower.
+            var info = __instance.Brain?.Info;
+            if (info == null) return;
 
+            var scale = CustomColorHelper.GetCustomScale(info.ID);
             if (scale <= 0) return;
-            __instance.Spine.skeleton.ScaleX = __instance.transform.position.x < __instance._destPos.x ? -scale : scale;
+
+            var skeleton = __instance.Spine != null ? __instance.Spine.skeleton : null;
+            if (skeleton == null) return;
+
+            skeleton.ScaleX = __instance.transform.position.x < __instance._destPos.x ? -scale : scale;
         }
         
         [HarmonyPatch(typeof(FollowerBrain), nameof(FollowerBrain.SetFollowerCostume),
@@ -224,12 +236,12 @@ namespace CustomSpineLoader.Patches
         {
             if (info != null)
             {
-                Plugin.Log.LogInfo($"Follower ID: {info.ID}, Name: {info.Name}");
                 var colorData = CustomColorHelper.GetCustomColor(info.ID);
                 if (colorData == null) return true;
                 if (!colorData.CustomFollowerCostume) return true;
 
-                Plugin.Log.LogInfo($"Custom costume enabled: {colorData.CustomFollowerCostume}, ClothingType: {colorData.FollowerClothingType}, SpecialType: {colorData.FollowerSpecialType}, HatType: {colorData.FollowerHatType}, OutfitType: {colorData.FollowerOutfitType}");
+                if (Plugin.DebugDumpFollowerSpineAtlas.Value)
+                    Plugin.Log.LogInfo($"Custom costume for follower {info.ID}: ClothingType: {colorData.FollowerClothingType}, SpecialType: {colorData.FollowerSpecialType}, HatType: {colorData.FollowerHatType}, OutfitType: {colorData.FollowerOutfitType}");
                 hat = (FollowerHatType)colorData.FollowerHatType;
                 necklace = CustomColorCommand.GetNecklaceToUse(colorData.FollowerNecklaceType, info);
                 special = (FollowerSpecialType)colorData.FollowerSpecialType;
@@ -275,14 +287,13 @@ namespace CustomSpineLoader.Patches
                 FollowerSlotDumper.Dump(skeleton, overwrite: false);
             }
 
-            Plugin.Log.LogInfo("Setting follower costume for"); 
             if (info != null)
             {
-                Plugin.Log.LogInfo($"Follower ID: {info.ID}, Name: {info.Name}");
                 var colorData = CustomColorHelper.GetCustomColor(info.ID);
                 if (colorData == null) return;
 
-                Plugin.Log.LogInfo($"Custom color found for follower {info.ID}: R={colorData.R}, G={colorData.G}, B={colorData.B}, A={colorData.A}");
+                if (Plugin.DebugDumpFollowerSpineAtlas.Value)
+                    Plugin.Log.LogInfo($"Custom color for follower {info.ID}: R={colorData.R}, G={colorData.G}, B={colorData.B}, A={colorData.A}");
 
                 skeleton.FindSlot("ARM_LEFT_SKIN").SetColor(new Color(colorData.R, colorData.G, colorData.B, 1));
                 skeleton.FindSlot("LEG_LEFT_SKIN").SetColor(new Color(colorData.R, colorData.G, colorData.B, 1));
@@ -297,28 +308,12 @@ namespace CustomSpineLoader.Patches
                     // follower.transform.localScale = new Vector3(colorData.scale, colorData.scale, 1f);
                     follower.Spine.skeleton.scaleY = colorData.scale;
                     follower.Spine.skeleton.scaleX = colorData.scale;
-                    Plugin.Log.LogInfo("Set follower scale to " + colorData.scale);
                 }
                 
 
-                if (colorData.CustomFollowerCostume)
-                {
-                    try
-                    {
-                        
-                        Plugin.Log.LogInfo("Costume override applied successfully.");
-                    }
-                    catch (Exception)
-                    {
-                        Plugin.Log.LogWarning("The costume combinations were invalid, try another!");
-                    }
-                }
-
-                
             }
             else
             {
-                Plugin.Log.LogInfo("Follower info is null, skipping costume setting.");
                 return;
             }
 

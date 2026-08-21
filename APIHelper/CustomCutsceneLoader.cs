@@ -289,17 +289,29 @@ public static class CustomCutsceneLoader
             process.StartInfo.RedirectStandardError = true;
             process.EnableRaisingEvents = true;
 
+            // Drained as it arrives rather than read after exit: an ffmpeg that writes more than
+            // the pipe buffer to stderr blocks BEFORE exiting, so Exited never fires and the
+            // whole thing deadlocks. The async reader keeps the pipe empty.
+            var stderr = new System.Text.StringBuilder();
+            process.ErrorDataReceived += (_, args) =>
+            {
+                if (args.Data != null) lock (stderr) stderr.AppendLine(args.Data);
+            };
+
             process.Exited += (_, _) =>
             {
                 lock (Converting) Converting.Remove(name);
 
                 try
                 {
+                    string tail;
+                    lock (stderr) tail = stderr.ToString().Trim();
+
                     if (process.ExitCode == 0 && File.Exists(output))
                         Plugin.Log.LogInfo($"Cutscene '{name}': soundtrack extracted to {Path.GetFileName(output)}.");
                     else
                         Plugin.Log.LogWarning($"Cutscene '{name}': ffmpeg could not extract a soundtrack " +
-                                              $"(exit {process.ExitCode}). {process.StandardError.ReadToEnd().Trim()}");
+                                              $"(exit {process.ExitCode}). {tail}");
                 }
                 catch (Exception)
                 {
@@ -311,6 +323,7 @@ public static class CustomCutsceneLoader
             };
 
             process.Start();
+            process.BeginErrorReadLine();
             Plugin.Log.LogInfo($"Cutscene '{name}': extracting its soundtrack with ffmpeg in the background.");
         }
         catch (Exception e)

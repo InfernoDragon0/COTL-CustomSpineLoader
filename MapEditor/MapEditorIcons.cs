@@ -113,7 +113,10 @@ public static class MapEditorIcons
     {
         if (onLoaded == null || string.IsNullOrEmpty(prefabPath)) return;
 
-        if (_propIcons.TryGetValue(prefabPath, out var cached)) { onLoaded(cached); return; }
+        // Fake-null check on the hit: these sprites belong to addressable prefabs, and a cached
+        // entry that has been unloaded must become a reload rather than a destroyed sprite
+        // handed straight to Image.sprite.
+        if (_propIcons.TryGetValue(prefabPath, out var cached) && cached != null) { onLoaded(cached); return; }
         if (_propIconsFailed.Contains(prefabPath)) { onLoaded(null); return; }
 
         _propQueue.Enqueue((prefabPath, onLoaded));
@@ -123,6 +126,11 @@ public static class MapEditorIcons
     // Cancels everything not yet started. Switching prop groups makes the previous group's
     // pending loads pure waste, and they would fill in cells that no longer exist.
     public static void CancelPendingPropIcons() => _propQueue.Clear();
+
+    // Bumped by ClearSceneScopedCache: completions belonging to a previous session must not
+    // decrement the fresh session's counter (a negative _inFlight would disable the throttle
+    // for good).
+    private static int _session;
 
     private static IEnumerator DrainPropQueue()
     {
@@ -134,9 +142,10 @@ public static class MapEditorIcons
 
             var (path, callback) = _propQueue.Dequeue();
             _inFlight++;
+            var session = _session;
             LoadPropIcon(path, sprite =>
             {
-                _inFlight--;
+                if (session == _session) _inFlight--;
                 try { callback(sprite); }
                 catch (Exception e) { Plugin.Log.LogWarning("MapEditor: prop icon callback failed: " + e.Message); }
             });
@@ -191,7 +200,9 @@ public static class MapEditorIcons
         _structureIcons.Clear();
         _propQueue.Clear();
         // The drain coroutine died with its host; without resetting these, the next editor
-        // would queue requests that nothing ever picks up.
+        // would queue requests that nothing ever picks up. The session bump makes stragglers
+        // from the old session no-ops instead of corrupting the fresh counter.
+        _session++;
         _inFlight = 0;
         _draining = false;
     }
