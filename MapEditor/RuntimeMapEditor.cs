@@ -11,9 +11,8 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Editor host. What each tool does, and the reasoning behind the parts that look odd, is in
-// MapEditor/README.md.
-public class RuntimeMapEditor : MonoBehaviour
+// Editor host; see MapEditor/README.md.
+public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 {
     private Canvas _canvas;
     private GameObject _canvasGO;
@@ -30,10 +29,8 @@ public class RuntimeMapEditor : MonoBehaviour
     private Image _statusPanel;
     private Image _statusBorder;
 
-    // The current tool's controls, listed down the left edge.
     private RectTransform _shortcutPanel;
 
-    // Selection ring per tool button on the dock.
     private readonly Dictionary<string, Image> _toolRings = [];
 
     private readonly List<IMapEditorTool> _tools = [];
@@ -83,8 +80,7 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private const float PanSpeed = 14f;
 
-    // The hover components on buttons and grid cells need a way back to the status bar without
-    // every widget carrying a reference; there is only ever one editor host per scene.
+    // Hover widgets reach the status bar through this; one editor host per scene.
     public static RuntimeMapEditor Active { get; private set; }
 
     private void Awake()
@@ -95,8 +91,7 @@ public class RuntimeMapEditor : MonoBehaviour
         CreateUi();
         _canvas.enabled = false;
 
-        // A level run survives the scene reload as static state; the new host re-binds it
-        // (and starts the entrance-room load if the run was waiting on this scene entry).
+        // A level run survives scene reload as static state; re-bind it to the new host.
         LevelPlayback.OnEditorReady(this);
     }
 
@@ -120,7 +115,6 @@ public class RuntimeMapEditor : MonoBehaviour
 
     public T GetTool<T>() where T : class, IMapEditorTool => _tools.OfType<T>().FirstOrDefault();
 
-    // Shared by every tool that places something, so Ctrl+Z is the only undo the user needs.
     public MapEditorHistory History { get; } = new();
 
     private void UndoLast()
@@ -129,8 +123,6 @@ public class RuntimeMapEditor : MonoBehaviour
         else SetStatus("Nothing to undo.");
     }
 
-    // The wheel switches tools rather than zooming: zoom is on Z/X, and a wheel that changed the
-    // view fought with every scrollable list in the editor.
     private void CycleTool(int direction)
     {
         if (_tools.Count == 0) return;
@@ -140,12 +132,10 @@ public class RuntimeMapEditor : MonoBehaviour
         SelectTool(_tools[index]);
     }
 
-    // One loader shared by every consumer (Load Map tool, level playback), so the IsLoading
-    // guard actually covers concurrent load attempts.
+    // One shared loader so the IsLoading guard covers every consumer.
     private BlueprintLoader _loader;
     public BlueprintLoader Loader => _loader ??= new BlueprintLoader(this);
 
-    // Swaps the working blueprint for one that was just loaded, so a subsequent Save round-trips.
     public void AdoptBlueprint(CTNodeBlueprint bp)
     {
         if (bp == null) return;
@@ -153,8 +143,31 @@ public class RuntimeMapEditor : MonoBehaviour
         UpdateNameLabel();
     }
 
-    // The loader needs to close the editor (restore time, HUD, camera) before the walk-in entry
-    // can run: GoToAndStop paths on scaled time, and Update would re-freeze timeScale otherwise.
+    // Handed an emptied Woolhaven by HubSession: the editor opens on it under the hub's name, and
+    // the save writes the hub record beside the blueprint.
+    public void BeginHubAuthoring(string hubName)
+    {
+        var hub = CTLevelSerialization.LoadByName(hubName);
+        var existing = HubSession.BlueprintFor(hub);
+        var bp = existing != null ? MapEditorSerialization.LoadByName(existing) : null;
+
+        if (bp != null)
+        {
+            AdoptBlueprint(bp);
+            Loader.Load(bp);
+        }
+        else
+        {
+            AdoptBlueprint(new CTNodeBlueprint { MapName = hubName });
+        }
+
+        if (!_editing) EnterEditorMode();
+        SetStatus(bp != null
+            ? $"Editing hub '{hubName}'. Save Map keeps it a hub."
+            : $"New hub '{hubName}': the town has been cleared. Build it, then Save Map.");
+    }
+
+    // The walk-in entry runs on scaled time; the open editor would re-freeze timeScale.
     public void ExitForPlayback()
     {
         if (_editing) ExitEditorMode();
@@ -162,20 +175,17 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private void OnDestroy()
     {
-        // The canvas lives on its own GameObject, so destroying the host is not enough.
-        // Without this it leaks one canvas per dungeon entry.
+        // The canvas is its own GameObject; without this it leaks one per dungeon entry.
         if (_canvasGO != null) Destroy(_canvasGO);
+        if (_previewBadgeGO != null) Destroy(_previewBadgeGO);
         if (_editing) RestoreGameState();
 
-        // Icons harvested from the scene (build-menu sprites, rendered enemy thumbnails) die
-        // with it; keeping them cached would hand the next scene destroyed sprites.
+        // Scene-harvested sprites die with the scene; a stale cache hands out destroyed sprites.
         MapEditorIcons.ClearSceneScopedCache();
         EnemyThumbnails.ClearSceneScopedCache();
 
-        // Static state whose owner just died with the scene. Each of these, left set, silently
-        // bricks something in the next session: a latched modal count eats all editor input, a
-        // stranded sequence owner blocks every trigger in the game, and the lighting table would
-        // re-apply a dead session's values to rooms that happen to share identities.
+        // Session-owned static state; left set, it bricks the next session (latched modal count,
+        // stranded sequence owner, stale lighting table).
         MapNamePrompt.ResetModalState();
         Tools.CTMapTrigger.ResetSequenceState();
         if (!LevelPlayback.Active) Tools.LightingTool.ForgetRoomLighting();
@@ -189,6 +199,68 @@ public class RuntimeMapEditor : MonoBehaviour
 
         if (_editing) ExitEditorMode();
         else EnterEditorMode();
+    }
+
+    private bool _chromeHidden;
+
+    // F6: the panels go away while the room stays frozen, so the scene can be framed and shot
+    // without the editor in the picture. Closing the editor restores them.
+    public void ToggleChromeHidden()
+    {
+        if (_canvas == null || !_editing || ModalOpen) return;
+
+        _chromeHidden = !_chromeHidden;
+        _canvas.enabled = !_chromeHidden;
+        MapEditorGizmos.SetHidden(_chromeHidden);
+        ShowPreviewBadge(_chromeHidden);
+
+        if (!_chromeHidden) SetStatus("Editor UI back. F6 hides it again.");
+    }
+
+    private void ShowChrome()
+    {
+        _chromeHidden = false;
+        MapEditorGizmos.SetHidden(false);
+        ShowPreviewBadge(false);
+    }
+
+    private GameObject _previewBadgeGO;
+
+    // The one thing left on screen while the chrome is hidden: without it there is nothing to say
+    // the room is frozen mid-edit, or which key brings the editor back.
+    private void ShowPreviewBadge(bool visible)
+    {
+        if (visible && _previewBadgeGO == null) BuildPreviewBadge();
+        if (_previewBadgeGO != null) _previewBadgeGO.SetActive(visible);
+    }
+
+    private void BuildPreviewBadge()
+    {
+        // Its own canvas: the editor's is switched off wholesale, and a label hanging from it
+        // would go dark with everything else.
+        _previewBadgeGO = new GameObject("RuntimeMapEditor_PreviewBadge");
+
+        var canvas = _previewBadgeGO.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 5001;
+
+        var scaler = _previewBadgeGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.matchWidthOrHeight = 0.5f;
+
+        var label = _ui.CreateLabel(_previewBadgeGO.transform, "Preview mode - F6 to show UI", 18,
+            TextAlignmentOptions.Left);
+        var text = label.GetComponent<TMP_Text>();
+        text.color = new Color(1f, 0.85f, 0.5f);
+        text.raycastTarget = false;
+
+        // Bottom left, where the shortcut list sits when the chrome is up.
+        var rect = label.GetComponent<RectTransform>();
+        rect.anchorMin = rect.anchorMax = Vector2.zero;
+        rect.pivot = Vector2.zero;
+        rect.sizeDelta = new Vector2(600f, 30f);
+        rect.anchoredPosition = new Vector2(24f, 16f);
     }
 
     private void EnterEditorMode()
@@ -224,6 +296,7 @@ public class RuntimeMapEditor : MonoBehaviour
         _activeTool?.OnExit();
         _activeTool = null;
         _editing = false;
+        ShowChrome();
         _canvas.enabled = false;
         RestoreGameState();
     }
@@ -236,14 +309,13 @@ public class RuntimeMapEditor : MonoBehaviour
         if (HUD_Manager.Instance != null) HUD_Manager.Instance.Show(0, true);
     }
 
-    // The build menu restores timeScale when it closes, which silently un-pauses the game while
-    // the editor is still open. Tools that open game menus call this once the menu is gone.
+    // Game menus restore timeScale on close; tools that open one call this after it is gone.
     public void ReassertPause()
     {
         if (_editing) Time.timeScale = 0f;
     }
 
-    // Clicks are silently swallowed without an EventSystem, which is easy to miss when debugging.
+    // Without an EventSystem every click is silently swallowed.
     private static void EnsureEventSystem()
     {
         if (EventSystem.current != null) return;
@@ -254,21 +326,17 @@ public class RuntimeMapEditor : MonoBehaviour
         go.AddComponent<StandaloneInputModule>();
     }
 
-    // Each subsystem is isolated: a throw in camera handling must never stop tools from updating.
     private void Update()
     {
         if (!_editing) return;
 
         if (ModalOpen) return;
 
-        // Game menus opened from a tool (the build menu in particular) restore timeScale when
-        // they close, which would silently un-pause the world under the open editor.
+        // Game menus restore timeScale on close, un-pausing under the open editor.
         if (Time.timeScale != 0f) Time.timeScale = 0f;
 
         if (_resetArmed && Time.unscaledTime - _resetArmedAt > ResetArmWindow) DisarmReset();
 
-        // While naming, the keyboard belongs to the text field: panning and tools must not also
-        // consume the same keystrokes.
         if (_renaming)
         {
             HandleRenameInput();
@@ -279,6 +347,14 @@ public class RuntimeMapEditor : MonoBehaviour
         RestoreEventSystem();
 
         if (CtrlHeld && Input.GetKeyDown(KeyCode.Z)) UndoLast();
+
+        // Chrome hidden: the room is being looked at, not edited. The camera still pans so the
+        // shot can be framed, but no tool acts on a click.
+        if (_chromeHidden)
+        {
+            HandleCameraControls();
+            return;
+        }
 
         try
         {
@@ -299,8 +375,7 @@ public class RuntimeMapEditor : MonoBehaviour
         }
         catch (System.Exception e)
         {
-            // Throttled: a tool broken in OnUpdate throws again next frame, and a full
-            // exception log at 60Hz buries everything else in the file.
+            // Throttled: a broken tool throws again every frame.
             if (Time.unscaledTime >= _nextUpdateErrorAt)
             {
                 _nextUpdateErrorAt = Time.unscaledTime + 5f;
@@ -379,8 +454,7 @@ public class RuntimeMapEditor : MonoBehaviour
         CycleTool(scroll > 0f ? -1 : 1);
     }
 
-    // Scrolls whichever of the editor's own lists the cursor is over. Returns true when the
-    // wheel was consumed, so it does not also switch tools.
+    // Returns true when the wheel was consumed by an editor list, so it does not also switch tools.
     private bool ScrollUiUnderPointer(float delta)
     {
         if (_canvasGO == null) return false;
@@ -388,8 +462,7 @@ public class RuntimeMapEditor : MonoBehaviour
         var mouse = (Vector2)Input.mousePosition;
         var scrollRects = _canvasGO.GetComponentsInChildren<ScrollRect>(false);
 
-        // Back to front: an open dropdown list is parented last and must win over the panel
-        // it is drawn on top of.
+        // Back to front: an open dropdown is parented last and must win.
         for (var i = scrollRects.Length - 1; i >= 0; i--)
         {
             var scroll = scrollRects[i];
@@ -413,8 +486,6 @@ public class RuntimeMapEditor : MonoBehaviour
         gm.CameraSetZoom(_zoom);
     }
 
-    // Hands the camera to a dummy object we can move freely, and lifts the room's camera bounds
-    // so the view can leave the play area.
     private void TakeCameraControl()
     {
         var start = PlayerFarming.Instance != null
@@ -481,8 +552,7 @@ public class RuntimeMapEditor : MonoBehaviour
         }
     }
 
-    // Projects a screen point onto the z=0 world plane. Correct for both orthographic and
-    // perspective cameras, replacing the two inconsistent conversions the prototype used.
+    // Projects a screen point onto the z=0 world plane; correct for ortho and perspective cameras.
     public Vector3 ScreenToWorld(Vector2 screenPoint)
     {
         var cam = SceneRefs.Cam;
@@ -499,14 +569,11 @@ public class RuntimeMapEditor : MonoBehaviour
 
     public Vector3 MouseWorld() => ScreenToWorld(Input.mousePosition);
 
-    // Where the editor's view is pointed. The anchor rather than the camera transform: the
-    // camera sits back from it along the rig's own angle, which is not what an author means by
-    // "where the camera is looking".
+    // The follow anchor, not the camera transform - the camera sits back along the rig's angle.
     public Vector3 CameraFocus =>
         _cameraAnchor != null ? _cameraAnchor.transform.position : Vector3.zero;
 
-    // Recentres the view. Moves the follow anchor rather than the camera, which the game's rig
-    // would otherwise overwrite on the next frame.
+    // Moves the follow anchor, not the camera - the rig overwrites the camera next frame.
     public void MoveCameraTo(Vector3 worldPosition)
     {
         if (_cameraAnchor == null) return;
@@ -555,12 +622,10 @@ public class RuntimeMapEditor : MonoBehaviour
         ApplyStatus(message, severity, pulse: true);
     }
 
-    // What the bar was saying before the cursor wandered over a button, so hovering can be
-    // undone without losing the last real message.
+    // Last real message, restored when hover text clears.
     private string _statusMessage = "";
     private StatusSeverity _statusSeverity = StatusSeverity.Info;
 
-    // Wordless icons need somewhere to say their name; the status bar is it.
     public void ShowHoverStatus(string message) => ApplyStatus(message, StatusSeverity.Info, pulse: false);
 
     public void ClearHoverStatus() => ApplyStatus(_statusMessage, _statusSeverity, pulse: false);
@@ -651,11 +716,9 @@ public class RuntimeMapEditor : MonoBehaviour
         _activeTool?.OnExit();
         _activeTool = tool;
 
-        // A dropdown list left open over the previous tool's panel would outlive the panel and
-        // keep absorbing clicks.
+        // An open dropdown would outlive the previous tool's panel and keep absorbing clicks.
         _ui.CloseTransientUi();
 
-        // Only the active tool's option column is visible.
         foreach (Transform child in _optionsContent)
             child.gameObject.SetActive(child.name == "Options_" + tool.Name);
 
@@ -677,7 +740,7 @@ public class RuntimeMapEditor : MonoBehaviour
         _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         _canvas.sortingOrder = 5000;
 
-        // The prototype left this at defaults, which renders the panel unreadably small at 4K.
+        // Without scaling the UI is unreadably small at 4K.
         var scaler = _canvasGO.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
@@ -685,8 +748,7 @@ public class RuntimeMapEditor : MonoBehaviour
 
         _canvasGO.AddComponent<GraphicRaycaster>();
 
-        // Floating overlays (dropdown lists) parent to the canvas root, and async icon fills
-        // need a coroutine host, so the UI layer has to know both before anything is built.
+        // Attach before building: overlays parent to the canvas root, icon fills need a coroutine host.
         _ui.Attach(this, _canvasGO.GetComponent<RectTransform>());
 
         CreateTitle();
@@ -728,7 +790,6 @@ public class RuntimeMapEditor : MonoBehaviour
         foreach (var tool in _tools)
         {
             var captured = tool;
-            // The icons carry no text, so the status bar names whichever one the cursor is over.
             _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon(tool.Name), tool.Name,
                 () => SelectTool(captured), out var ring, ToolIconSize, hoverText: tool.Name);
             _toolRings[tool.Name] = ring;
@@ -740,13 +801,11 @@ public class RuntimeMapEditor : MonoBehaviour
                     out _, ToolIconSize, hoverText: "Save map");
         }
 
-        // Horizontal only: the height is already exact, and letting the fitter own it as well
-        // would make the plate collapse for a frame before the icons report their sizes.
+        // Horizontal only: a vertical fit collapses the plate for a frame before icons report sizes.
         var fitter = dock.gameObject.AddComponent<ContentSizeFitter>();
         fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Resolved now rather than next frame, because the status bar is built immediately after
-        // and sizes itself off the result.
+        // Resolve now: the status bar built next sizes itself off _dockWidth.
         LayoutRebuilder.ForceRebuildLayoutImmediate(dock);
         _dockWidth = dock.rect.width;
     }
@@ -784,7 +843,6 @@ public class RuntimeMapEditor : MonoBehaviour
         headerRt.anchoredPosition = Vector2.zero;
         header.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
 
-        // The tool name lives here now that the dock buttons are wordless icons.
         var title = _ui.CreateLabel(header.transform, "", 21, TextAlignmentOptions.Left);
         var titleRt = title.GetComponent<RectTransform>();
         titleRt.anchorMin = Vector2.zero;
@@ -833,8 +891,7 @@ public class RuntimeMapEditor : MonoBehaviour
         if (!_optionsCollapsed && _activeTool != null)
             _optionColumns.TryGetValue(_activeTool.Name, out column);
 
-        // Three frames, because Destroy is deferred to the end of the current one and the
-        // staggered fill can still be adding cells.
+        // Three frames: Destroy defers to end of frame and staggered fills may still add cells.
         if (_optionsRebuildFrames > 0)
         {
             _optionsRebuildFrames--;
@@ -852,13 +909,11 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private void CreateStatusBar()
     {
-        // Sits directly above the dock: the two together are the editor's only bottom chrome.
         var bar = CreatePanel("StatusBar", new Vector2(0.5f, 0f), new Vector2(_dockWidth, 46f),
             new Vector2(0f, DockHeight + 20f));
         _statusPanel = bar.GetComponent<Image>();
 
-        // A frame rather than a plate behind: a child Graphic always draws over its parent's,
-        // so a solid backing would have covered the bar instead of outlining it.
+        // A child Graphic always draws over its parent's, so an outline rather than a backing plate.
         _statusBorder = MapEditorUI.AddOutline(bar, MapEditorUI.Accent, inset: 3f);
         _statusBorder.gameObject.SetActive(false);
 
@@ -871,8 +926,6 @@ public class RuntimeMapEditor : MonoBehaviour
         _statusText = label.GetComponent<TMP_Text>();
     }
 
-    // Says whose editor this is and that it is live - the world behind it is still the game,
-    // and at a glance a paused dungeon looks much like a running one.
     private void CreateTitle()
     {
         var go = new GameObject("Title");
@@ -900,13 +953,9 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private TMP_Text _titleText;
 
-    // The map name lives here now rather than in an editable label on the dock: it is only ever
-    // set through the save dialog, so it is a readout, not a control.
     private string TitleText =>
         $"CultTweaker Map Editor  -  {(string.IsNullOrWhiteSpace(Map.MapName) ? "Untitled" : Map.MapName)}";
 
-    // The controls that are not buttons - what the mouse does, what Delete does - listed down
-    // the left edge in the game's own prompt style, and rebuilt whenever the tool changes.
     private void CreateShortcutPanel()
     {
         var go = new GameObject("Shortcuts");
@@ -929,8 +978,7 @@ public class RuntimeMapEditor : MonoBehaviour
         var fitter = go.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Each row paints its own plate, so the container stays invisible; it is still a click
-        // blocker, because a hint sitting over the map must not double as a placement target.
+        // Invisible container, but still a click blocker.
         RegisterUiBlocker(_shortcutPanel);
     }
 
@@ -962,11 +1010,12 @@ public class RuntimeMapEditor : MonoBehaviour
             _ui.CreateKeyHint(_shortcutPanel, "Z / X", "Zoom in / out");
             _ui.CreateKeyHint(_shortcutPanel, "Wheel", "Switch tool");
             _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last placement");
+            _ui.CreateKeyHint(_shortcutPanel, "F6", "Hide UI (stays paused)");
             _ui.CreateKeyHint(_shortcutPanel, "F5", "Reset room");
             _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
         }
 
-        _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   –",
+        _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   -",
             ToggleShortcutsCollapsed, 30f);
     }
 
@@ -982,7 +1031,6 @@ public class RuntimeMapEditor : MonoBehaviour
         rt.sizeDelta = size;
         rt.anchoredPosition = offset;
 
-        // Rounded, like every panel the game itself draws.
         var img = go.AddComponent<Image>();
         img.sprite = MapEditorUI.RoundedPlate;
         img.type = Image.Type.Sliced;
@@ -1071,7 +1119,9 @@ public class RuntimeMapEditor : MonoBehaviour
 
     private void SaveMap()
     {
-        var doorTool = GetTool<DoorTool>();
+        // A hub is a town room, not a dungeon room: it has no doors to a next room, and the four
+        // the check wants do not exist in Woolhaven at all.
+        var doorTool = HubSession.IsAuthoring ? null : GetTool<DoorTool>();
         var missing = doorTool?.MissingDirections();
         if (missing != null && missing.Count > 0)
         {
@@ -1119,13 +1169,12 @@ public class RuntimeMapEditor : MonoBehaviour
 
         Map.SceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
 
-        // Snapshot live tool state into the map immediately before writing.
         foreach (var tool in _tools.OfType<IMapDataContributor>())
             tool.ContributeTo(Map);
 
         yield return null;
 
-        // Then everything the tools do not own: the full-room prop snapshot.
+        // Full-room prop snapshot: everything the tools do not own.
         RoomSnapshot.Collect(Map, this);
 
         yield return null;
@@ -1138,6 +1187,16 @@ public class RuntimeMapEditor : MonoBehaviour
         {
             SetStatus("Save failed, see log.", StatusSeverity.Error);
             yield break;
+        }
+
+        // Saving in a hub session saves a hub: the record beside the blueprint is what the world
+        // map's Hub picker lists and what playback rebuilds. It follows the name the save used, so
+        // saving under a new name makes that the hub.
+        if (HubSession.IsAuthoring)
+        {
+            HubSession.WriteRecord(Map.MapName, Map.MapName);
+            SetStatus($"Saved hub '{Map.MapName}'. World map nodes can target it as a Hub.",
+                StatusSeverity.Success);
         }
 
         yield return CaptureSnapshot();
@@ -1157,9 +1216,7 @@ public class RuntimeMapEditor : MonoBehaviour
         {
             var full = ScreenCapture.CaptureScreenshotAsTexture();
 
-            // Downscale returns its input unchanged when the screen is already narrow enough,
-            // so destroying both blindly would destroy the same texture twice - and encode it
-            // after the first Destroy.
+            // Downscale may return its input unchanged; guard against destroying the same texture twice.
             var scaled = Downscale(full, SnapshotWidth);
             if (!ReferenceEquals(scaled, full)) Destroy(full);
 
@@ -1210,7 +1267,6 @@ public class RuntimeMapEditor : MonoBehaviour
 
         var height = Mathf.Max(1, Mathf.RoundToInt(width * (float)source.height / source.width));
 
-        // Through the GPU: a bilinear blit costs nothing next to resampling on the CPU.
         var rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
         var previous = RenderTexture.active;
         try
@@ -1268,7 +1324,6 @@ internal static class Interactor_Update_Patch
         RuntimeMapEditor.Active == null || !RuntimeMapEditor.Active.IsEditing;
 }
 
-// How loudly the status bar should say something.
 public enum StatusSeverity
 {
     Info,

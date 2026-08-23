@@ -15,8 +15,7 @@ public class CTNodeBlueprint
     public string SourceRoom = "";
     public bool UseVanillaFloorCollision = true;
     public string MusicEvent = "";   // FMOD event path (event:/music/...); empty = vanilla music
-    // Restart MusicEvent when it finishes. FMOD events loop only if authored to; this covers
-    // one-shot tracks used as room music.
+    // Restart MusicEvent when it finishes; FMOD events loop only if authored to.
     public bool MusicLoop;
     public MapLightingData Lighting = new();
     public List<MapShapeData> Shapes = [];
@@ -62,14 +61,12 @@ public class MapKeptData
     public SerializableVector3 Position;
     public float RotationZ;
 
-    // Turning a prop to face the other way is a Y rotation in this game's fixed view; Z only
-    // ever tips it over. Both are stored so vanilla scenery (which uses Z) still round-trips.
+    // Y flips a prop in this game's fixed view; Z tips it over. Both stored so vanilla scenery round-trips.
     public float RotationY;
     public SerializableVector3 Scale;
 }
 
-// One snapshotted scene object (vanilla scenery, decorations, encounter props, clones), resolved
-// back to the prefab it was spawned from so the room can be recreated after a full clear.
+// One snapshotted scene object, resolved back to the prefab it was spawned from.
 [Serializable]
 public class MapPropData
 {
@@ -81,8 +78,7 @@ public class MapPropData
     public SerializableVector3 Position;
     public float RotationZ;
 
-    // Turning a prop to face the other way is a Y rotation in this game's fixed view; Z only
-    // ever tips it over. Both are stored so vanilla scenery (which uses Z) still round-trips.
+    // Y flips a prop in this game's fixed view; Z tips it over. Both stored so vanilla scenery round-trips.
     public float RotationY;
     public SerializableVector3 Scale;
 }
@@ -96,8 +92,7 @@ public class MapStructureData
     public float Rotation;
     public bool FlipX;
 
-    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
-    // written before resizing existed, which is why every reader treats null as "leave it".
+    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 
 }
@@ -111,8 +106,7 @@ public class MapDoorData
     public SerializableVector3 Position;
     public float RotationZ;
 
-    // Turning a prop to face the other way is a Y rotation in this game's fixed view; Z only
-    // ever tips it over. Both are stored so vanilla scenery (which uses Z) still round-trips.
+    // Y flips a prop in this game's fixed view; Z tips it over. Both stored so vanilla scenery round-trips.
     public float RotationY;
 }
 
@@ -123,8 +117,7 @@ public class MapEnemyData
     public bool IsCustom;
     public SerializableVector3 Position;
 
-    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
-    // written before resizing existed, which is why every reader treats null as "leave it".
+    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 }
 
@@ -135,8 +128,7 @@ public class MapNpcData
     public bool IsCustom;
     public SerializableVector3 Position;
 
-    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
-    // written before resizing existed, which is why every reader treats null as "leave it".
+    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 }
 
@@ -231,8 +223,7 @@ public class MapPodiumData
     // false = only the equipped podium is consumed, the rest stay usable.
     public bool ClearAllOnEquip = true;
 
-    // World scale at save time, so the select tool's resize round-trips. Null on blueprints
-    // written before resizing existed, which is why every reader treats null as "leave it".
+    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 }
 

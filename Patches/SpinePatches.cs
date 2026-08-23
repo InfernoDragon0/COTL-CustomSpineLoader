@@ -77,12 +77,11 @@ namespace CustomSpineLoader.Patches
                     Plugin.Log.LogInfo("Added fleece skin: Owl");
                 }
 
-                //add custom fleece skins
-                foreach (var kvp in PlayerSpineLoader.FleeceCyclingSpines)
+                //add custom fleece skins - from the registry, not the loaded dictionary, so
+                //a fleece spine is in the cycle before it has ever been loaded.
+                foreach (var (spineName, fleeces) in PlayerSpineLoader.FleeceCycleEntries())
                 {
-                    var spineName = kvp.Key;
-
-                    foreach (var fleeceName in kvp.Value.Item2)
+                    foreach (var fleeceName in fleeces)
                     {
                         var fleeceString = "CultTweaker_" + spineName + "_" + fleeceName;
                         if (!PlayerSpineLoader.FleeceRotation.Contains(fleeceString))
@@ -107,6 +106,10 @@ namespace CustomSpineLoader.Patches
                 test.SetTextureScale("_EmissionMap", new Vector2(0f, 0f));
                 PlayerSpineLoader.LoadAllPlayerSpines(test);
             }
+
+            // The API's saved selection may not have existed yet when the mod loaded; by the
+            // time a player spawns it does, so the worn look gets a second chance to load.
+            PlayerSpineLoader.EnsureSelectedLoaded();
             return true;
         }
 

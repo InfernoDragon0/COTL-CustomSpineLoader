@@ -8,6 +8,7 @@ blueprint** (`CustomLevelBlueprints/<name>.json`) that plays through the mod's o
 | --- | --- |
 | `F4` | Open / close the editor (Dungeon1 scenes only) |
 | `F5` | Enter the test dungeon — or, with the editor open, reset the room |
+| `F6` | Hide / show the editor's UI while it stays paused (screenshots); on an open world map, flip between play view and editing |
 | `F7` | CultTweaker panel (fleeces, player spines, mod info) — not part of the editor |
 | `WASD` / arrows | Pan the camera |
 | `Z` / `X` | Zoom in / out |
@@ -28,7 +29,7 @@ camera would otherwise make the world appear to delete itself.
 - [Tools](#tools)
   - [Select](#select) · [Shape](#shape) · [Structure](#structure) · [Enemy](#enemy) · [NPC](#npc)
   - [Podium](#podium) · [Trigger](#trigger) · [Door](#door) · [Lighting](#lighting) · [Music](#music)
-  - [Clear](#clear) · [Load Map](#load-map) · [Level](#level) · [Dungeon Builder](#dungeon-builder)
+  - [Clear](#clear) · [Load Map](#load-map) · [Level](#level) · [Hubs](#hubs) · [Dungeon Builder](#dungeon-builder)
 - [Trigger actions](#trigger-actions)
 - [Custom NPCs and dialogue](#custom-npcs-and-dialogue)
 - [Saving and loading](#saving-and-loading)
@@ -54,6 +55,14 @@ corner and grows upward — a header on top would drift with the hint count.
 
 **Status bar.** The editor's only feedback channel. Severity colours the text and, for anything the
 user must act on, darkens and pulses the bar.
+
+**Hiding the UI.** `F6` takes the chrome away without leaving the editor: the room stays frozen at
+`timeScale 0` — enemies included — so a shot can be framed and taken with nothing of the editor in
+it. The camera still pans while hidden, but no tool acts on a click, and the world gizmos (trigger
+volumes, selection outlines) go with the panels, since they are objects in the scene rather than
+canvas chrome. All that is left is a *Preview mode - F6 to show UI* line in the bottom left, on a
+canvas of its own because the editor's own is switched off wholesale. Closing the editor restores
+everything.
 
 **Undo.** One stack for the whole editor. Tools push an entry as they place; `Ctrl+Z` walks the
 single history regardless of which tool is active. Entries return false when the thing they would
@@ -491,6 +500,51 @@ advance through the chain.
 - All playback state is static: scene reloads destroy the editor host, and each fresh host re-binds
   via `OnEditorReady`.
 
+### Hubs
+
+A **hub** is a safe town room built in the game's own DLC town — Woolhaven, emptied.
+
+**Woolhaven is not a scene.** It is a `GenerateRoom` called `DLC_ShrineRoom` sitting inside
+`Base Biome 1`, switched on by `BiomeBaseManager.ActivateDLCShrineRoom()`, which switches the base
+room and the church off at the same time. Enabling a `GenerateRoom` makes it `GenerateRoom.Instance`
+— and `GenerateRoom.Instance` is what every editor tool, the blueprint loader and the clear sweeps
+work on. That one fact is the whole feature: once the town room is up, the F4 editor edits it with
+nothing changed.
+
+Hubs live in the **F7 panel**, not the Level tool, because the editor can only be reached once the
+room it edits is standing:
+
+| Panel control | What happens |
+| --- | --- |
+| **New Hub** | Travels to the base, raises the town room, empties it, opens the editor on a blank hub |
+| **Edit Hub** | The same trip, then rebuilds the saved hub in the room for editing |
+| **Visit Hub** | The same trip, then rebuilds it and leaves the player in it |
+
+`HubSession` does all three: get to `Base Biome 1` (`GameManager.ToShip`, picked up again on scene
+load), raise the room, quiet `LambTownController` so it stops driving shops and boards that are
+about to stop existing, clear placed objects / scenery / terrain, then hand over to the editor or
+the blueprint loader. **Before it clears anything it checks that `SceneRefs.Room` really is
+`DLC_ShrineRoom`** and bails out if it is not: in this scene the other candidate is the player's own
+base, and there is no undo for emptying that.
+
+Nothing is written to the scene, so **leaving a hub is a reload of `Base Biome 1`** and the town
+comes back untouched. Every scene load ends the session, that reload included.
+
+**Saving is what makes it a hub.** Save Map in a hub session writes the room blueprint and, beside
+it, a `CTLevelBlueprint` with `IsHub` naming that blueprint — the record the world map's Hub picker
+lists and playback rebuilds. The four-door requirement is waived for that save: a town room has no
+doors to a next room, and Woolhaven has none to find. Saving under a different name makes that name
+the hub.
+
+**The portal is authored, not built in.** Dress whatever object reads as a portal, then put a
+trigger volume on it with either **Return to base** (sends the players home) or **Open world map**
+(opens a named world map, so a hub can be the place you travel from). Both are ordinary trigger
+actions, so a hub can also greet the player with a caption, a conversation, or a camera move first.
+
+A world map node reaches a hub with `TargetKind: "Hub"`; hubs are listed there rather than under
+Level, and the node goes through `HubSession` rather than the level runner — a hub is a town room,
+not a dungeon. Entering one never completes the node: a hub has no success path to record.
+
 ### Dungeon Builder
 
 Authors a **dungeon** as the Slay-the-Spire-style node graph the game shows between rooms: one node
@@ -633,32 +687,7 @@ links, so a second bottom node would be drawn and never reachable. The exit door
 - `CTLevelDungeon` (the Level tool's *Play Level*) clears the installed map on entry, so a map left
   behind by a *Preview Map* press cannot turn a single level's exit into a node picker.
 
---- | --- |
-| empty | shows the completion screen — a one-floor dungeon |
-| set, current node below the top layer | opens the map selector to pick the next floor |
-| set, current node on the top layer | shows the completion screen — the run is over |
-
-**Notes**
-
-- The map is remembered **on entry** (`DungeonMapPlayback.UseMap`), not looked up on exit: by the
-  time the exit door asks, the blueprint that named it is out of reach.
-- The first floor is the map's bottom layer. `ShowMap` marks `GetFirstNode()` visited and offers
-  its outgoing links, so arriving in the dungeon and then meeting the map lines up with layer 0
-  already being behind the player.
-- A scene load builds a fresh `MapManager` with no map of ours in it, so the graph is rebuilt and
-  re-installed on the first exit after entering. Node entry does *not* reload the scene
-  (`Regenerate` passes `MMTransition.NO_SCENE`), so progress along `Map.path` survives between
-  floors.
-- `CustomDungeonManager.Add` mints a `FollowerLocation` from `GuidManager` keyed by a name, and
-  every json dungeon shares the same `Location` seed — so `Add` now keys on `InternalName` when
-  there is one. Without that the second dungeon minted the first one's value and threw on insert.
-  Registration is idempotent: a dungeon already registered keeps its minted location and only its
-  blueprint is refreshed, which is what lets *Save Dungeon* make a dungeon enterable without a
-  restart.
-- `CTLevelDungeon` (the Level tool's *Play Level*) clears the installed map on entry, so a map left
-  behind by a *Test Map* press cannot turn a single level's exit into a node picker.
-
-**Notes**
+**Notes on the grid overlay**
 
 - **It is a grid because the renderer is.** `MakeMapNode` positions every node at
   `new Vector2(point.x, point.y) * 300f + Random.insideUnitCircle * 50f` — the integer cell is the
@@ -735,6 +764,8 @@ still needs. A category holding one action skips its own submenu.
 | --- | --- | --- |
 | Apply lighting | a saved lighting profile, or "Vanilla lighting" | cross-fades the room's lighting over 1 / 2 / 4s (or instant), then moves on; vanilla restores the biome's own values |
 | Change music | an FMOD music event | starts the track and keeps it looping; does not wait for it |
+| Open world map | a saved world map | opens it and waits until it closes — a hub's travel portal |
+| Return to base | — | ends any run and sends the players home, as the dungeon portal does; nothing after it runs |
 
 **Wait for seconds** stands on its own: 0.5–8 seconds of nothing, for pacing between two other
 actions. It waits in realtime, because a sequence is often running while the game is paused around
@@ -1018,3 +1049,193 @@ half-open, visible and permanently unable to take a keystroke.
 Anything protected by `MapEditorProtection` is never destroyed by the clear or delete tools — doors
 in particular are `IslandPiece`s carrying the `RoomLockController`, so destroying one soft-locks the
 room: it can never be completed or exited.
+
+
+## World maps
+
+The world editor builds a custom overworld in the shape of the DLC's Ewefall map: a full-screen
+travel menu over whatever scene the player is standing in, built of the map's own art, with
+travel nodes that unlock outward from what the player has completed. It is entirely the mod's
+own system - the vanilla DLC map (whose node IDs are save-data array indices) is never touched,
+and completion lives in the mod's own per-save-slot file.
+
+### Folder layout
+
+```
+CustomWorldMaps/
+    <MapName>/
+        config.json      the map (layers + nodes)
+        *.png            sprite layers and node icons, referenced by file name
+        <SpineFolder>/   one spine per subfolder: skeleton .json + .atlas + pages
+    progress_slot<N>.json    per-save-slot completion (managed by the mod)
+```
+
+One folder per map: the config and its art travel together, so a finished map ships as a zip.
+The folder name is the map's identity.
+
+### Opening and editing
+
+- F7 panel, "World Maps" section: Open / Edit / New. **New World Map** takes the next free name in
+  the `untitledworld`, `untitledworld2`, ... series (`CTWorldMapSerialization.FreeName`), so it
+  always opens an empty canvas rather than reopening the last scratch map; rename it from the
+  editor's File tool.
+- **F6** flips an open map between play view and the editor.
+- A trigger with the **Open world map** action (under Ambient actions) opens a named map from
+  inside any custom room - this is also how a hub room's exit portal will work.
+- Esc and the X button are one door, in this order: dismiss the prompt on screen, else leave edit
+  mode, else close. The world is paused underneath, exactly like the vanilla map menu.
+- Closing while the map differs from what is on disk asks first: **Save & close**, **Discard**, or
+  **Cancel**. The check is a comparison against the last saved copy rather than a flag raised by
+  each widget, so no slider can quietly slip through it. The prompt strip stands clear of the dock
+  and status bar and wears a red border — it shares the canvas with the editor's chrome, and one
+  drawn behind it reads as nothing having happened.
+- **Rename / Save As** writes the map under the new name *and copies its art across*, since a map
+  is its folder — the new name would otherwise be a config.json with no images beside it. Files
+  already at the destination are left as they are, and the original map is left alone.
+
+The editor has its own dock across the bottom, in the room editor's shape and metrics (separate
+from the F4 room editor's; the two can never be open at once), with the same accent border around
+the selected tool. Its options panel carries the room editor's title bar and `-`/`+` collapse, so
+the quarter of the map it covers can be worked on without leaving the tool. There is no Play
+button: **F6** leaves edit mode. **World File** (save/load/new, background colour, parallax strength, wipe
+progress), **World Layers** (click a layer on the map or its row to select it — the selection wears
+a frame — then drag to move, ctrl+drag to clone, scale, rotate, parallax, flip, spine animation and
+skin pickers, *Refresh art list* for files dropped in mid-session, `Del` for the selected layer,
+and a layer list with `+`/`-` order and `X` delete for any other), **World Nodes** (a node picker, drag,
+name, icon type, visibility, keys, count gates, links, and the destination picker). Ctrl+Z
+undoes placements, moves, clones, deletions and links.
+
+Picking a layer on the map: the **selected** layer wins wherever it sits in the stack, so one behind
+others stays draggable; otherwise the front-most under the cursor wins. However far a layer is
+scaled down, its grab box and its selection frame stop shrinking at the same floor — 68 screen
+pixels for a sprite, 110 for a spine, whose skeleton draws well outside the rect it reports
+(`WorldMapSelectionFrame.MinFor`). What is outlined is what can be grabbed, which is what makes a
+spine layer at 0.005 usable at all.
+
+The frame is drawn in the room editor's selection colour (`MapEditorGizmos.BoxColour`) and hangs
+from the content rect's **last** child, a gizmo root, rather than from the layer it marks: parented
+to the layer it would draw at that layer's depth, and any layer in front would cover it. It copies
+the layer's position, rotation and scale every frame instead, and destroys itself when its target
+goes.
+
+The node tool has no *Add node* button — ctrl+click the map places one, and the dropdown in its
+place selects a node by name, for nodes sitting under others. **Icon type** is one list: the seven
+node types first, then the map folder's pngs. Picking a png overrides only the drawn icon, so a
+node keeps meaning what its type means (Base closes the map, Key banks keys, Lock spends them)
+whatever face it wears. **Visibility** is the initial state. Both carry a caption above them, since
+a dropdown shows its current value once one is picked and then says nothing about what it sets.
+
+Nodes are worked with the mouse rather than through modes:
+
+| Gesture | What it does |
+| --- | --- |
+| Left click a node | selects it; its outline turns red |
+| Left drag a node | moves it |
+| Left click empty map | clears the selection |
+| **Ctrl** + left click | places a new node there (the only way to add one) |
+| **Del** | deletes the selected node (there is no button for it) |
+| Right click a node | links the selection to it, or removes that link if it exists |
+| Right click a link | removes it |
+
+A node's **Name** is one field: it is what the map shows, and the id everything refers to (links,
+gates, saved progress) is a slug of it, kept unique on its own. Renaming rewrites every reference
+inside the map, but progress already recorded under the old id does not carry over.
+
+A **shortcuts panel** sits in the bottom left, the same one the room editor has and built from the
+same `IMapEditorShortcuts` list: the active tool's keys first, then Ctrl+Z and F6, with its
+title bar collapsing it. Esc has no row of its own — it does what F6 does and then closes. A **status bar** runs along the bottom beside it, saying what the cursor
+is over — the dock tool, a widget, a layer row, or the node under the pointer with its type,
+unlock state, destination and links — and carrying the editor's own messages when nothing is
+hovered. Tool icons come from
+`Assets/EditorIcons/<Tool name>.png` like the room editor's — here `World File.png`,
+`World Layers.png` and `World Nodes.png`, matching `IMapEditorTool.Name` exactly, spaces and all.
+A tool with no icon file borrows one that already means the right thing (World File takes Load
+Map's, World Nodes takes the vanilla map's dungeon disc) or shows its initials. Icons are read once
+per session and the miss is cached too, so a file dropped in while the game runs needs a restart.
+
+In play view the map carries a permanent *Play mode - F6 to show UI* line in the bottom left, the
+room editor's badge in the room editor's corner. It appears only once the editor has been used on
+that map this session: a player who opened the map to travel has no business being told about F6.
+
+### Nodes and unlocking
+
+Positions are in the canvas's 1920x1080 reference space. A node's `Id` is a string it keeps
+forever - progress is keyed on it, so renaming a node orphans progress earned under the old id.
+
+States follow the DLC cascade: a **completed** node's children become **selectable**, its
+grandchildren become a grey **preview** ("???"), everything further stays **hidden**. States
+only ever upgrade when branches meet. On top of that:
+
+- `InitialState` (`Hidden` / `Preview` / `Selectable`) is what a node is before any completion
+  reaches it. The starting node is authored `Selectable`.
+- A **Base** node is home: selecting it closes the map, it never completes, and its children
+  unlock from the start.
+- A **Key** node banks `KeysGranted` keys when completed (once, however often it is replayed).
+- A **Lock** node surfaces where a selectable node would be, priced at `KeysCost` keys, and
+  blocks its branch until opened. An opened lock passes completion straight through.
+- `RequiredCompletedCount` + `RequiredNodes` holds a node at preview until N of the listed
+  nodes are completed - the "beat the minibosses first" gate.
+
+A node's destination is `TargetKind` + `Target`: a saved **dungeon map** (`CustomDungeonMaps`),
+a saved **level** (`CustomLevelBlueprints`), or **None**, which completes on the spot when
+selected (a reward cache, a key lying on the map). Completion is recorded only when a run
+entered from the map ends in the success path - dying records nothing.
+
+Selecting a node acts immediately; the vanilla DLC map asks nothing either
+(`UIDLCMapMenuController.OnLocationSelected` travels or refuses, and never prompts). The one
+exception is a **Lock**, which asks before spending keys - that is a cost, and it is not a gesture
+the vanilla map has.
+
+### Vanilla map art
+
+Nodes and links are **clones of the game's own DLC map**, so a custom world reads as part of the
+game: the same node discs, outline glows, selection rings, lock fills and the same four-state link
+renderers (dim / open / walked / highlighted), plus the map's open, close, hover and enter sounds.
+
+The prefab is an Addressable the game only loads when the DLC map is about to open, so the first
+map opened in a session waits a moment for it ("Preparing the map..."). If it cannot be loaded the
+screen falls back to the mod's own discs and lines and says so once in the log — everything else
+works the same.
+
+Only the art is taken. Every vanilla script is stripped off the clone before it wakes, because
+they expect the DLC menu, its save data and its authored node graph; what is left is driven by
+`DlcNodeVisual` and `DlcLineVisual`, which mirror the game's own state visuals. A node's authored
+`Icon` png replaces the vanilla icon inside the vanilla frame, so custom art still gets the glow
+and the ring. `NodeType` chooses which vanilla style is borrowed:
+
+| NodeType | Vanilla style |
+|---|---|
+| `Base` | the home node |
+| `Dungeon` | a standard Ewefall dungeon |
+| `MiniBoss` / `Boss` | the miniboss / boss nodes |
+| `Key` / `Lock` | the key and lock nodes, with their extra outline |
+| `Reward` | the reward cache |
+
+### Layers
+
+Sprite layers are the png at its authored pixel size, tinted and scaled as configured. Spine
+layers render on the canvas with `SkeletonGraphic` and animate even while the world is paused.
+A canvas skeleton draws in raw spine units, which this game authors far larger than a 1920x1080
+canvas wants, so spine layers carry the game's own factor internally: **scale 1 means the size the
+game draws that skeleton at**, matching what 1 means for a sprite. Their grab area also never
+shrinks below a clickable box, since a skeleton's rect says nothing about what it actually draws.
+**This game's Spine runtime draws a canvas skeleton with a single texture, so world map spines
+should use a single-page atlas** - a multi-page skeleton renders its first page correctly and
+misdraws the rest. `ParallaxDistance` (0 pinned, 1 moves most) drifts a layer toward the mouse
+in play view; the editor keeps everything pinned so placement is exact.
+
+### Files
+
+| File | What it is |
+|---|---|
+| `CTWorldMap.cs` | World map schema and JSON read/write |
+| `WorldMapProgress.cs` | Per-save-slot completion, key/lock bookkeeping, run tracking |
+| `WorldMap/WorldMapScreen.cs` | The full-screen map: canvas, pause, layers, states, travel |
+| `WorldMap/WorldMapNodeView.cs` | One node's icon, label and state rendering |
+| `WorldMap/WorldMapLine.cs` | The link lines |
+| `WorldMap/WorldMapAssets.cs` | The map's sprite/spine cache (and the Keep() discipline) |
+| `WorldMap/CustomMapSkin.cs` | Loads the game's DLC map prefab and cuts stripped clones from it |
+| `WorldMap/CustomNodeVisual.cs` | Drives a cloned vanilla node's state visuals and hover |
+| `WorldMap/CustomLineVisual.cs` | Drives a cloned vanilla link's four line renderers |
+| `WorldMap/WorldMapEditor.cs` | The editor host: dock, options panel, undo, tool plumbing |
+| `WorldMap/Tools/*.cs` | The four world tools |

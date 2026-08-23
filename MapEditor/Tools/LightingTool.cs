@@ -17,8 +17,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     private TMP_Text _stateLabel;
     private bool _built;
 
-    // Every slider with how to read its current value back, so a profile (or a loaded map) can
-    // move the knobs instead of leaving them showing the previous room's numbers.
+    // Slider + reader pairs, so a profile or loaded map can move the knobs.
     private readonly List<(Slider slider, Func<float> read)> _sliders = [];
 
     private MapEditorDropdown _profileDropdown;
@@ -73,8 +72,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
         ui.CreateHeader(panel, "Fog");
         ColourSliders(ui, panel, "Fog", () => Data.Fog);
-        // Near/far are the distances the fog fades between; height and spread shape how far up
-        // it climbs and how soft its edge is.
+        // Near/far: fade distances. Height/spread: vertical reach and edge softness.
         TrackedSlider(ui, panel, "Fog Near", 0f, 60f, () => Data.FogNear, v => Data.FogNear = v);
         TrackedSlider(ui, panel, "Fog Far", 0f, 120f, () => Data.FogFar, v => Data.FogFar = v);
         TrackedSlider(ui, panel, "Fog Height", 0f, 10f, () => Data.FogHeight, v => Data.FogHeight = v);
@@ -94,7 +92,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     private void ColourSliders(MapEditorUI ui, RectTransform panel, string label,
         Func<SerializableColor> colour)
     {
-        // HDR colours in this game routinely exceed 1, which is what gives the glow.
+        // HDR colours routinely exceed 1, hence the 0-3 range.
         TrackedSlider(ui, panel, label + " R", 0f, 3f, () => colour().R, v => colour().R = v);
         TrackedSlider(ui, panel, label + " G", 0f, 3f, () => colour().G, v => colour().G = v);
         TrackedSlider(ui, panel, label + " B", 0f, 3f, () => colour().B, v => colour().B = v);
@@ -119,7 +117,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
         _lastProfile = profile.Name;
 
-        // A copy, so slider edits from here shape this map without rewriting the profile.
+        // Clone: slider edits must not rewrite the profile.
         _editor.Map.Lighting = LightingProfiles.Clone(profile.Data);
         Apply();
         SyncSliders();
@@ -129,7 +127,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     private void SaveProfile()
     {
-        // Saving while "following the biome" means "save what is on screen".
+        // Saving while following the biome saves what is on screen.
         if (!Data.Enabled) CaptureCurrent();
 
         MapNamePrompt.Show(_editor, _lastProfile ?? "", "NAME THIS LIGHTING PROFILE", name =>
@@ -172,12 +170,10 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     public void OnEnter()
     {
-        // A blueprint that never captured anything starts from what the room actually looks
-        // like, so the first slider drag is a nudge rather than a jump to black.
+        // Uncaptured blueprint starts from the live look, not defaults.
         if (!Data.Enabled) CaptureCurrent();
 
-        // Both can have changed while the tool was closed: a map load brings its own lighting,
-        // and the trigger tool can add profiles.
+        // Map loads and the trigger tool can change these while the tool is closed.
         SyncSliders();
         RefreshProfileOptions();
 
@@ -202,7 +198,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             _stateLabel.text = Data.Enabled ? "Overriding the biome" : "Following the biome";
     }
 
-    // Reads the room's live values so editing starts from what is on screen.
     private void CaptureCurrent()
     {
         var current = LightingManager.Instance != null ? LightingManager.Instance.currentSettings : null;
@@ -222,31 +217,19 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     }
 
     // ---- which room owns which lighting -----------------------------------------------------
-    //
-    // A lighting override is global state on LightingManager; the room does not carry it, and
-    // walking through a door neither removes nor restores it. That cuts both ways - the room you
-    // left goes on lighting the room you walked into, and the room you come back to has lost its
-    // own - which is why both had to be handled here rather than left to whoever happens to run
-    // last on a room change.
-    //
-    // Keyed by grid coordinates rather than the BiomeRoom object: coordinates are stable for
-    // the whole run no matter how the generator reuses or rebuilds its room objects, and a
-    // revisit whose BiomeRoom identity changed was exactly the lookup miss that left a
-    // re-entered room plain.
+
+    // Per-room lighting, keyed by grid coords rather than the BiomeRoom object: BiomeRoom
+    // identity can change on revisit, which left re-entered rooms plain.
     private static readonly Dictionary<(int x, int y), MapLightingData> _roomLighting = [];
 
-    // What the biome looked like before anything of ours touched it, captured once per biome.
-    // Restoring these is not the same as clearing inOverride: clearing it transitions to
-    // LightingManager's time-of-day target, which in a dungeon is not the biome's own lighting,
-    // and the room kept the custom mood.
+    // Biome values captured once, before any override. Restoring these is not the same as
+    // clearing inOverride: that transitions to the time-of-day target, not the biome's own look.
     private static MapLightingData _biomeSnapshot;
 
     private static BiomeRoom CurrentRoom =>
         BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
 
-    // The room whose lighting was asserted last. An arrival is announced by more than one hook -
-    // see the pair in DungeonPatches - and without this the same arrival would start two lighting
-    // transitions on top of each other.
+    // Last room asserted; more than one hook announces the same arrival (see DungeonPatches).
     private static (int x, int y)? _assertedRoom;
 
     private static (int x, int y)? CurrentRoomKey()
@@ -255,10 +238,8 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         return room != null ? (room.x, room.y) : null;
     }
 
-    // Subscribed to BiomeGenerator.OnBiomeChangeRoom: the one signal that fires on EVERY door
-    // change - a re-activated room never runs the generation or SetRoom paths the other hooks
-    // ride on, which is why a revisited room's lighting used to stay un-applied. Wrapped so a
-    // lighting slip can never break the other subscribers on the game's event.
+    // Subscribed to BiomeGenerator.OnBiomeChangeRoom, the one signal firing on EVERY door change
+    // (revisits skip the generation hooks). Wrapped so a slip cannot break other subscribers.
     public static void OnBiomeRoomChanged()
     {
         try
@@ -271,18 +252,12 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         }
     }
 
-    // Called on arrival in a room: the arriving room's own lighting, or none at all.
-    //
-    // Generation alone was not enough to hang this on. The game builds a room once and merely
-    // re-activates it on every later visit, so a revisit never announced itself - the room walked
-    // out of went on lighting the one walked into, and a room with its own mood came back plain.
-    // Both are the failure this exists to prevent, so the arrival hooks feed it instead.
+    // On arrival: assert the arriving room's own lighting, or clear the override.
     public static void OnRoomEntered()
     {
         var key = CurrentRoomKey();
 
-        // Nothing of ours has ever touched the lighting, so there is nothing to assert or undo.
-        // Also keeps a hook that now runs on every room change free in ordinary play.
+        // Nothing ever overridden: keep this per-room-change hook free in ordinary play.
         if (_roomLighting.Count == 0 && _biomeSnapshot == null) return;
 
         // The same arrival, announced a second time.
@@ -302,18 +277,11 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         ClearOverride();
     }
 
-    // A new biome is a new set of rooms, and the old ones are gone along with anything they asked
-    // for. Called on biome start and when a level run ends.
+    // Called on biome start and when a level run ends.
     public static void ForgetRoomLighting()
     {
         _roomLighting.Clear();
-
-        // The snapshot goes with them: a new biome's own values are its own, and restoring the
-        // last one over it is exactly the stale-mood bug this pair exists to avoid.
         _biomeSnapshot = null;
-
-        // The room it names is one of the ones just forgotten, and a new biome's first arrival
-        // must not be mistaken for a repeat of it.
         _assertedRoom = null;
     }
 
@@ -344,8 +312,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         var key = CurrentRoomKey();
         if (key == null) return;
 
-        // The live object rather than a copy: while a room is being edited its sliders write
-        // straight into this, and the room should keep showing what the sliders say.
+        // The live object, not a copy: sliders write straight into it while editing.
         if (data != null && data.Enabled) _roomLighting[key.Value] = data;
         else _roomLighting.Remove(key.Value);
     }
@@ -353,9 +320,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     // Public: the blueprint loader applies a loaded room's lighting the same way.
     public static void Apply(MapLightingData data) => Apply(data, 0f);
 
-    // fadeSeconds > 0 cross-fades to the new look instead of snapping to it. The sliders and the
-    // blueprint loader stay instant - a fade there reads as lag - but a trigger's Apply-lighting
-    // action is a cue, and a cue that cuts is a flicker.
+    // fadeSeconds > 0 cross-fades; sliders and the loader stay instant, trigger cues fade.
     public static void Apply(MapLightingData data, float fadeSeconds)
     {
         if (data == null || !data.Enabled) return;
@@ -364,14 +329,13 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         ApplyInternal(data, fadeSeconds);
     }
 
-    // The push without the bookkeeping: restoring the biome's own values goes through here, so
-    // that a restore is not recorded as the room asking for that look.
+    // The push without Remember(): a biome restore must not be recorded as the room's own look.
     private static void ApplyInternal(MapLightingData data, float fadeSeconds)
     {
         var manager = LightingManager.Instance;
         if (manager == null) return;
 
-        // The fade has to wait out any transition already running, so it goes through a coroutine.
+        // Coroutine: the fade must wait out any transition already running.
         if (fadeSeconds > 0f && StartFade(manager, data, fadeSeconds)) return;
 
         ApplyTo(manager, data, fadeSeconds);
@@ -381,14 +345,12 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     {
         try
         {
-            // Hosted on the manager itself: it is alive whenever there is lighting to fade, and a
-            // fade whose room is being torn down should die with it.
+            // Hosted on the manager so a fade dies with the scene that wanted it.
             manager.StartCoroutine(FadeRoutine(manager, data, fadeSeconds));
             return true;
         }
         catch (System.Exception e)
         {
-            // A missed lighting cue is worse than an abrupt one.
             Plugin.Log.LogWarning("MapEditor: lighting fade could not start, applying at once: " + e.Message);
             return false;
         }
@@ -396,15 +358,13 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     private static IEnumerator FadeRoutine(LightingManager manager, MapLightingData data, float fadeSeconds)
     {
-        // A fade that starts while another transition is still unwinding would lerp from whatever
-        // that one leaves in currentSettings, which is not what is on screen - a visible jump
-        // before the fade even begins. Cancel it, let it land, then read the live values back.
+        // Starting mid-transition would lerp from stale currentSettings (a visible jump):
+        // cancel the running one, let it land, then read the live values back.
         if (manager.lerpActive)
         {
             manager.lerpActive = false;
 
-            // The cancelled coroutine needs two frames; the cap is so a queue that keeps feeding
-            // itself cannot strand the cue.
+            // The cancelled coroutine needs two frames; the cap keeps the cue from stranding.
             for (var frames = 0; frames < 10 && manager != null && manager.IsTransitionActive; frames++)
                 yield return null;
 
@@ -415,16 +375,9 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         ApplyTo(manager, data, fadeSeconds);
     }
 
-    // One settings object, reused and rewritten, rather than a fresh ScriptableObject per apply.
-    //
-    // A slider drag applies on every frame it moves, and a room change applies again, so the old
-    // shape minted a ScriptableObject per frame and abandoned it - while LightingManager went on
-    // holding references to some of them through currentSettings and its lerp. Unity's asset
-    // garbage collector (the AssetGarbageCollectorHelper thread) walks exactly that graph during
-    // UnloadUnusedAssets, which a room change triggers.
-    //
-    // HideAndDontSave keeps this one out of that sweep entirely: it is ours, it lives as long as
-    // the process, and nothing should ever consider unloading it.
+    // One settings object, reused and rewritten. A fresh ScriptableObject per apply gets swept by
+    // UnloadUnusedAssets (room changes trigger it) while the manager still references it;
+    // HideAndDontSave keeps this one out of that sweep.
     private static BiomeLightingSettings _overrideSettings;
 
     private static BiomeLightingSettings OverrideSettings()
@@ -434,8 +387,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         _overrideSettings = ScriptableObject.CreateInstance<BiomeLightingSettings>();
         _overrideSettings.hideFlags = HideFlags.HideAndDontSave;
 
-        // Only the properties named here are taken from our settings; the rest keep coming from
-        // the biome's own time-of-day asset. Set once, with the object.
+        // Only these properties come from us; the rest follow the biome's time-of-day asset.
         _overrideSettings.overrideLightingProperties = new OverrideLightingProperties
         {
             Enabled = true,
@@ -462,8 +414,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             PrepareManager(manager);
 
             var settings = OverrideSettings();
-            // Without this the transition below never finishes while the editor is open (see
-            // PrepareManager), so the first slider drag would be the last one that did anything.
+            // Editor runs at timeScale 0: a scaled transition never finishes there.
             settings.UnscaledTime = true;
             settings.AmbientColour = data.Ambient.ToColor();
             settings.DirectionalLightColour = data.DirectionalLight.ToColor();
@@ -488,9 +439,8 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     private void Apply() => Apply(Data);
 
-    // The manager scales its own transitionDuration (5s out of the box) rather than taking
-    // seconds, and resets the multiplier to 1 at the end of every transition - so it is set on
-    // each apply. 0 lands the change this frame, which is what a slider drag needs.
+    // The manager scales transitionDuration (5s default) and resets the multiplier to 1 after
+    // every transition, so it is set on each apply. 0 lands the change this frame.
     private static float FadeMultiplier(LightingManager manager, float fadeSeconds) =>
         fadeSeconds > 0f && manager.transitionDuration > 0f ? fadeSeconds / manager.transitionDuration : 0f;
 
@@ -498,17 +448,15 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     {
         if (manager.currentSettings != null) manager.currentSettings.UnscaledTime = true;
 
-        // UpdateLighting *reverses* a running lerp instead of starting a new one (it flips
-        // deltaTimeMult while lerpActive), so the old one is stood down first.
+        // UpdateLighting *reverses* a running lerp (flips deltaTimeMult) instead of starting
+        // a new one; stand the old one down first.
         manager.lerpActive = false;
     }
 
     public static void ClearOverride() => ClearOverride(0f);
 
-    // The explicit "this room gives up its lighting": the tool's Reset To Biome button, and a
-    // loaded blueprint that declares no lighting. Deliberately NOT part of ClearOverride - that
-    // runs on every unlit-room arrival, and deleting whatever room happens to be current at that
-    // moment is how a lit room's memory used to vanish.
+    // Explicit give-up only (Reset button, blueprint with no lighting). NOT part of
+    // ClearOverride, which runs on every unlit-room arrival and would erase lit rooms' memory.
     public static void ForgetCurrentRoom()
     {
         var key = CurrentRoomKey();
@@ -520,15 +468,11 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         var manager = LightingManager.Instance;
         if (manager == null) return;
 
-        // Nothing was ever overridden, so there is nothing to undo - and no snapshot to
-        // restore from either.
         if (_biomeSnapshot == null && !manager.inOverride) return;
 
         if (_biomeSnapshot != null)
         {
-            // ApplyInternal, not Apply: this room is being handed the biome's look back, which
-            // is not the same as it asking for that look. Recording it would make the restore
-            // itself the room's lighting, and re-assert it on every return.
+            // ApplyInternal, not Apply: a restore must not be recorded as the room's own lighting.
             ApplyInternal(_biomeSnapshot, fadeSeconds);
             return;
         }
@@ -537,8 +481,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         {
             PrepareManager(manager);
             manager.inOverride = false;
-            // Without a snapshot the biome comes back through the manager's own path, whose
-            // default is already a 5-second fade - so an unasked-for duration keeps that.
+            // No snapshot: the manager's own path already defaults to a 5s fade; keep it.
             manager.transitionDurationMultiplier =
                 fadeSeconds > 0f ? FadeMultiplier(manager, fadeSeconds) : 1f;
             manager.UpdateLighting(allowInterupt: true, ignoreAccessibilitySetting: false, forceUpdate: true);
@@ -551,8 +494,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     public void ContributeTo(CTNodeBlueprint map)
     {
-        // Edited directly on the live blueprint; the hook exists so a future refactor cannot
-        // silently drop it.
+        // Already edited live on the blueprint; hook guards against a refactor dropping it.
         map.Lighting = Data;
     }
 }

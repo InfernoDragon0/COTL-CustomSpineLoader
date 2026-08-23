@@ -27,9 +27,12 @@ namespace CustomSpineLoader
     {
         public const string PluginGuid = "InfernoDragon0.cotl.CustomSpineLoader";
         public const string PluginName = "CultTweaker";
-        public const string PluginVer = "1.1.1";
+        public const string PluginVer = "2.0.0";
+        public const bool PreRelease = true;
 
         internal static ManualLogSource Log;
+
+        internal static Plugin Instance;
         internal readonly static Harmony Harmony = new(PluginGuid);
 
         internal static string PluginPath;
@@ -37,11 +40,21 @@ namespace CustomSpineLoader
         public static ConfigEntry<int> CurrentFleeceIndexP1 { get; set; }
         public static ConfigEntry<int> CurrentFleeceIndexP2 { get; set; }
 
+        // The fleece by NAME as well as index: the index only means something after the fleece
+        // rotation is built in game, but the lazy loader must know at boot which spine the
+        // remembered fleece lives on so it can load it eagerly.
+        public static ConfigEntry<string> CurrentFleeceNameP1 { get; set; }
+        public static ConfigEntry<string> CurrentFleeceNameP2 { get; set; }
+
         public static ConfigEntry<bool> DebugDumpFollowerSpineAtlas { get; set; }
 
         public static ConfigEntry<bool> FleeceCyclingEnabled { get; set; }
 
         private RuntimeMapEditor runtimeMapEditor;
+
+        // Whichever room editor is up: the dungeon one this class owns, or the one a hub session
+        // stands up in the base. RuntimeMapEditor keeps the live one in a static of its own.
+        private static RuntimeMapEditor RoomEditor => RuntimeMapEditor.Active;
 
         // The F7 panel. Unlike the map editor it is not scoped to a dungeon - fleeces and spines
         // are just as worth setting in the base - so it lives on its own persistent host.
@@ -50,19 +63,28 @@ namespace CustomSpineLoader
         private void Awake()
         {
             Log = base.Logger;
+            Instance = this;
             PluginPath = Path.GetDirectoryName(Info.Location);
-            PlayerSpineLoader.LoadAllPlayerSpines();
+
+            // Bound BEFORE the spine loader runs: the saved fleece name is one of the things
+            // that decides which spines load eagerly.
+            CurrentFleeceIndexP1 = Config.Bind("Fleece", "CurrentFleeceIndexP1", -1, "Current Fleece Index for Player 1");
+            CurrentFleeceIndexP2 = Config.Bind("Fleece", "CurrentFleeceIndexP2", -1, "Current Fleece Index for Player 2");
+            CurrentFleeceNameP1 = Config.Bind("Fleece", "CurrentFleeceNameP1", "", "Current fleece skin name for Player 1 (kept alongside the index so its spine can load at boot)");
+            CurrentFleeceNameP2 = Config.Bind("Fleece", "CurrentFleeceNameP2", "", "Current fleece skin name for Player 2 (kept alongside the index so its spine can load at boot)");
+
+            SpineMemory.Phase("PlayerSpines", () => PlayerSpineLoader.LoadAllPlayerSpines());
             Log.LogInfo("Cult Tweaker is loading! For more information or templates on how to use this mod, go to the NexusMods page!");
             CustomFollowerCommandManager.Add(new CustomColorCommand());
-            StructureBuildingOverrideHelper.LoadBuildingOverrides();
+            SpineMemory.Phase("BuildingOverrides", StructureBuildingOverrideHelper.LoadBuildingOverrides);
             Log.LogInfo("Loading Custom Items...");
-            CustomItemLoader.LoadAllCustomItems();
+            SpineMemory.Phase("Items", CustomItemLoader.LoadAllCustomItems);
             Log.LogInfo("Loading Custom Meals...");
-            CustomMealLoader.LoadAllCustomMeals();
+            SpineMemory.Phase("Meals", CustomMealLoader.LoadAllCustomMeals);
             Log.LogInfo("Loading Custom Tarots...");
-            CustomTarotLoader.LoadAllCustomTarots();
+            SpineMemory.Phase("Tarots", CustomTarotLoader.LoadAllCustomTarots);
             Log.LogInfo("Loading Custom Structures...");
-            CustomStructureLoader.LoadAllCustomStructures();
+            SpineMemory.Phase("Structures", CustomStructureLoader.LoadAllCustomStructures);
 
             // No loading to do - a cutscene is a file, read when it plays - but the folder is
             // created here so it is there to drop videos into, and listed so the log says what
@@ -72,18 +94,20 @@ namespace CustomSpineLoader
             // A video's soundtrack has to be its own file to be audible; this pulls it out with
             // ffmpeg when one is missing, in the background, so a new .mp4 only has to be
             // dropped in the folder.
-            CustomCutsceneLoader.ConvertMissingAudio();
+            SpineMemory.Phase("CutsceneAudio", CustomCutsceneLoader.ConvertMissingAudio);
 
             // Enemies are registered here but their prefabs load asynchronously, which is why
             // this takes the plugin as a coroutine host the way the NPC loader does.
-            CustomEnemyLoader.LoadAllCustomEnemies(this);
+            SpineMemory.Phase("Enemies", () => CustomEnemyLoader.LoadAllCustomEnemies(this));
             Log.LogInfo("Loading Custom Follower Overrides...");
-            FollowerSpineLoader.LoadAllNonSpineSkins();
-            Log.LogInfo("Loading Custom NPCs...");
-            CustomNpcLoader.LoadAllCustomNpcs(this);
+            SpineMemory.Phase("FollowerOverrides", FollowerSpineLoader.LoadAllNonSpineSkins);
 
-            CurrentFleeceIndexP1 = Config.Bind("Fleece", "CurrentFleeceIndexP1", -1, "Current Fleece Index for Player 1");
-            CurrentFleeceIndexP2 = Config.Bind("Fleece", "CurrentFleeceIndexP2", -1, "Current Fleece Index for Player 2");
+            // Building those skins repacked atlases; the repack scaffolding (Spine's cache and
+            // the API's page duplicates) is pure memory now.
+            SpineMemory.TrimRepackCaches("startup skin builds");
+            Log.LogInfo("Loading Custom NPCs...");
+            SpineMemory.Phase("NPCs", () => CustomNpcLoader.LoadAllCustomNpcs(this));
+
             DebugDumpFollowerSpineAtlas = Config.Bind(
                 "Debug", "DumpFollowerSpineAtlas", false,
                 "If true, will dump the follower spine slots to a json file. May impact performance when enabled. Ensure followerSlots.json is not present before dumping.");
@@ -111,6 +135,16 @@ namespace CustomSpineLoader
             var panelHost = new GameObject("CultTweakerPanelHost");
             DontDestroyOnLoad(panelHost);
             cultTweakerPanel = panelHost.AddComponent<ModUI.CultTweakerPanel>();
+            if (PreRelease) panelHost.AddComponent<ModUI.PreReleaseBanner>();
+
+            // The world map is a menu over whatever scene is running, so its host persists the
+            // way the panel's does. The folder is created now so there is somewhere to drop a
+            // map's art before any map is saved.
+            MapEditor.CTWorldMapSerialization.EnsureRootFolder();
+            var worldMapHost = new GameObject("WorldMapHost");
+            DontDestroyOnLoad(worldMapHost);
+            worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapScreen>();
+            worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapEditor>();
 
             var customTestDungeon = new CustomDungeon();
 
@@ -137,7 +171,7 @@ namespace CustomSpineLoader
 
             // Every saved dungeon map is a dungeon. Registering mints a FollowerLocation per
             // map, so it happens once at startup rather than every time the tool lists them.
-            MapEditor.CTMapDungeon.RegisterAll();
+            SpineMemory.Phase("MapDungeons", MapEditor.CTMapDungeon.RegisterAll);
         }
     
         public void Update()
@@ -145,6 +179,10 @@ namespace CustomSpineLoader
             // Hands finished background skeleton parses back to their assets; does nothing once the
             // warm-up has drained.
             SpineLoaderHelper.PlayerSpineLoader.PumpWarmUp();
+
+            // Logs a warning whenever memory leaps by 256MB within a second, so the log lines
+            // around it name the culprit. Four reads per second.
+            SpineMemory.Watch();
 
             // if (Input.GetKeyDown(KeyCode.F9))
             // {
@@ -178,13 +216,13 @@ namespace CustomSpineLoader
             //     Log.LogInfo("F8 Pressed - Fleece Cycle Player 2");
             //     TestApplySpineOverride(1);
             // }
-            if (Input.GetKeyDown(KeyCode.F5))
+            if (Input.GetKeyDown(KeyCode.F5) && !MapEditor.WorldMap.WorldMapScreen.IsOpen)
             {
                 // Inside the map editor F5 resets the room; the test-dungeon shortcut would
                 // otherwise throw away the room being edited without so much as a warning.
-                if (runtimeMapEditor != null && runtimeMapEditor.IsEditing)
+                if (RoomEditor != null && RoomEditor.IsEditing)
                 {
-                    runtimeMapEditor.RequestResetRoom();
+                    RoomEditor.RequestResetRoom();
                 }
                 else
                 {
@@ -195,11 +233,24 @@ namespace CustomSpineLoader
                 }
             }
 
-            // Both take the camera, the pause and the HUD; the panel wins while it is up.
-            if (Input.GetKeyDown(KeyCode.F4) && runtimeMapEditor != null &&
-                (cultTweakerPanel == null || !cultTweakerPanel.IsOpen))
+            // F6 hides the chrome of whichever editor is up, leaving the paused scene to be looked
+            // at (or screenshotted): on the world map that is the play view, in the room editor the
+            // panels simply go away and come back.
+            if (Input.GetKeyDown(KeyCode.F6))
             {
-                runtimeMapEditor.ToggleEditor();
+                if (MapEditor.WorldMap.WorldMapScreen.IsOpen &&
+                    MapEditor.WorldMap.WorldMapEditor.Instance != null)
+                    MapEditor.WorldMap.WorldMapEditor.Instance.ToggleEditMode();
+                else if (RoomEditor != null && RoomEditor.IsEditing)
+                    RoomEditor.ToggleChromeHidden();
+            }
+
+            // All three take the pause and the screen; whichever is up wins.
+            if (Input.GetKeyDown(KeyCode.F4) && RoomEditor != null &&
+                (cultTweakerPanel == null || !cultTweakerPanel.IsOpen) &&
+                !MapEditor.WorldMap.WorldMapScreen.IsOpen)
+            {
+                RoomEditor.ToggleEditor();
             }
         }
         private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
@@ -238,6 +289,14 @@ namespace CustomSpineLoader
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            // The game repacks skins as it dresses things; every scene change is a safe moment
+            // to drop the copies that pipeline leaves behind.
+            SpineMemory.TrimRepackCaches("scene change");
+
+            // A hub is authored and played in the base's own town room, so the hub session picks
+            // its scene up here - and ends on any other.
+            MapEditor.HubSession.OnSceneLoaded(scene);
+
             if (scene.name == "Dungeon1")
             {
                 TryCreateRuntimeEditor(scene);

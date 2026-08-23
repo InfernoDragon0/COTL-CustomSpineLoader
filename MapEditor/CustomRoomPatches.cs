@@ -27,12 +27,8 @@ public static class CustomRoomPatches
         return false;
     }
 
-    // Re-activating an already-built room runs RegenerateDecorationsWithPool -> SpawnDecorations,
-    // which iterates room.Pieces asking each island for its collider. The blueprint loader adds
-    // its respawned islands to that list (pathfinding needs them known) but a later room swap
-    // destroys them - and vanilla never expects destroyed entries, so its decoration coroutine
-    // died on the first one. Everything it had not scattered yet - the perlin noise trees over
-    // the room's shapes - simply never spawned on a revisit.
+    // A later room swap can destroy islands the loader registered in room.Pieces; vanilla's
+    // decoration coroutine dies on the first destroyed entry, so prune before it runs.
     [HarmonyPatch(typeof(GenerateRoom), "OnEnable")]
     private static class GenerateRoom_OnEnable_Patch
     {
@@ -60,8 +56,7 @@ public static class CustomRoomPatches
         }
     }
 
-    // Also called on every re-entry (and once by the loader, deliberately). Vanilla never
-    // removes old copies, so without this a custom room gains one backdrop per visit.
+    // Vanilla never removes old backdrops; without this a custom room gains one per visit.
     [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.CreateBackgroundSpriteShape))]
     private static class GenerateRoom_CreateBackgroundSpriteShape_Patch
     {

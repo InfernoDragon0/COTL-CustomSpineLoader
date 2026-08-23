@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
@@ -84,6 +85,22 @@ public static class MapEditorGizmos
 
     // A box with no target of its own, for callers that know their own bounds - the trigger tool
     // marks an action's target this way, and a trigger volume has no renderer to measure.
+    // Gizmos are world objects, not canvas chrome, so hiding the editor's panels has to reach them
+    // too or a screenshot keeps every outline and volume box in it.
+    private static readonly List<GameObject> Drawn = [];
+    private static bool _hidden;
+
+    public static void SetHidden(bool hidden)
+    {
+        _hidden = hidden;
+
+        for (var i = Drawn.Count - 1; i >= 0; i--)
+        {
+            if (Drawn[i] == null) Drawn.RemoveAt(i);
+            else Drawn[i].SetActive(!hidden);
+        }
+    }
+
     public static GameObject CreateBox(string name, Color colour)
     {
         var go = new GameObject(name);
@@ -97,6 +114,9 @@ public static class MapEditorGizmos
         line.sharedMaterial = LineMaterial();
         line.startColor = line.endColor = colour;
         line.sortingOrder = 32000;
+
+        Drawn.Add(go);
+        if (_hidden) go.SetActive(false);
         return go;
     }
 

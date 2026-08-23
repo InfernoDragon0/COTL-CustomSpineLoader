@@ -5,9 +5,8 @@ using Newtonsoft.Json;
 
 namespace CustomSpineLoader.MapEditor;
 
-// One authored adventure map - the node graph the game shows between rooms, which vanilla builds
-// with Map.MapGenerator. Stored as a grid because that is all the game's renderer reads: it lays
-// every node out at point * 300 and jitters it, so an authored pixel position would be discarded.
+// One authored adventure map, stored as a grid: the renderer lays nodes out at point * 300 plus
+// jitter, so anything finer than a cell would be discarded.
 public class CTDungeonMap
 {
     public string MapName = "untitledmap";
@@ -16,15 +15,12 @@ public class CTDungeonMap
     public int Layers = 5;
     public int Columns = 5;
 
-    // The Unity scene the dungeon runs in. Not in the tool: the editor only knows Dungeon1 is
-    // real, and offering scene names that may not exist is worse than editing the json.
+    // The Unity scene the dungeon runs in; json-only, no control in the tool.
     public string SceneName = "Dungeon1";
 
     public List<CTDungeonMapNode> Nodes = [];
 
-    // The floor the player arrives in. Validation keeps layer 0 to a single node, so this is
-    // unambiguous - and it matches the game, whose GetFirstNode() takes the first of that layer
-    // whatever else is on it.
+    // The floor the player arrives in; validation keeps layer 0 to a single node.
     public CTDungeonMapNode StartNode()
     {
         foreach (var node in Nodes)
@@ -47,16 +43,13 @@ public class CTDungeonMapNode
     public int X;
     public int Y;
 
-    // Map.NodeType by name: that enum has holes and is versioned with the game, so a name
-    // survives a build that renumbers it where a stored int would silently become something else.
+    // Map.NodeType by name: a stored int would silently shift when the game renumbers the enum.
     public string NodeType = "MinorEnemy";
 
-    // A CTLevelBlueprint by name, played when this node is entered. Empty means the node keeps
-    // whatever the game would have generated for its type.
+    // A CTLevelBlueprint by name, played on entry. Empty = the node's vanilla generation.
     public string Level = "";
 
-    // Nodes one layer up that this one leads to. Incoming is rebuilt from these on load, never
-    // stored - two directions of the same fact drift apart.
+    // Nodes one layer up that this one leads to; incoming is rebuilt from these, never stored.
     public List<CTDungeonMapLink> Outgoing = [];
 
     public bool LinksTo(int x, int y)

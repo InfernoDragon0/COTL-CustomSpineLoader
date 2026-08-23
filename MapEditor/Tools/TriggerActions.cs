@@ -17,10 +17,9 @@ public enum TriggerActionType
     // Target is a saved lighting profile's name, or empty for "back to the biome's own".
     ApplyLighting,
 
-    // Target is an FMOD music event path. Plays it and keeps it looping.
+    // Target is an FMOD music event path.
     ChangeMusic,
 
-    // Duration seconds of nothing at all. A beat between two other actions.
     Wait,
 
     // Position is the offset from whatever the camera follows, captured in the editor.
@@ -38,18 +37,22 @@ public enum TriggerActionType
     // Target names one of TriggerCameraActions.Effects; Duration is how long it runs.
     CameraEffect,
 
-    // Target names a video in CustomCutscenes, or one of the game's own. Loop doubles as
-    // "skippable" here: a cutscene has nothing to loop.
+    // Loop doubles as "skippable": a cutscene has nothing to loop.
     PlayCutscene,
 
     // Target is the text itself, Duration how long it stays up.
     ShowCaption,
     ShowFullscreenText,
-    ShowTitleText
+    ShowTitleText,
+
+    // Target is a saved world map's name; the sequence waits until the map screen closes.
+    OpenWorldMap,
+
+    // No target: sends the players home, the way the dungeon portal does. A hub's way out.
+    ReturnToBase
 }
 
-// One step of a trigger's sequence. The runtime twin of MapTriggerActionData - the tool edits
-// these, the blueprint stores the other.
+// One sequence step; the runtime twin of MapTriggerActionData.
 public class TriggerAction
 {
     public TriggerActionType Type;
@@ -64,21 +67,15 @@ public class TriggerAction
     public bool Loop;
     public float Duration;
 
-    // A second number, for actions whose Duration already means something else. Camera zoom
-    // is the only one so far.
+    // Second number for actions whose Duration already means something else (camera zoom).
     public float Amount;
 
-    // Screen text is two lines of different sizes: Target is the title, this is the line under it.
+    // For screen text: Target is the title, this is the line under it.
     public string Subtext = "";
 
-    // A conversation hands input back to the player (the wheel needs a button press), so the
-    // control lock is lifted around it. Everything else runs on rails.
     public bool NeedsPlayerInput => Type == TriggerActionType.StartConversation;
 
-    // How long an Apply-lighting action cross-fades for, reusing the same Duration field the
-    // animation action stores its loop length in. A negative Duration is the picker's explicit
-    // "Instant"; 0 means the action was authored before the picker existed, and gets the default
-    // rather than the hard cut it used to have.
+    // Lighting fade reuses Duration: negative = explicit instant, 0 = pre-picker, gets default.
     public const float DefaultLightingFade = 1.5f;
 
     public float LightingFade => Duration < 0f ? 0f : Duration > 0f ? Duration : DefaultLightingFade;
@@ -110,12 +107,13 @@ public class TriggerAction
         TriggerActionType.ShowCaption => $"Caption: {Quote(Target)}{SubtextNote()}",
         TriggerActionType.ShowFullscreenText => $"Fullscreen: {Quote(Target)}{SubtextNote()}",
         TriggerActionType.ShowTitleText => $"Title: {Quote(Target)}{SubtextNote()}",
+        TriggerActionType.OpenWorldMap => $"World map: {Target}",
+        TriggerActionType.ReturnToBase => "Return to base",
         _ => Type.ToString()
     };
 
     private string SubtextNote() => string.IsNullOrEmpty(Subtext) ? "" : " + subtext";
 
-    // Long captions would push every other row's wording off the panel.
     private static string Quote(string text)
     {
         if (string.IsNullOrEmpty(text)) return "\"\"";
@@ -138,8 +136,7 @@ public static class TriggerActions
 
         var locked = false;
 
-        // Copied, because an action can outlive the trigger (a conversation runs for as long as
-        // the player reads it) and the list must not change underneath the loop.
+        // Copied: an action can outlive the trigger; the list must not change under the loop.
         var actions = new List<TriggerAction>(trigger.Actions);
         var lockControl = trigger.LockPlayerControl;
 
@@ -201,8 +198,6 @@ public static class TriggerActions
                 break;
 
             case TriggerActionType.ApplyLighting:
-                // The fade runs on its own; the sequence moves straight on to the next action so
-                // the new light comes up under whatever happens next.
                 ApplyLighting(action.Target, action.LightingFade);
                 break;
 
@@ -211,8 +206,7 @@ public static class TriggerActions
                 break;
 
             case TriggerActionType.Wait:
-                // Unscaled: a sequence that locks the players is often running while the game is
-                // paused around a conversation, and a scaled wait would never end there.
+                // Unscaled: the game may be paused around a conversation; a scaled wait never ends.
                 yield return new WaitForSecondsRealtime(Mathf.Max(0f, action.Duration));
                 break;
 
@@ -274,14 +268,39 @@ public static class TriggerActions
                 TriggerScreenText.Show(TriggerScreenText.Mode.Title, action.Target,
                     action.Subtext, action.Duration);
                 break;
+
+            case TriggerActionType.OpenWorldMap:
+            {
+                var screen = WorldMap.WorldMapScreen.Instance;
+                if (screen == null || !CTWorldMapSerialization.Exists(action.Target))
+                {
+                    Plugin.Log.LogWarning($"MapEditor: trigger action targets world map " +
+                                          $"'{action.Target}', which is not saved here.");
+                    break;
+                }
+
+                screen.Open(action.Target);
+
+                // Waits: later actions should run once the player is back.
+                while (WorldMap.WorldMapScreen.IsOpen)
+                    yield return new WaitForSecondsRealtime(0.1f);
+                break;
+            }
+
+            case TriggerActionType.ReturnToBase:
+                // The run state has to go first: the scene load lands in the base, where a level
+                // still believing it is playing would apply blueprints to the cult's own rooms.
+                LevelPlayback.Stop();
+                DungeonMapPlayback.Clear();
+                GameManager.ToShip();
+
+                // Nothing after this runs in the room being left; the scene is already going.
+                yield break;
         }
     }
 
     // ---- music ------------------------------------------------------------------------------
 
-    // Starts the track and keeps it going. The sequence does not wait for it: music runs under
-    // whatever happens next, and an action that blocked until a track ended would freeze the
-    // players for the length of the song.
     private static void ChangeMusic(string eventPath)
     {
         if (string.IsNullOrEmpty(eventPath)) return;
@@ -296,9 +315,7 @@ public static class TriggerActions
             return;
         }
 
-        // FMOD events only loop if they were authored to, so looping is a watchdog that restarts
-        // the event once it reports stopped - the same one blueprint music uses. Starting a new
-        // one replaces any previous track's watchdog, so two music actions cannot fight.
+        // FMOD events only loop if authored to; SetMusicLoop is the restart watchdog.
         var host = RuntimeMapEditor.Active;
         if (host != null) host.SetMusicLoop(eventPath);
         else Plugin.Log.LogWarning("MapEditor: no editor host to keep the trigger's music looping; " +
@@ -309,7 +326,7 @@ public static class TriggerActions
 
     private static void ApplyLighting(string profileName, float fadeSeconds)
     {
-        // An empty target is the "vanilla lighting" choice: back to the biome's own values.
+        // Empty target = vanilla lighting: back to the biome's own values.
         if (string.IsNullOrEmpty(profileName))
         {
             LightingTool.ClearOverride(fadeSeconds);
@@ -354,8 +371,7 @@ public static class TriggerActions
 
             if (enabled)
             {
-                // Only states this system puts them in are cleared - a player who died or
-                // started a conversation of their own mid-sequence keeps that state.
+                // Only clear states this system set; a player who died mid-sequence keeps theirs.
                 if (player.state.CURRENT_STATE is StateMachine.State.InActive
                     or StateMachine.State.CustomAnimation)
                     player.state.CURRENT_STATE = StateMachine.State.Idle;
@@ -383,8 +399,7 @@ public static class TriggerActions
             var target = centre;
             if (players.Count > 1)
             {
-                // Starting at the top of the circle and going round: with two players that is
-                // above and below the point, which reads as "either side" in this camera.
+                // Ring starts at the top: two players land above/below, reading as either side.
                 var angle = Mathf.PI * 0.5f + i * (Mathf.PI * 2f / players.Count);
                 target += new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * Mathf.Max(0.1f, spread);
             }
@@ -397,8 +412,7 @@ public static class TriggerActions
                 AbortGoToCallback: null, groupAction: false);
         }
 
-        // The game's own timeout plus a margin; a player destroyed mid-walk (a room reload)
-        // simply stops being counted.
+        // Game's own timeout plus a margin; a player destroyed mid-walk stops being counted.
         var deadline = Time.time + 10f;
         while (Time.time < deadline)
         {

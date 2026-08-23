@@ -107,6 +107,10 @@ public class CustomDungeon
 
     public virtual void EnterDungeon()
     {
+        // Whatever run the world map thought it was watching, this entry is a new one; only
+        // the map itself re-arms tracking (right after this call returns).
+        MapEditor.WorldMapProgress.AbortTracking();
+
         CustomDungeonManager.EnteringCustomDungeon = this.Location;
         Plugin.Log.LogInfo($"Entering Custom Dungeon: {this.Location} with scene {this.SceneName} and {this.NumRooms} rooms.");
         AudioManager.Instance.StopCurrentMusic();
@@ -284,6 +288,10 @@ public class CustomDungeon
     
     public virtual void ExitDoor()
     {
+        // The one success-only choke point: every run type funnels its victory through here,
+        // and death never reaches it - so this is where a world map node earns its completion.
+        MapEditor.WorldMapProgress.NotifyRunSucceeded();
+
         //Default behavior for exiting the final room is to exit to base.
         //you can override this behavior to exit into a different scene for a cutscene, etc.
         MonoSingleton<UIManager>.Instance.ShowDeathScreenOverlay(UIDeathScreenOverlayController.Results.Completed);

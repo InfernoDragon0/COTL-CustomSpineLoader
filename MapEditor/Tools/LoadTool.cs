@@ -27,22 +27,20 @@ public class LoadTool : IMapEditorTool
 
         ui.CreateButton(panel, "Refresh List", RefreshList);
 
-        // Same browser as the structure tool, with much larger cells: the icon here is the
-        // save-time screenshot of the whole room, which is unreadable at prop-icon size.
+        // Larger cells than the structure browser: the icon is a full-room screenshot.
         _grid = ui.CreateIconGrid(panel, "MapGrid", columns: 2, cellSize: 168f);
     }
 
     private MapEditorGrid _grid;
 
-    // Rebuilt on every entry so newly saved blueprints show up without a refresh press.
+    // Rebuilt on every entry so new saves show up without a refresh press.
     public void OnEnter()
     {
         RefreshList();
         _editor.SetStatus("Pick a blueprint - this discards the current room.");
     }
 
-    // Full-screen snapshots are megabytes of texture each; keep them alive only while the
-    // panel is on screen.
+    // Snapshots are megabytes each; alive only while the panel shows.
     public void OnExit() => ClearEntries();
 
     public void OnUpdate() { }
@@ -90,16 +88,14 @@ public class LoadTool : IMapEditorTool
                         _editor.SetStatus("Load already in progress.", StatusSeverity.Warning);
                         return;
                     }
-                    // A manual load is not part of any running level; a stale run advancing on
-                    // the next door would teleport the player into an unrelated room chain.
+                    // A stale level run advancing on the next door would teleport the player.
                     LevelPlayback.Stop();
                     _editor.Loader.Load(captured);
                 }
             });
         }
 
-        // Full-screen screenshots are megabytes each, so they are read as the cells appear
-        // rather than all up front, and dropped again when the panel closes.
+        // Screenshots load lazily as cells appear.
         _grid.Populate(_editor, entries, name =>
         {
             var preview = LoadPreview(name);

@@ -14,6 +14,10 @@ public class CTLevelBlueprint
     // 0 = roll a fresh seed per run; anything else makes room pool picks deterministic.
     public int Seed;
 
+    // A hub is a level of one safe room: nothing spawns, the room never locks, and its exit takes
+    // the player home rather than ending a run. See README "Hubs".
+    public bool IsHub;
+
     public List<CTLevelRoom> Rooms = [];
 }
 
@@ -57,6 +61,22 @@ public static class CTLevelSerialization
         catch (Exception e)
         {
             Plugin.Log.LogError("MapEditor: failed to save level blueprint: " + e);
+            return null;
+        }
+    }
+
+    public static CTLevelBlueprint LoadByName(string levelName)
+    {
+        var path = PathFor(levelName);
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            return JsonConvert.DeserializeObject<CTLevelBlueprint>(File.ReadAllText(path));
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogError($"MapEditor: could not parse level blueprint '{path}': {e.Message}");
             return null;
         }
     }

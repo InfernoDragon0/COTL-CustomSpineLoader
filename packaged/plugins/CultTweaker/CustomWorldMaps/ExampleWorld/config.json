@@ -1,0 +1,116 @@
+{
+  "MapName": "ExampleWorld",
+  "DisplayName": "Example World",
+  "MusicEvent": "",
+  "MusicLoop": true,
+  "BackgroundColor": { "R": 0.05, "G": 0.07, "B": 0.12, "A": 1.0 },
+  "ParallaxStrength": 1.0,
+
+  "Layers": [
+    {
+      "Id": "scamp",
+      "Kind": "Spine",
+      "Asset": "Scamp",
+      "Position": { "X": -640, "Y": -320, "Z": 0 },
+      "Scale": { "X": 0.35, "Y": 0.35, "Z": 1 },
+      "RotationZ": 0,
+      "SortOrder": 1,
+      "ParallaxDistance": 0.1,
+      "Tint": { "R": 1, "G": 1, "B": 1, "A": 1 },
+      "Animation": "_idles/pray",
+      "Skin": "SF_Occultist_Scamp",
+      "Loop": true,
+      "TimeScale": 1.0
+    },
+    {
+      "Id": "emblem",
+      "Kind": "Sprite",
+      "Asset": "icon.png",
+      "Position": { "X": 640, "Y": 320, "Z": 0 },
+      "Scale": { "X": 1, "Y": 1, "Z": 1 },
+      "RotationZ": 0,
+      "SortOrder": 2,
+      "ParallaxDistance": 0.5,
+      "Tint": { "R": 1, "G": 1, "B": 1, "A": 0.6 }
+    }
+  ],
+
+  "Nodes": [
+    {
+      "Id": "start",
+      "DisplayName": "Home",
+      "Position": { "X": -640, "Y": -200, "Z": 0 },
+      "Scale": 1.1,
+      "Icon": "",
+      "NodeType": "Base",
+      "Children": [ "woods" ],
+      "InitialState": "Selectable",
+      "TargetKind": "None",
+      "Target": ""
+    },
+    {
+      "Id": "woods",
+      "DisplayName": "The Woods",
+      "Position": { "X": -300, "Y": -60, "Z": 0 },
+      "Scale": 1.0,
+      "Icon": "",
+      "NodeType": "Dungeon",
+      "Children": [ "keycache", "gatelock" ],
+      "InitialState": "Hidden",
+      "TargetKind": "Level",
+      "Target": "untitledlevel1"
+    },
+    {
+      "Id": "keycache",
+      "DisplayName": "Hidden Key",
+      "Position": { "X": -40, "Y": 160, "Z": 0 },
+      "Scale": 0.8,
+      "Icon": "",
+      "NodeType": "Key",
+      "Children": [],
+      "InitialState": "Hidden",
+      "KeysGranted": 1,
+      "TargetKind": "None",
+      "Target": ""
+    },
+    {
+      "Id": "gatelock",
+      "DisplayName": "Old Gate",
+      "Position": { "X": 20, "Y": -180, "Z": 0 },
+      "Scale": 0.9,
+      "Icon": "",
+      "NodeType": "Lock",
+      "Children": [ "deep" ],
+      "InitialState": "Hidden",
+      "KeysCost": 1,
+      "TargetKind": "None",
+      "Target": ""
+    },
+    {
+      "Id": "deep",
+      "DisplayName": "The Deep Dungeon",
+      "Position": { "X": 340, "Y": -80, "Z": 0 },
+      "Scale": 1.0,
+      "Icon": "",
+      "NodeType": "Dungeon",
+      "Children": [ "summit" ],
+      "InitialState": "Hidden",
+      "TargetKind": "DungeonMap",
+      "Target": "untitleddungeon1"
+    },
+    {
+      "Id": "summit",
+      "DisplayName": "The Summit",
+      "Position": { "X": 620, "Y": 60, "Z": 0 },
+      "Scale": 1.2,
+      "Icon": "icon.png",
+      "NodeType": "Boss",
+      "Children": [],
+      "InitialState": "Hidden",
+      "RequiredCompletedCount": 2,
+      "RequiredNodes": [ "woods", "deep" ],
+      "TargetKind": "None",
+      "Target": ""
+    }
+  ]
+}

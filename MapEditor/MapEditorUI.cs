@@ -11,7 +11,7 @@ namespace CustomSpineLoader.MapEditor;
 
 public class MapEditorUI
 {
-    // Rows across the whole editor. One number, so panels stay predictable in height.
+    // Shared row height across the whole editor.
     public const float RowHeight = 34f;
 
     // ---- palette ----------------------------------------------------------------------------
@@ -35,8 +35,7 @@ public class MapEditorUI
     public RectTransform CanvasRoot => _canvasRoot;
     public RuntimeMapEditor Editor => _editor;
 
-    // Needed before any dropdown or grid is built: floating overlays parent to the canvas root
-    // and register themselves as click blockers, and async icon fills need a coroutine host.
+    // Must run before any dropdown or grid is built.
     public void Attach(RuntimeMapEditor editor, RectTransform canvasRoot)
     {
         _editor = editor;
@@ -48,8 +47,7 @@ public class MapEditorUI
 
     private static Sprite _rounded;
 
-    // A 9-sliced rounded rectangle, generated rather than shipped: the mod has no art pipeline,
-    // and every plate in the editor wants the same shape at a different size.
+    // 9-sliced rounded rectangle, generated at runtime - the mod ships no art.
     public static Sprite RoundedPlate
     {
         get
@@ -71,8 +69,7 @@ public class MapEditorUI
             {
                 for (var x = 0; x < size; x++)
                 {
-                    // Distance past the corner arc, so the edge gets one pixel of softening
-                    // instead of a staircase.
+                    // Distance past the corner arc; one pixel of edge softening.
                     var dx = Mathf.Max(radius - (x + 0.5f), (x + 0.5f) - (size - radius), 0f);
                     var dy = Mathf.Max(radius - (y + 0.5f), (y + 0.5f) - (size - radius), 0f);
                     var distance = Mathf.Sqrt(dx * dx + dy * dy);
@@ -180,8 +177,7 @@ public class MapEditorUI
     private static TMP_FontAsset _headingFont;
     private static bool _headingRequested;
 
-    // Headers built before the async heading font arrives; re-fonted on arrival rather than
-    // left on the fallback for the rest of the session.
+    // Headers built before the async heading font arrives; re-fonted on arrival.
     private static readonly List<TMP_Text> _pendingHeaders = [];
 
     public static void WarmFonts()
@@ -195,8 +191,7 @@ public class MapEditorUI
             {
                 if (font == null)
                 {
-                    // No font is ever coming; the headers stay on the fallback. Without this the
-                    // static list kept accumulating destroyed TMP_Texts, one per header, forever.
+                    // No font coming; clear or the static list accumulates destroyed TMP_Texts.
                     _pendingHeaders.Clear();
                     return;
                 }
@@ -245,12 +240,10 @@ public class MapEditorUI
         }
     }
 
-    // The game's menus never go below this, and the editor sitting at 14-15 was the main reason
-    // its panels read as a debug overlay rather than part of the game.
+    // The game's menus never go below this.
     private const int MinFontSize = 17;
 
-    // The game's accessibility Text Scale slider drives this; it captures the font size in
-    // OnEnable, so it can only be added once the size is final.
+    // MMTextScaler captures the font size in OnEnable; add only once the size is final.
     private static void AddTextScaler(GameObject go)
     {
         try
@@ -263,8 +256,7 @@ public class MapEditorUI
         }
     }
 
-    // Pins a row's height for the vertical layout group it lands in; width is driven by the
-    // column so labels fill it instead of collapsing to their anchored size.
+    // Pins row height for the layout group; width is driven by the column.
     private static void ApplyRowLayout(GameObject go, float height)
     {
         var element = go.GetComponent<LayoutElement>();
@@ -302,8 +294,7 @@ public class MapEditorUI
         return go;
     }
 
-    // Section heading in the game's heading font. Used for the '— Groups —' style dividers the
-    // tools used to draw as ordinary labels.
+    // Section heading in the game's heading font.
     public GameObject CreateHeader(Transform parent, string text, int size = 24)
     {
         var go = CreateLabel(parent, text, size, TextAlignmentOptions.Center);
@@ -339,7 +330,12 @@ public class MapEditorUI
     {
         void Handle()
         {
+            // Both editors poll the mouse themselves, and a click on a widget must not also read as
+            // a click on the map underneath it.
             RuntimeMapEditor.Active?.BlockWorldClicks();
+            if (WorldMap.WorldMapEditor.Instance != null && WorldMap.WorldMapEditor.Instance.IsEditing)
+                WorldMap.WorldMapEditor.Instance.BlockWorldClicks();
+
             onClick?.Invoke();
         }
 
@@ -361,8 +357,7 @@ public class MapEditorUI
         }
     }
 
-    // Hover does double duty: it brightens the plate, and it is how the status bar learns what
-    // the cursor is over (tool names on the dock, item names in the grids).
+    // Hover brightens the plate and feeds the status bar.
     internal static MapEditorHover AddHover(GameObject go, Image plate, Color idle, Color hover, string hoverText)
     {
         var component = go.AddComponent<MapEditorHover>();
@@ -633,8 +628,7 @@ public class MapEditorUI
         return scrollbar;
     }
 
-    // A texture row for the option panels (blueprint snapshot previews). The outer row fixes
-    // the height for the layout group; the inner RawImage letterboxes to the texture's aspect.
+    // Fixed-height texture row; the inner RawImage letterboxes to the texture's aspect.
     public GameObject CreateImage(Transform parent, Texture2D texture, float height = 100f)
     {
         var row = new GameObject("Preview");
@@ -676,8 +670,6 @@ public class MapEditorUI
 
         var field = AddPlate(row, FieldIdle);
 
-        // A rounded plate on its own read as one more button in the column. The gold frame and
-        // the red arrow block are what make this look like the control that opens the catalogue.
         AddOutline(rowRt, new Color(0.75f, 0.65f, 0.45f, 0.9f));
 
         var label = CreateLabel(row.transform, caption, 19);
@@ -719,8 +711,7 @@ public class MapEditorUI
         return dropdown;
     }
 
-    // Only one dropdown list may be open, and it must not survive a tool switch or the editor
-    // closing - a floating overlay left behind would keep swallowing world clicks.
+    // One dropdown open at a time; a stranded overlay would keep swallowing world clicks.
     private MapEditorDropdown _openDropdown;
 
     internal void NotifyDropdownOpened(MapEditorDropdown dropdown)
@@ -738,8 +729,6 @@ public class MapEditorUI
 
     // ---- icon grid --------------------------------------------------------------------------
 
-    // The vanilla build menu's grid of square icons, rebuilt for the editor: browsing 200 props
-    // as a text list is what made the old tools unusable.
     public MapEditorGrid CreateIconGrid(Transform parent, string name, int columns = 4, float cellSize = 88f)
     {
         var root = new GameObject(name);
@@ -777,8 +766,7 @@ public class MapEditorUI
         return new MapEditorGrid(this, root, cells.transform, captionText);
     }
 
-    // One square icon cell: a rounded plate that brightens under the cursor, a red selection
-    // border behind it, the icon, and a letter tile that shows through until one arrives.
+    // One square icon cell; the letter tile shows until an icon arrives.
     public GameObject CreateIconButton(Transform parent, Sprite icon, string label, Action onClick,
         out Image selectionBorder, float size = 60f, string hoverText = null)
     {
@@ -793,8 +781,7 @@ public class MapEditorUI
         element.minWidth = size;
         element.minHeight = size;
 
-        // Drawn first and slightly larger than the plate, so only its rim shows: a border, not
-        // a highlight that swallows the icon.
+        // Drawn first and slightly larger than the plate, so only its rim shows.
         var border = new GameObject("Border");
         border.transform.SetParent(cell.transform, false);
         var borderRt = border.AddComponent<RectTransform>();
@@ -847,8 +834,7 @@ public class MapEditorUI
         return cell;
     }
 
-    // One control prompt, shaped like the game's own: a pale key cap with dark text, the action
-    // spelled out beside it, on a dark brush-stroke plate.
+    // One control prompt in the game's key-cap style.
     public GameObject CreateKeyHint(Transform parent, string key, string action)
     {
         var row = new GameObject("Hint_" + action);
@@ -922,8 +908,8 @@ public class MapEditorUI
     }
 }
 
-// Row-level toggle state. Separate from the row's button so tools can push a value in without
-// re-entering their own change handler.
+// Toggle state kept separate from the button, so tools can push a value without re-entering
+// their own change handler.
 public class MapEditorToggle : MonoBehaviour
 {
     public Action<bool> OnValueChanged;
@@ -948,8 +934,7 @@ public class MapEditorToggle : MonoBehaviour
     }
 }
 
-// Brightens a plate under the cursor, and tells the status bar what the cursor is over. The
-// editor has no tooltips, so the status bar is where a wordless icon gets its name.
+// Brightens a plate under the cursor and feeds the status bar (the editor has no tooltips).
 public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     public Image Plate;
@@ -984,6 +969,15 @@ public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitH
 
         var text = HoverTextProvider != null ? HoverTextProvider() : HoverText;
         if (string.IsNullOrEmpty(text)) return;
+
+        // Whichever editor owns the screen right now; they are never open together.
+        var world = WorldMap.WorldMapEditor.Instance;
+        if (world != null && world.IsEditing)
+        {
+            if (hovered) world.ShowHoverStatus(text);
+            else world.ClearHoverStatus();
+            return;
+        }
 
         var editor = RuntimeMapEditor.Active;
         if (editor == null) return;

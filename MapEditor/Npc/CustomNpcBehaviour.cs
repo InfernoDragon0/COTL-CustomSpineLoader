@@ -31,8 +31,7 @@ public class CustomNpcInteraction : Interaction
 
     private void Start()
     {
-        // Without this, Label returns "" until the base-game tutorial building unlock, and the
-        // prompt silently never appears in a dungeon.
+        // Required, or Label is blanked pre-tutorial and the prompt never appears in a dungeon.
         IgnoreTutorial = true;
         ActivateDistance = 2f;
         UpdateLocalisation();

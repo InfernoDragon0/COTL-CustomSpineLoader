@@ -48,8 +48,7 @@ public class LevelTool : IMapEditorTool
         if (_saveArmed && Time.unscaledTime - _saveArmedAt > SaveArmWindow) _saveArmed = false;
     }
 
-    // The whole lower panel is dynamic: it shows either the open/create chooser or the loaded
-    // level's editing controls, and is rebuilt after every structural change.
+    // Chooser or editing controls; rebuilt after every structural change.
     private void Rebuild()
     {
         foreach (var go in _dynamic)
@@ -66,7 +65,11 @@ public class LevelTool : IMapEditorTool
     {
         _dynamic.Add(_ui.CreateButton(_panel, "New Level Blueprint", CreateNew));
 
+        // Hubs are not dungeon content: they are authored in the game's town room from the F7
+        // panel, and would only be half-editable here.
         var levels = CTLevelSerialization.LoadAll();
+        levels.RemoveAll(level => level is { IsHub: true });
+
         if (levels.Count == 0)
         {
             _dynamic.Add(_ui.CreateLabel(_panel, "No level blueprints yet.", 14, TextAlignmentOptions.Center));
@@ -74,7 +77,8 @@ public class LevelTool : IMapEditorTool
         }
 
         var labels = new List<string>(levels.Count);
-        foreach (var level in levels) labels.Add($"{level.LevelName} ({level.Rooms.Count} rooms)");
+        foreach (var level in levels)
+            labels.Add(level.IsHub ? $"{level.LevelName} (hub)" : $"{level.LevelName} ({level.Rooms.Count} rooms)");
 
         AddDropdown("Open Existing Level", labels, index =>
         {
@@ -88,10 +92,8 @@ public class LevelTool : IMapEditorTool
         });
     }
 
-    // Every list here is rebuilt from scratch after each pick, so a dropdown's Root has to join
-    // the dynamic set or the old widget is left sitting on top of the new one. Picking from a
-    // dropdown that Rebuild then destroys is safe: it closes its own overlay and reads nothing
-    // more once the handler returns.
+    // Roots join the dynamic set or old widgets stack on new ones. Picking from a dropdown that
+    // Rebuild destroys is safe: it closes its overlay and reads nothing after the handler.
     private void AddDropdown(string caption, IList<string> options, Action<int> onPicked,
         int selected = -1)
     {
@@ -102,7 +104,8 @@ public class LevelTool : IMapEditorTool
 
     private void BuildLevelEditor()
     {
-        _dynamic.Add(_ui.CreateLabel(_panel, "Level: " + _level.LevelName, 16, TextAlignmentOptions.Center));
+        _dynamic.Add(_ui.CreateLabel(_panel, "Level: " + _level.LevelName, 16,
+            TextAlignmentOptions.Center));
 
         _dynamic.Add(_ui.CreateButton(_panel, "Rename Level", () =>
             _editor.PromptText("level name", _level.LevelName, value =>
@@ -138,8 +141,7 @@ public class LevelTool : IMapEditorTool
             roomLabels.Add($"{i + 1}: {room.Role} (pool: {pool})");
         }
 
-        // Pre-selected, so after the rebuild the closed dropdown still names the room being
-        // edited - that is what the old "<" marker was for.
+        // Pre-selected so the closed dropdown still names the room being edited after a rebuild.
         AddDropdown("Select a room", roomLabels, index =>
         {
             _selectedRoom = index;
@@ -150,8 +152,7 @@ public class LevelTool : IMapEditorTool
 
         var selected = _level.Rooms[_selectedRoom];
 
-        // Labelled rather than bare values: a closed dropdown reading just "Combat" says nothing
-        // about what it sets.
+        // Labelled: a closed dropdown reading just "Combat" says nothing about what it sets.
         var modifierLabels = new List<string>(Modifiers.Length);
         foreach (var modifier in Modifiers) modifierLabels.Add("Modifier: " + modifier);
 
@@ -174,16 +175,13 @@ public class LevelTool : IMapEditorTool
 
     private const string VanillaLabel = "Vanilla generated room";
 
-    // The pool is a set the author builds up, so it takes the trigger tool's shape rather than a
-    // checkbox per saved blueprint: one dropdown offering what is not in the pool yet, and a row
-    // per member that removes it. The old list grew by a button for every map ever saved.
+    // One dropdown offering what is not in the pool yet, and an X row per member.
     private void BuildPoolControls(CTLevelRoom room)
     {
         var candidateKeys = new List<string>();
         var candidateLabels = new List<string>();
 
-        // A pool can also offer the room the game would have generated, so a level mixes
-        // authored rooms with vanilla ones.
+        // <vanilla> = the room the game would have generated.
         if (!room.NodePool.Contains(CTLevelRoom.VanillaNode))
         {
             candidateKeys.Add(CTLevelRoom.VanillaNode);
@@ -259,14 +257,14 @@ public class LevelTool : IMapEditorTool
         _editor.SetStatus($"Created level '{_level.LevelName}'. Add rooms and assign node pools.");
     }
 
-    private static string FreeName()
+    private static string FreeName(string stem = "untitledlevel")
     {
         for (var i = 1; i < 1000; i++)
         {
-            var candidate = "untitledlevel" + i;
+            var candidate = stem + i;
             if (!CTLevelSerialization.Exists(candidate)) return candidate;
         }
-        return "untitledlevel";
+        return stem;
     }
 
     private void AddRoom()
@@ -292,6 +290,16 @@ public class LevelTool : IMapEditorTool
     // Older or hand-edited files could miss the invariant; repair rather than trusting it.
     private static void EnsureEndRooms(CTLevelBlueprint level)
     {
+        // A hub is one room that is both the way in and the way out; the entrance/exit pair does
+        // not apply to it.
+        if (level.IsHub)
+        {
+            if (level.Rooms.Count == 0) level.Rooms.Add(new CTLevelRoom());
+            while (level.Rooms.Count > 1) level.Rooms.RemoveAt(level.Rooms.Count - 1);
+            level.Rooms[0].Role = "Entrance";
+            return;
+        }
+
         if (level.Rooms.Count == 0)
         {
             level.Rooms.Add(new CTLevelRoom { Role = "Entrance" });

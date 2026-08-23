@@ -27,13 +27,11 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public const string PadName = "CultTweaker_DoorPad";
     private readonly Dictionary<Door, SpriteShapeController> _pads = [];
-    // Width stays inside the door's barrier collider: a wider pad let the player slip around
-    // the barrier at the sides.
+    // Width stays inside the door's barrier collider or the player slips around it.
     private const float PadLength = 9f;
     private const float PadWidth = 3f;
 
-    // Solid blockers for removed doors whose walkway floor is carved into the main island's
-    // authored shape and therefore cannot be hidden with the door.
+    // Solid blockers for removed doors whose walkway is carved into the authored island shape.
     private readonly Dictionary<Door, GameObject> _plugs = [];
 
     private readonly List<DoorGizmo> _gizmos = [];
@@ -82,8 +80,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     private readonly Dictionary<string, MapEditorToggle> _doorToggles = [];
 
-    // The doors can change behind the panel's back - a blueprint load, the loader's
-    // reconciliation, or Enable All - so the boxes are re-read rather than assumed.
+    // Doors can change behind the panel's back (loads, reconciliation, Enable All).
     private void SyncDoorToggles()
     {
         foreach (var pair in _doorToggles)
@@ -115,8 +112,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return null;
     }
 
-    // includeInactive matters: a hidden door's hierarchy is inactive, and the default overload
-    // returns null there - which made a toggled-off door impossible to toggle back on.
+    // includeInactive: a hidden door's hierarchy is inactive; the default overload returns null.
     private static IslandPiece DoorIsland(Door door) =>
         door != null ? door.GetComponentInParent<IslandPiece>(true) : null;
 
@@ -149,7 +145,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return missing;
     }
 
-    // Adds every door the room does not have yet, so the four-door rule is one click away.
     public int AddAllDoors()
     {
         var added = 0;
@@ -188,8 +183,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         SyncDoorToggles();
     }
 
-    // Reactivates a previously removed door, or spawns a fresh door island for the direction.
-    // Used by the toggle buttons and by the blueprint loader's reconciliation.
+    // Reactivates a removed door, or spawns a fresh door island. Also used by the loader.
     public Door EnsureDoor(string direction, bool deferCollision)
     {
         var existing = FindByDirection(direction);
@@ -264,8 +258,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _editor.StartCoroutine(FinalizePad(pad, deferCollision));
     }
 
-    // Pads stay short by default - a doorway apron, not a runway. Only a doorway the loader
-    // finds cut off from the floor grows, one step at a time, via ExtendPad.
+    // Pads stay short; only a doorway the loader finds cut off from the floor grows, stepwise.
     private readonly Dictionary<Door, float> _padLengths = [];
     private const float PadMaxLength = 60f;
     private const float PadGrowStep = 8f;
@@ -273,8 +266,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     private float PadLengthFor(Door door) =>
         _padLengths.TryGetValue(door, out var length) ? length : PadLength;
 
-    // Grows one door's pad so it can reach terrain that does not meet the doorway. Returns
-    // false once it is already as long as it is allowed to get.
+    // Grows one pad by a step; false once at max length.
     public bool ExtendPad(Door door, bool deferCollision)
     {
         if (door == null) return false;
@@ -287,8 +279,8 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return true;
     }
 
-    // A rectangle the composite can actually merge. Splines are built in world-axis directions
-    // on an unrotated transform, so the box is simply the spline's extents.
+    // A box the composite can merge; splines are world-axis on an unrotated transform, so the
+    // box is the spline's extents.
     private static void BuildPadCollider(SpriteShapeController pad, Door door, float length)
     {
         var dir = door.GetDoorDirection();
@@ -395,8 +387,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         if (plug != null) Object.DestroyImmediate(plug);
     }
 
-    // The loader's second half of reconciliation: any live door whose direction the blueprint
-    // does not list gets hidden, floor patch and all.
+    // Loader reconciliation: hide any live door the blueprint does not list.
     public void RemoveDoorsNotIn(HashSet<string> directions)
     {
         RememberDoors();
@@ -409,8 +400,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         }
     }
 
-    // Spawns the vanilla door island prefab for the direction: the same object the generator
-    // places, so it brings the door trigger, lock controller and walkable floor rectangle.
+    // Instantiates the vanilla door island prefab: trigger, lock controller and floor included.
     private Door SpawnDoor(string direction, bool deferCollision)
     {
         var room = SceneRefs.Room;
@@ -439,8 +429,8 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         var piece = island.GetComponent<IslandPiece>();
         if (piece != null && room.Pieces != null) room.Pieces.Add(piece);
-        // Vanilla hides every island's authored placeholder sprites during generation; a freshly
-        // instantiated door island would otherwise show its flat green editor fill.
+        // Vanilla hides placeholder sprites during generation; without this the island shows
+        // its flat green editor fill.
         piece?.HideSprites();
 
         var door = island.GetComponentInChildren<Door>(true);
@@ -451,8 +441,8 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             return null;
         }
 
-        // Set directly, never via Door.Init: Init dereferences the dungeon graph's neighbor
-        // entry for this direction, which does not exist for a door the graph never planned.
+        // Set directly, never via Door.Init: Init dereferences a graph neighbor entry that
+        // does not exist for a door the graph never planned.
         door.ConnectionType = GenerateRoom.ConnectionTypes.True;
 
         if (!HasGraphNeighbor(direction) && door.RoomLockController != null)
@@ -494,8 +484,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public int SealDoorsWithoutNeighbours()
     {
-        // Before the biome knows which room the player is in, "no neighbour" is meaningless and
-        // sealing on it would brick every door in the room.
+        // Before the biome knows the current room, "no neighbour" would seal every door.
         if (BiomeGenerator.Instance == null || BiomeGenerator.Instance.CurrentRoom == null) return 0;
 
         RememberDoors();
@@ -555,8 +544,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
                connection.ConnectionType != GenerateRoom.ConnectionTypes.False;
     }
 
-    // Something in the room pipeline still deactivates a repositioned door. Rather than chase
-    // every path that can do it, the tool restores any door it finds switched off.
+    // The room pipeline still deactivates repositioned doors; restore any found switched off.
     private void ReviveDisabledDoors()
     {
         for (var i = _knownDoors.Count - 1; i >= 0; i--)
@@ -589,8 +577,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         ClearGizmos();
     }
 
-    // Each door gets the same cyan box and yellow centre dot the select tool uses, so selection
-    // reads the same everywhere.
+    // Same cyan box and yellow dot the select tool uses.
     private void BuildGizmos()
     {
         ClearGizmos();
@@ -619,7 +606,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         var handle = go.AddComponent<DoorDragHandle>();
         handle.Initialize(this, _editor, door);
 
-        // Direction letter above the grip, so it is obvious which way each door leads.
+        // Direction letter above the grip.
         var label = _editor.UI.CreateLabel(rt, door.direction.ToString().Substring(0, 1), 18,
             TMPro.TextAlignmentOptions.Center);
         var labelRt = label.GetComponent<RectTransform>();
@@ -714,10 +701,8 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         _editor.SetStatus($"Moved {_dragging.direction} door.");
 
-        // The pad follows the door so the doorway stays walkable wherever it was dropped.
         RefreshPad(_dragging, deferCollision: false);
-        // ...and the door's own slide effect re-anchors, or it would drift back towards where
-        // the room generated it the next time the player walks up to it.
+        // PlayerDistanceMovement caches StartPos in Start(); re-cache or the door drifts back.
         RefreshMovementAnchors(_dragging);
 
         _dragging = null;
@@ -740,8 +725,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         map.Doors.Clear();
         foreach (var door in _knownDoors)
         {
-            // Only doors that are actually present: absence from the blueprint is what tells the
-            // loader to hide that direction's door (and its ground shape) on load.
+            // Absence from the blueprint tells the loader to hide that direction on load.
             if (!IsDoorPresent(door)) continue;
             map.Doors.Add(new MapDoorData
             {

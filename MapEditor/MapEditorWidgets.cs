@@ -81,8 +81,7 @@ public class MapEditorDropdown
         floatRt.offsetMin = Vector2.zero;
         floatRt.offsetMax = Vector2.zero;
 
-        // Catcher: dims the rest of the editor, absorbs the click that closes the list, and is
-        // registered as a blocker so that click never reaches a placement tool.
+        // Catcher: dims the editor, absorbs the closing click, and blocks it from reaching a tool.
         var catcher = _floating.AddComponent<Image>();
         catcher.color = new Color(0f, 0f, 0f, 0.25f);
         _ui.Editor?.RegisterUiBlocker(floatRt);
@@ -121,8 +120,7 @@ public class MapEditorDropdown
         }
     }
 
-    // Opens downward from the row, and upward instead when there is not enough room below - the
-    // enemy and prop dropdowns sit low in a tall options panel.
+    // Opens downward from the row, upward when there is not enough room below.
     private void PositionList(RectTransform canvas, RectTransform panel, float height)
     {
         var corners = new Vector3[4];
@@ -217,8 +215,7 @@ public class MapEditorGrid
         _selectedId = null;
         if (_caption != null) _caption.text = "";
 
-        // Going from a long group to a short one shrinks this grid, and the panel around it has
-        // to be told - nested size fitters will not notice on their own.
+        // Nested size fitters will not notice the shrink on their own; tell the panel.
         _ui.Editor?.RequestOptionsResize();
     }
 
@@ -271,8 +268,6 @@ public class MapEditorGrid
     {
         if (string.IsNullOrEmpty(id) || _byId.ContainsKey(id)) return;
 
-        // The hover text is the item's name in the status bar; the tile itself is far too small
-        // to carry it, and the caption under the grid echoes it locally.
         var go = _ui.CreateIconButton(_cells, icon, displayName, () =>
         {
             SetSelected(id);

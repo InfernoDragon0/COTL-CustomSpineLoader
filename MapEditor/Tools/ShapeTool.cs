@@ -48,14 +48,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         ui.CreateButton(panel, "New Shape (screen centre)", SpawnShape);
 
-        // Picking a shape from a list beats stepping through them one at a time, and the list
-        // doubles as the readout of which one is active.
         _shapeDropdown = ui.CreateDropdown(panel, "Select a shape", [], (index, _) => SelectShapeAt(index));
         ui.CreateButton(panel, "Delete Shape (Del)", DeleteActiveShape);
 
         _profileDropdown = ui.CreateDropdown(panel, "Select a profile", [], (index, _) => SelectProfileAt(index));
 
-        // Off by default: having every stray click drop a point made the tool hard to use.
         ui.CreateToggle(panel, "Click adds points", _clickAddsPoints, v =>
         {
             _clickAddsPoints = v;
@@ -94,23 +91,21 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             ApplyColliderSettings();
         });
 
-        // Depth ordering. Higher Z sits further back, so "Send Back" increases it.
+        // Higher Z sits further back, so "Send Back" increases it.
         ui.CreateButton(panel, "Send Back (Z+)", () => NudgeZ(ZStep));
         ui.CreateButton(panel, "Bring Front (Z-)", () => NudgeZ(-ZStep));
 
         ui.CreateButton(panel, "Center View On Shape", CenterOnShape);
     }
 
-    // The loader must call this BEFORE clearing the room: the template clone and the profile
-    // list are harvested from scene objects that Clear Terrain destroys.
+    // Must run BEFORE the loader clears the room: template and profiles come from scene objects.
     public void PrepareForLoad()
     {
         CaptureTemplate();
         CollectProfiles();
     }
 
-    // The loader wipes the room; everything this tool tracked is gone. Show Collision is also
-    // switched off so a stale toggle cannot redraw the green outline over the loaded map.
+    // Show Collision goes off too, so a stale toggle cannot redraw over the loaded map.
     public void ResetTracking()
     {
         _shapes.Clear();
@@ -145,12 +140,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         RebuildHandles();
         UpdateLabels();
 
-        // Open on a shape rather than on nothing: every other control here acts on the active
-        // one, so an empty selection makes the whole panel look inert.
         if (_active == null && _allShapes.Count > 0) SelectShapeAt(0);
 
-        // OnExit tears the overlay down, so it has to be rebuilt on re-entry or the toggle stays
-        // on with nothing drawn after switching tools.
+        // OnExit tears the overlay down; rebuild on re-entry.
         RefreshCollisionOverlay();
 
         _editor.SetStatus("Drag handles to edit the shape.");
@@ -158,9 +150,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Drag a handle"),
-        ("RMB", "Delete a handle"),
-        ("LMB", "Add point (if enabled)"),
+        ("LMB", "Drag node"),
+        ("RMB", "Delete node"),
+        ("LMB", "Add node (if enabled)"),
         ("Del", "Delete selected shape")
     ];
 
@@ -188,8 +180,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         AddPointAt(_editor.MouseWorld());
     }
 
-    // Keep an inactive clone of a room sprite shape so new shapes can still be created after
-    // Clear Terrain has removed every original from the scene.
+    // Inactive clone so new shapes can be created after Clear Terrain removed every original.
     private void CaptureTemplate()
     {
         if (_template != null) return;
@@ -216,8 +207,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return Object.FindObjectOfType<SpriteShapeController>();
     }
 
-    // Profiles come from the biome definition and from whatever the room actually uses, since
-    // DecorationList does not always populate every slot.
+    // DecorationList does not always populate every slot, so live scene shapes are scanned too.
     private void CollectProfiles()
     {
         _profiles.Clear();
@@ -227,7 +217,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (s != null && !_profiles.Contains(s)) _profiles.Add(s);
         }
 
-        // Biome definition first, so the room's own profiles head the list.
         var deco = SceneRefs.Decorations;
         if (deco != null)
         {
@@ -236,8 +225,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             Add(deco.SpriteShapeBack);
         }
 
-        // Disk-built CultTweaker_* profiles next, ahead of the global asset sweep, so their
-        // names always resolve to the custom asset.
+        // Custom profiles before the global sweep, so their names resolve to the custom asset.
         foreach (var custom in CustomShapeProfiles.All)
             Add(custom);
 
@@ -246,16 +234,13 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         if (_template != null) Add(_template.spriteShape);
 
-        // Everything else already loaded in memory, including profiles from biomes that are not
-        // currently instantiated. FindObjectsOfTypeAll reaches assets, not just scene objects.
+        // FindObjectsOfTypeAll reaches assets, not just scene objects.
         foreach (var shape in Resources.FindObjectsOfTypeAll<SpriteShape>())
             Add(shape);
 
         Plugin.Log.LogInfo($"MapEditor: {_profiles.Count} sprite shape profile(s) available.");
     }
 
-    // Keeps the profile index pointing at whatever the selected shape actually uses, so the
-    // label and the next Cycle press are relative to that shape rather than the previous one.
     private void SyncProfileIndex()
     {
         if (_active == null || _active.spriteShape == null) return;
@@ -281,7 +266,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             return;
         }
 
-        // Screen centre, not the cursor: the cursor is over the button that was just clicked.
+        // Screen centre, not the cursor - the cursor is over the button that was just clicked.
         var center = _editor.ScreenToWorld(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
 
         var go = Object.Instantiate(_template.gameObject, root);
@@ -291,8 +276,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var ctrl = go.GetComponent<SpriteShapeController>();
 
-        // The template carries the source shape's baked colliders. Strip them so the new shape
-        // bakes its own rather than inheriting the old outline.
+        // The template carries the source's baked colliders; strip so this shape bakes its own.
         foreach (var inherited in go.GetComponents<Collider2D>())
             Object.DestroyImmediate(inherited);
 
@@ -316,8 +300,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         ctrl.colliderDetail = _colliderDetail;
         ctrl.colliderOffset = _colliderOffset;
 
-        // Explicit, because CommitShape only maintains collision on shapes that already have a
-        // collider and the inherited ones were just stripped.
+        // CommitShape only maintains collision on shapes that already carry a collider.
         EnsureCollider(ctrl);
 
         _shapes.Add(ctrl);
@@ -332,7 +315,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private MapEditorDropdown _shapeDropdown;
     private MapEditorDropdown _profileDropdown;
 
-    // Every shape in the room, ours and the biome's, in a stable order the dropdown indexes into.
+    // Every shape in the room, in the stable order the dropdown indexes into.
     private readonly List<SpriteShapeController> _allShapes = [];
 
     private void CollectShapes()
@@ -344,7 +327,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (s != null && s != _template && !_allShapes.Contains(s)) _allShapes.Add(s);
     }
 
-    // Rebuilt whenever the set of shapes changes; the dropdown is the only shape readout now.
     private void RefreshShapeDropdown()
     {
         if (_shapeDropdown == null) return;
@@ -387,8 +369,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         ClearHandles();
 
-        // DestroyImmediate so the collider is gone before the composite is rebuilt; a deferred
-        // destroy would leave the removed shape in the merged outline until the next change.
+        // DestroyImmediate: a deferred destroy leaves the shape in the merged outline until the next change.
         Object.DestroyImmediate(doomed.gameObject);
         SceneRefs.RegenerateRoomCollision();
         RefreshCollisionOverlay();
@@ -425,8 +406,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.SetStatus("Profile: " + _profiles[_profileIndex].name);
     }
 
-    // Reflects the selected shape's actual collision state without re-entering the callback that
-    // would otherwise add or strip a collider as a side effect of merely selecting a shape.
+    // notify: false - selecting a shape must not add or strip a collider as a side effect.
     private void SyncCollisionToggle()
     {
         if (_collisionToggleRow == null) return;
@@ -465,8 +445,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             }
         }
 
-        // Insert after the nearest existing point so the outline stays sensible rather than
-        // always appending to the end.
+        // Insert after the nearest point, not at the end, so the outline stays sensible.
         var insertIndex = NearestPointIndex(spline, local) + 1;
         try
         {
@@ -560,8 +539,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         }
     }
 
-    // Draws the collider the controller actually baked, so a mismatch between the visible shape
-    // and its collision is immediately obvious rather than something you discover by walking.
     private void RefreshCollisionOverlay()
     {
         if (_collisionOverlay != null)
@@ -675,8 +652,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         if (ctrl == null) return;
 
-        // Visual-only shapes are refreshed but never given a collider, so editing decorative
-        // room geometry cannot turn it solid.
+        // Visual-only shapes never get a collider: editing decorative geometry must not turn it solid.
         if (!ShapeHasCollision(ctrl))
         {
             ctrl.RefreshSpriteShape();
@@ -696,7 +672,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         ctrl.BakeCollider();
         JoinRoomComposite(ctrl);
 
-        // Rebuilds the composite outline and the A* grid together.
         SceneRefs.RegenerateRoomCollision();
 
         if (ReferenceEquals(ctrl, _active)) RefreshCollisionOverlay();
@@ -714,8 +689,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             : $"Vanilla floor collision disabled ({affected} piece(s)); shapes now define the floor.");
     }
 
-    // Flag application without the collision rebuild, for the loader, which batches one rebuild
-    // at the end of the whole load instead.
+    // No collision rebuild here: the loader batches one rebuild at the end of the load.
     public int ApplyVanillaFloorFlag(bool enabled)
     {
         _useVanillaFloor = enabled;
@@ -754,11 +728,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (edge != null) edge.usedByComposite = true;
     }
 
-    // Called by a handle when the user releases the mouse.
     public void CommitActiveShape() => CommitShape(_active);
 
-    // All handles share one canvas; giving each its own would nest a canvas plus a raycaster
-    // per spline point.
     private Transform HandleRoot()
     {
         if (_handleCanvas != null) return _handleCanvas.transform;
@@ -786,7 +757,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         SyncHandlePositions();
     }
 
-    // Yellow node at the shape's centroid that moves the whole shape rather than one point.
     private GameObject CreateCenterHandle()
     {
         var go = new GameObject("ShapeCenterHandle");
@@ -805,7 +775,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return go;
     }
 
-    // Average of the spline points in world space.
     public Vector3 ActiveShapeCentroid()
     {
         if (_active == null) return Vector3.zero;
@@ -825,7 +794,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public bool HasActiveShape => _active != null;
 
-    // Moves the whole shape. Z is preserved so dragging never changes the depth ordering.
+    // Z preserved: dragging never changes depth ordering.
     public void SetActiveShapePosition(Vector3 world)
     {
         if (_active == null) return;
@@ -953,8 +922,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return list;
     }
 
-    // Bare template clone for auxiliary geometry (door pads): untracked, unserialized. The
-    // caller owns the spline and collider setup; FinalizeLoadedShape a frame later bakes it.
+    // Untracked, unserialized clone for auxiliary geometry (door pads); caller sets up the
+    // spline and collider, FinalizeLoadedShape a frame later bakes it.
     public SpriteShapeController CreateUntrackedShape(Transform parent, string name)
     {
         CaptureTemplate();
@@ -974,8 +943,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public static void EnsureShapeCollider(SpriteShapeController ctrl) => EnsureCollider(ctrl);
 
-    // Recreates one saved shape from spline data. Self-registers into _shapes so a subsequent
-    // save round-trips. The caller is responsible for calling FinalizeLoadedShape a frame later.
+    // Recreates a saved shape; self-registers so a save round-trips. Caller must call
+    // FinalizeLoadedShape a frame later.
     public SpriteShapeController RebuildShape(MapShapeData data)
     {
         if (data == null || data.Points == null || data.Points.Count < 3) return null;
@@ -998,8 +967,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var ctrl = go.GetComponent<SpriteShapeController>();
 
-        // The template carries the source shape's baked colliders; the shape either gets fresh
-        // ones below or stays visual-only.
         foreach (var inherited in go.GetComponents<Collider2D>())
             Object.DestroyImmediate(inherited);
 
@@ -1017,8 +984,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             {
                 spline.InsertPointAt(added, MapEditorSerialization.ToVector3(p.Position));
 
-                // Tangent mode first: setting it recomputes the tangents, which would clobber
-                // the saved values if they were applied before it.
+                // Tangent mode first: setting it recomputes tangents and would clobber saved values.
                 if (System.Enum.TryParse<ShapeTangentMode>(p.TangentMode, out var mode))
                     spline.SetTangentMode(added, mode);
                 spline.SetLeftTangent(added, MapEditorSerialization.ToVector3(p.LeftTangent));
@@ -1061,8 +1027,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return ctrl;
     }
 
-    // Bake and composite-join for a rebuilt shape. Must run a frame after RebuildShape: mesh
-    // generation is deferred to end of frame, and baking earlier captures the stale outline.
+    // Must run a frame after RebuildShape: mesh gen is deferred to end of frame, so baking
+    // earlier captures the stale outline.
     public void FinalizeLoadedShape(SpriteShapeController ctrl)
     {
         if (ctrl == null || !ShapeHasCollision(ctrl)) return;
@@ -1097,7 +1063,7 @@ public class ShapePointHandle : MonoBehaviour, IDragHandler, IEndDragHandler, IP
         _tool.SetPointWorldPosition(_index, _editor.ScreenToWorld(eventData.position));
     }
 
-    // Collision and navigation are rebuilt once here rather than on every drag frame.
+    // Collision and navigation are rebuilt once here, not on every drag frame.
     public void OnEndDrag(PointerEventData eventData)
     {
         _tool?.CommitActiveShape();
@@ -1111,8 +1077,7 @@ public class ShapePointHandle : MonoBehaviour, IDragHandler, IEndDragHandler, IP
     }
 }
 
-// Drags the whole shape. The grab offset is captured on mouse-down so the shape does not snap
-// its centroid to the cursor when the drag starts.
+// Drags the whole shape; grab offset captured on mouse-down so it does not snap to the cursor.
 public class ShapeCenterHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     private ShapeTool _tool;

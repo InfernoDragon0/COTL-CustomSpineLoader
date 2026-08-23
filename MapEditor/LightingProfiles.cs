@@ -12,9 +12,7 @@ public class LightingProfile
     public MapLightingData Data = new();
 }
 
-// Named lighting looks, saved once and applied anywhere - by the lighting tool's picker, or by a
-// trigger's Apply-lighting action at play time. One flat file (LightingProfiles.json) next to the
-// blueprint folders, so profiles travel between maps rather than living inside one.
+// Named lighting looks in one flat LightingProfiles.json, shared across maps.
 public static class LightingProfiles
 {
     public const string FileName = "LightingProfiles.json";
@@ -41,9 +39,8 @@ public static class LightingProfiles
             string.Equals(p.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
-    // Upsert. The stored copy is a CLONE with Enabled forced on: without the clone, later slider
-    // edits to the map would silently rewrite the in-memory profile; without Enabled, a profile
-    // saved while "following the biome" would apply as a no-op.
+    // Upsert. Stores a clone (map edits must not rewrite the profile) with Enabled forced on
+    // (else a profile saved while following the biome applies as a no-op).
     public static void Save(string name, MapLightingData data)
     {
         if (string.IsNullOrWhiteSpace(name) || data == null) return;
@@ -69,8 +66,6 @@ public static class LightingProfiles
         return true;
     }
 
-    // Applying hands out a copy for the same reason Save takes one: the map edits whatever it is
-    // handed, and those edits must not reach back into the profile.
     public static MapLightingData Clone(MapLightingData data) =>
         JsonConvert.DeserializeObject<MapLightingData>(JsonConvert.SerializeObject(data));
 

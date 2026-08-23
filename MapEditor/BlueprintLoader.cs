@@ -16,8 +16,7 @@ public class BlueprintLoader
 
     public bool IsLoading { get; private set; }
 
-    // Per-load tallies, reported at the end so a room that came back wrong says so in the log
-    // instead of only looking wrong on screen.
+    // Per-load tallies, reported at the end of the load.
     private int _propsSpawned;
     private int _propsFailed;
 
@@ -26,8 +25,7 @@ public class BlueprintLoader
         _editor = editor;
     }
 
-    // preferredEntryDirection: when set (level playback), enter through that door if the
-    // blueprint has one - the side opposite the door the player just walked through.
+    // preferredEntryDirection (level playback): enter through that door if the blueprint has one.
     public void Load(CTNodeBlueprint bp, string preferredEntryDirection = null)
     {
         if (bp == null || IsLoading) return;
@@ -83,8 +81,7 @@ public class BlueprintLoader
         // Everything the undo stack referred to has just been destroyed.
         _editor.History.Clear();
 
-        // Destroy is deferred to end of frame; rebuilding alongside doomed objects corrupts the
-        // composite bake and every FindObjectsOfType sweep.
+        // Destroy defers to end of frame; rebuilding alongside doomed objects corrupts the bake.
         yield return null;
 
         RestoreKeptAuthored(keptObjects, room);
@@ -207,12 +204,10 @@ public class BlueprintLoader
 
         doorTool?.SealDoorsWithoutNeighbours();
 
-        // The room now holds blueprint content: stop vanilla re-entry code from re-rolling
-        // decorations/backdrops over it (see CustomRoomPatches).
+        // Stops vanilla re-entry code re-rolling decorations/backdrops (see CustomRoomPatches).
         CustomRoomPatches.Mark(room);
 
-        // The backdrop is derived state - never saved, cleared with the strays above, and
-        // recreated exactly once here so the room is not floating on the void.
+        // The backdrop is derived state: never saved, cleared above, recreated exactly once here.
         try
         {
             if (!CustomRoomPatches.HasBackSprite(room)) room.CreateBackgroundSpriteShape();
@@ -223,7 +218,7 @@ public class BlueprintLoader
         }
 
         // ---- Phase 9: hand over and walk the player in -------------------------------------
-        // Safety net for the collision debug overlay: no editor visual may survive into play.
+        // No editor visual may survive into play.
         for (var overlay = GameObject.Find("MapEditor_CollisionOverlay"); overlay != null;
              overlay = GameObject.Find("MapEditor_CollisionOverlay"))
             Object.DestroyImmediate(overlay);
@@ -244,8 +239,7 @@ public class BlueprintLoader
         }
         _editor.SetMusicLoop(bp.MusicLoop && !string.IsNullOrEmpty(bp.MusicEvent) ? bp.MusicEvent : null);
 
-        // Lighting and fog are values rather than objects, so they are applied here rather than
-        // rebuilt with the room. A blueprint that never set them leaves the biome alone.
+        // Lighting/fog are values, not objects; a blueprint that never set them leaves the biome alone.
         if (bp.Lighting != null && bp.Lighting.Enabled) LightingTool.Apply(bp.Lighting);
         else { LightingTool.ForgetCurrentRoom(); LightingTool.ClearOverride(); }
 
@@ -257,8 +251,7 @@ public class BlueprintLoader
         IsLoading = false;
     }
 
-    // Editor placements live under the room's CustomTransform, which the clear tool deliberately
-    // preserves for in-editor use - but a load must not duplicate them.
+    // The clear tool preserves CustomTransform placements; a load must not duplicate them.
     private void ClearEditorContent()
     {
         var root = SceneRefs.ContentRoot;
@@ -419,8 +412,7 @@ public class BlueprintLoader
 
             var parent = ParentFor(data.Parent, room) ?? room.transform;
             var copy = Object.Instantiate(source.gameObject, parent);
-            // Instantiate appends "(Clone)", which would make the next save treat this as a
-            // runtime spawn instead of the authored object it stands in for.
+            // Strip Instantiate's "(Clone)" or the next save treats this as a runtime spawn.
             copy.name = data.Name;
             copy.transform.position = MapEditorSerialization.ToVector3(data.Position);
             copy.transform.eulerAngles = new Vector3(0f, data.RotationY, data.RotationZ);
@@ -461,14 +453,12 @@ public class BlueprintLoader
         }
         if (cleared > 0) Plugin.Log.LogInfo($"MapEditor: cleared {cleared} enemy(ies) before load.");
 
-        // HP bars are spawned as siblings of their unit, so they survive the unit's destruction.
-        // Safe to sweep them all: ShowHPBar re-instantiates a missing bar on the next hit.
+        // HP bars are siblings of their unit and survive it; ShowHPBar re-instantiates on demand.
         foreach (var bar in Object.FindObjectsOfType<HPBar>())
             if (bar != null) Object.Destroy(bar.gameObject);
     }
 
-    // Authored shapes under RoomTransform are not island pieces, so the clear tool's terrain
-    // pass does not know about them.
+    // Authored shapes under RoomTransform are not island pieces; the terrain pass misses them.
     private static void ClearStrayShapes()
     {
         foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
@@ -555,9 +545,7 @@ public class BlueprintLoader
             Plugin.Log.LogWarning($"MapEditor: {pending} prop(s) still loading after timeout; they may appear late.");
     }
 
-    // Props carry their scale inline; everything else is spawned by its own tool and scaled
-    // afterwards. Null means a blueprint written before resizing existed, and a zero X means a
-    // degenerate value that would make the object vanish - both leave the spawn as it came.
+    // Null = pre-resize blueprint, zero X = degenerate; both leave the spawn as it came.
     private static void ApplySavedScale(GameObject go, SerializableVector3 scale)
     {
         if (go == null || scale == null || scale.X == 0f) return;
@@ -572,8 +560,7 @@ public class BlueprintLoader
         if (prop.Scale != null && prop.Scale.X != 0f)
             go.transform.localScale = MapEditorSerialization.ToVector3(prop.Scale);
 
-        // A respawned island piece must be known to the generator again, or the composite
-        // maintenance and the vanilla-floor toggle would not see it.
+        // Re-register with the generator or composite maintenance/vanilla-floor miss the piece.
         var piece = go.GetComponent<IslandPiece>();
         if (piece != null && room != null && room.Pieces != null && !room.Pieces.Contains(piece))
             room.Pieces.Add(piece);
@@ -606,8 +593,7 @@ public class BlueprintLoader
             room.GeneratedPathing = true;
         }
 
-        // Union health check for diagnosing blocked-at-the-doorway reports: every disconnected
-        // region of the floor is its own path, and the player cannot cross between them.
+        // Each disconnected floor region is its own composite path; the player cannot cross.
         var composite = SceneRefs.RoomComposite;
         if (composite != null)
         {
@@ -777,8 +763,7 @@ public class BlueprintLoader
         player.transform.position = start;
         player.state.facingAngle = Vector3.Angle(Vector3.right, dir);
 
-        // The vanilla walk-in distance, snapped so an authored floor that does not extend that
-        // far never leaves the player wedged in terrain.
+        // Vanilla walk-in distance, snapped so a short authored floor never wedges the player.
         var target = SnapToWalkable(doorway + dir * 7.3f) ?? start;
 
         door.Used = true;
@@ -786,12 +771,10 @@ public class BlueprintLoader
         player.GoToAndStop(target, null, IdleOnEnd: true, DisableCollider: true,
             GoToCallback: () =>
             {
-                // Arriving via a vanilla door trigger left player colliders off
-                // (Door.OnTriggerEnter2D); vanilla's own arrival restores them, so must ours.
+                // Door.OnTriggerEnter2D left player colliders off; restore them as vanilla does.
                 PlayerFarming.SetCollidersActive(collidersActive: true);
 
-                // Vanilla's arrival hand-off: an Entrance-typed door turns solid so it can
-                // never soft-lock the player who walks back into it.
+                // Vanilla hand-off: an Entrance-typed door turns solid so it cannot soft-lock.
                 try
                 {
                     door.PlayerFinishedEnteringDoor();
@@ -825,8 +808,7 @@ public class BlueprintLoader
         {
             try
             {
-                // SetPlayerToIdle: false, exactly as vanilla - GoToAndStop's IdleOnEnd has
-                // already restored the state by the time this runs.
+                // SetPlayerToIdle: false, as vanilla - IdleOnEnd already restored the state.
                 manager.OnConversationEnd(SetPlayerToIdle: false);
                 manager.CameraSetOffset(Vector3.zero);
                 manager.AddPlayerToCamera();

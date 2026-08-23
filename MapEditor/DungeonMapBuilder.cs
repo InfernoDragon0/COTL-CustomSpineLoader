@@ -3,15 +3,11 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Turns an authored CTDungeonMap into the game's own Map.Map and hands it to MapManager, so the
-// selector the player sees is the real one rather than a preview of it.
-//
-// Everything here is fully qualified: the game puts its map types in a namespace called Map that
-// also contains a class called Map, and importing it into this namespace is unreadable.
+// Turns an authored CTDungeonMap into the game's own Map.Map and hands it to MapManager.
+// Fully qualified throughout: the game's Map namespace also contains a class called Map.
 public static class DungeonMapBuilder
 {
-    // Null when the map is playable; otherwise the first thing wrong with it. The rules are the
-    // renderer's, not ours - see the comments on each check.
+    // Null when the map is playable; otherwise the first thing wrong. Each rule is the renderer's.
     public static string Validate(CTDungeonMap map)
     {
         if (map == null || map.Nodes.Count == 0) return "The map has no nodes.";
@@ -31,8 +27,7 @@ public static class DungeonMapBuilder
             {
                 if (link == null) continue;
 
-                // UIAdventureMapOverlayController draws a connection for every outgoing point and
-                // does not null-check the far end, so a dangling link is a crash, not a gap.
+                // The renderer never null-checks a link's far end: a dangling link is a crash.
                 if (map.NodeAt(link.X, link.Y) == null)
                     return $"Node ({node.X},{node.Y}) links to ({link.X},{link.Y}), where there is no node.";
 
@@ -40,19 +35,15 @@ public static class DungeonMapBuilder
             }
         }
 
-        // GetFirstNode() is a .First(), not a .FirstOrDefault(): no node on layer 0 throws before
-        // anything is drawn.
+        // GetFirstNode() is a .First(): no node on layer 0 throws before anything is drawn.
         if (starts == 0) return "No node on the bottom layer - that is where the run starts.";
 
-        // One only, because the game does not let the player choose the first one: the renderer
-        // marks GetFirstNode() visited and offers its links, so a second bottom node would be
-        // drawn and never reachable.
+        // The renderer marks GetFirstNode() visited; a second bottom node would never be reachable.
         if (starts > 1) return $"{starts} nodes on the bottom layer - the run can only start on one.";
         if (!hasTop) return "No node on the top layer - the run has nowhere to end.";
         if (linked == 0) return "Nothing is linked; the map would render empty.";
 
-        // A node with no connections at all is skipped by the renderer, so it is authored but
-        // invisible. Worth naming rather than letting it quietly vanish.
+        // A node with no connections at all is silently skipped by the renderer.
         foreach (var node in map.Nodes)
         {
             if (node == null || node.Outgoing.Count > 0) continue;
@@ -61,8 +52,7 @@ public static class DungeonMapBuilder
             return $"Node ({node.X},{node.Y}) has no links, so the game would not draw it.";
         }
 
-        // A level that is not on this machine is not fatal - the node falls back to a vanilla
-        // floor and logs - but it is almost always a rename, so it is worth catching here.
+        // Not fatal (falls back to a vanilla floor) but almost always a rename; catch it here.
         foreach (var node in map.Nodes)
         {
             if (node == null || string.IsNullOrEmpty(node.Level)) continue;
@@ -73,14 +63,9 @@ public static class DungeonMapBuilder
         return Reachable(map);
     }
 
-    // Not a reason to refuse the map - it plays - but worth saying out loud, because the node
-    // icon promises something the vanilla floor behind it does not deliver.
-    //
-    // A node with no level bound generates a vanilla floor, and vanilla decides what a floor
-    // contains from save data keyed by the dungeon's location: the boss-fight flag comes from
-    // DataManager.GetDungeonLayer, which returns 0 for a minted location, so a MiniBoss or Boss
-    // node produces an ordinary floor with ordinary encounters. Bind a level to it to author
-    // what actually happens there.
+    // Warn, don't refuse: a boss node with no level bound generates an ordinary floor (the
+    // boss-fight flag comes from save data a minted location has none of), so the icon promises
+    // more than the floor delivers.
     public static string Advisory(CTDungeonMap map)
     {
         if (map == null) return null;
@@ -98,8 +83,7 @@ public static class DungeonMapBuilder
               "vanilla picks its bosses from save data this dungeon has none of.";
     }
 
-    // Every node has to be walkable from the bottom layer: the player only ever moves along
-    // outgoing links, so an unreachable branch is drawn but can never be entered.
+    // The player only moves along outgoing links; an unreachable branch is drawn but unenterable.
     private static string Reachable(CTDungeonMap map)
     {
         var open = new Queue<CTDungeonMapNode>();
@@ -140,8 +124,7 @@ public static class DungeonMapBuilder
 
     // ---- the game's node types ------------------------------------------------------------
 
-    // Only the types the loaded dungeon config actually has a blueprint for. A type without one
-    // has no icon and no RoomPrefabs, so picking it would place a node that cannot be entered.
+    // Only types the config has a blueprint for: without one there is no icon and no RoomPrefabs.
     public static List<global::Map.NodeType> AvailableTypes()
     {
         var results = new List<global::Map.NodeType>();
@@ -231,8 +214,7 @@ public static class DungeonMapBuilder
 
             var node = new global::Map.Node(type, blueprint, new global::Map.Point(authored.X, authored.Y))
             {
-                // The Node constructor hides one node in ten at random. An authored map showing
-                // something other than what was authored is a bug, not a surprise.
+                // The Node constructor hides one node in ten at random; show what was authored.
                 Hidden = false,
                 CanBeHidden = false,
                 position = new Vector2(authored.X, authored.Y)
@@ -242,8 +224,8 @@ public static class DungeonMapBuilder
             nodes.Add(node);
         }
 
-        // Both directions are filled from the authored outgoing list: the renderer walks outgoing
-        // and the traversal state walks incoming, and they have to agree.
+        // Both directions come from the authored outgoing list: the renderer walks outgoing,
+        // traversal walks incoming, and they must agree.
         foreach (var pair in built)
         {
             foreach (var link in pair.Key.Outgoing)
@@ -259,9 +241,7 @@ public static class DungeonMapBuilder
         return new global::Map.Map(config.name, nodes, []);
     }
 
-    // Hands the built graph to the game as the run's own map. CurrentMap has a private setter, so
-    // it goes through Traverse; MapGenerated is what stops ShowMap throwing the map away and
-    // generating a fresh one over it.
+    // CurrentMap has a private setter; MapGenerated stops ShowMap generating a fresh map over it.
     public static void InstallMap(global::Map.MapManager manager, global::Map.Map built)
     {
         HarmonyLib.Traverse.Create(manager).Property("CurrentMap").SetValue(built);

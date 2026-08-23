@@ -9,27 +9,21 @@ public class CTMapTrigger : MonoBehaviour
 {
     public string Id = "";
 
-    // The free-text action name the tool stored before sequences existed. Kept for blueprint
-    // compatibility; Actions is what actually runs.
+    // Legacy free-text name, kept for blueprint compatibility; Actions is what runs.
     public string Action = "";
 
     public bool Once = true;
     public Vector2 Size = new(4f, 3f);
 
-    // Played in order when a player steps in.
     public readonly List<TriggerAction> Actions = [];
 
-    // Freeze the players for the sequence, except around actions that need their input.
     public bool LockPlayerControl = true;
 
-    // Fired when a player enters. Nothing subscribes yet.
+    // Nothing subscribes yet.
     public static event System.Action<CTMapTrigger> Entered;
 
-    // Every live volume, so the tool can retint or re-show them all without owning the list.
     public static readonly List<CTMapTrigger> All = [];
 
-    // Keeps the volumes drawn after the editor closes. On by default: with no behaviours wired up
-    // yet, seeing the box light up is the only way to tell a trigger works.
     public static bool ShowInPlay = true;
 
     public bool Tripped { get; private set; }
@@ -76,8 +70,6 @@ public class CTMapTrigger : MonoBehaviour
         }
     }
 
-    // Re-applies the size to the collider and the gizmo. Called whenever the tool resizes or
-    // moves the volume.
     public void Refresh()
     {
         Size = new Vector2(Mathf.Max(0.5f, Size.x), Mathf.Max(0.5f, Size.y));
@@ -98,8 +90,6 @@ public class CTMapTrigger : MonoBehaviour
         ]);
     }
 
-    // Shown while the trigger tool is open, and - unless the tool says otherwise - during play
-    // too, where it is the only sign a trigger did anything.
     public void ShowGizmo(bool toolVisible)
     {
         _toolVisible = toolVisible;
@@ -199,11 +189,9 @@ public class CTMapTrigger : MonoBehaviour
 
     private void Update()
     {
-        // Nothing fires while the map is being authored: the player is parked wherever the
-        // editor was opened, often standing in the volume being drawn.
         if (RuntimeMapEditor.Active != null && RuntimeMapEditor.Active.IsEditing)
         {
-            // Standing in it at F4 time must not count as an entry the moment play resumes.
+            // Standing in the volume at F4 time must not count as an entry when play resumes.
             _inside = AnyPlayerInside();
             return;
         }
@@ -213,7 +201,6 @@ public class CTMapTrigger : MonoBehaviour
         if (inside && !_inside) _inside = Fire();
         else _inside = inside;
 
-        // The flash has to be taken back down, and only this component knows when it lapses.
         if (_flashing && _flashUntil <= Time.unscaledTime)
         {
             _flashing = false;
@@ -249,8 +236,7 @@ public class CTMapTrigger : MonoBehaviour
         return rect.Overlaps(new Rect(bounds.min.x, bounds.min.y, bounds.size.x, bounds.size.y));
     }
 
-    // Returns whether the entry was consumed. False means "not now" - the trigger stays armed and
-    // un-entered, so the poll retries next frame.
+    // Returns whether the entry was consumed; false = deferred, the poll retries next frame.
     private bool Fire()
     {
         if (Once && Tripped) return true;
@@ -259,8 +245,6 @@ public class CTMapTrigger : MonoBehaviour
 
         Tripped = true;
 
-        // Visible proof: with a trigger whose sequence is a single quiet action, the flash is
-        // still the fastest way to tell a working volume from a broken one.
         _flashUntil = Time.unscaledTime + 1.2f;
         _flashing = true;
         ApplyTint();
@@ -281,7 +265,7 @@ public class CTMapTrigger : MonoBehaviour
         return true;
     }
 
-    // One sequence at a time, globally - see Fire for why.
+    // One sequence at a time, globally.
     private static CTMapTrigger _sequenceOwner;
 
     public static bool SequencePlaying => _sequenceOwner != null;
@@ -302,8 +286,7 @@ public class CTMapTrigger : MonoBehaviour
         _sequenceOwner = null;
     }
 
-    // Called when the room is torn down: a sequence whose coroutine died with the scene would
-    // otherwise leave the global owner set and block every trigger from then on.
+    // Room teardown: a coroutine that died with the scene must not leave the global owner set.
     public static void ResetSequenceState()
     {
         if (_sequenceOwner == null) return;
@@ -311,7 +294,6 @@ public class CTMapTrigger : MonoBehaviour
         TriggerActions.SetControl(true);
     }
 
-    // Re-arms a one-shot trigger, for testing the same volume more than once per room.
     public void Rearm()
     {
         Tripped = false;
@@ -378,8 +360,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 : $"{_selected.Id} leaves the players in control.");
         }).GetComponent<MapEditorToggle>();
 
-        // Grouped with the other two: it is a checkbox like they are, and it sat below the
-        // action list where nothing else of its kind lived.
         ui.CreateToggle(panel, "Show volumes in play", CTMapTrigger.ShowInPlay, value =>
         {
             CTMapTrigger.ShowInPlay = value;
@@ -402,7 +382,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         ui.CreateButton(panel, "Delete Selected", DeleteSelected);
 
-        // The label is kept: it is what says the button is armed.
+        // The label doubles as the armed indicator.
         _clearAllLabel = ui.CreateButton(panel, ClearAllLabel, ClearAllPressed)
             .GetComponentInChildren<TMPro.TMP_Text>();
 
@@ -412,7 +392,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         _targetDropdown = ui.CreateDropdown(panel, "Target", System.Array.Empty<string>(), OnTargetChosen);
 
-        // Rows are rebuilt whenever the list changes, so they live in their own container.
         _actionList = CreateActionListContainer(panel);
 
         RebuildActionList();
@@ -430,9 +409,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private const string ClearAllLabel = "Clear All Triggers";
     private const float ArmWindow = 4f;
 
-    // Two presses rather than a dialog: the panel has no modal of its own, and one stray click
-    // that deletes every volume in the room is not recoverable - placing a trigger is on the undo
-    // stack, but this wipe clears the stack along with the triggers.
     private void ClearAllPressed()
     {
         var live = LiveCount();
@@ -465,8 +441,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         if (_clearAllLabel != null) _clearAllLabel.text = ClearAllLabel;
     }
 
-    // The window lapsing has to put the button's own wording back, so a stale "Click again" is
-    // never what the next click answers.
     private void TickArmWindow()
     {
         if (_armedUntil <= 0f || Time.unscaledTime <= _armedUntil) return;
@@ -492,12 +466,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private MapEditorDropdown _addDropdown;
     private MapEditorDropdown _targetDropdown;
 
-    // The row the user clicked, whose target is outlined in the world.
     private TriggerAction _selectedAction;
 
-    // The Add-action dropdown lists groups, not actions: there are enough actions now that one
-    // flat list was longer than the panel. Index-aligned with ActionGroups; a group holding a
-    // single action skips the submenu and starts it directly.
+    // Index-aligned with ActionGroups.
     private static readonly string[] ActionLabels =
     [
         "Player actions",
@@ -532,14 +503,15 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         ],
         [
             TriggerActionType.ApplyLighting,
-            TriggerActionType.ChangeMusic
+            TriggerActionType.ChangeMusic,
+            TriggerActionType.OpenWorldMap,
+            TriggerActionType.ReturnToBase
         ],
         [
             TriggerActionType.Wait
         ]
     ];
 
-    // What a group's submenu calls each action.
     private static string ActionName(TriggerActionType type) => type switch
     {
         TriggerActionType.MovePlayersToTrigger => "Move players to trigger",
@@ -547,6 +519,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         TriggerActionType.StartConversation => "Talk to custom NPC",
         TriggerActionType.PlayPlayerAnimation => "Play animation on players",
         TriggerActionType.ApplyLighting => "Apply lighting",
+        TriggerActionType.OpenWorldMap => "Open world map",
+        TriggerActionType.ReturnToBase => "Return to base",
         TriggerActionType.ChangeMusic => "Change music",
         TriggerActionType.Wait => "Wait for seconds",
         TriggerActionType.CameraOffset => "Set camera offset",
@@ -575,7 +549,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         LightingFade,
         Music,
 
-        // Which action inside the group the user picked.
         Category,
 
         // Shared by everything that ends with "for how long": waits, camera holds, text.
@@ -584,7 +557,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Effect,
         LookTrigger,
         Cutscene,
-        CutsceneSkip
+        CutsceneSkip,
+        WorldMap
     }
 
     private TargetStage _stage;
@@ -606,7 +580,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private static readonly float[] SecondsValues = [0.5f, 1f, 2f, 3f, 5f, 8f];
 
-    // 10 is the rig's own resting distance, so the list reads as "how far in from normal".
     private static readonly string[] CutsceneSkipModes =
         ["Skippable (Esc)", "Cannot be skipped"];
 
@@ -615,11 +588,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         "1 (closest)", "2", "3", "4", "5", "6", "7", "8", "9", "10 (default)"
     ];
 
-    // Display names are what the dropdown shows; the ids that go into the action are kept
-    // alongside, because an NPC's display name is not what the registry is keyed by.
+    // Ids behind the dropdown's display labels; an NPC's display name is not its registry key.
     private readonly List<string> _targetKeys = [];
 
-    // Set while the tool is waiting for a world click to name a Move-to-object target.
     private bool _pickingObject;
 
     private RectTransform CreateActionListContainer(RectTransform panel)
@@ -637,8 +608,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         layout.childControlHeight = false;
         layout.childForceExpandHeight = false;
 
-        // The panel column does not control its children's height, so the container has to
-        // report its own - otherwise every row would stack inside a zero-height rect.
+        // Without the fitter every row stacks inside a zero-height rect.
         var fitter = go.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
@@ -668,8 +638,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 CreateActionRow(i, actions[i]);
         }
 
-        // Destroyed children do not leave the layout until end of frame, and nested fitters do
-        // not settle on their own - the editor's own rebuild pass handles both.
+        // Destroyed children leave the layout at end of frame; nested fitters never settle alone.
         _editor.RequestOptionsResize();
     }
 
@@ -716,7 +685,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             SelectAction(action);
         });
 
-        // Numbered, because the order is the whole point of a sequence.
         var label = _ui.CreateLabel(row.transform, $"{index + 1}. {action.Describe()}", 15);
         var labelText = label.GetComponent<TMPro.TMP_Text>();
         labelText.enableWordWrapping = false;
@@ -733,8 +701,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         var button = _ui.CreateButton(row.transform, text, onClick, RowHeight - 4f);
 
-        // CreateButton's row layout flexes to fill a column; in a horizontal row that would push
-        // the label out entirely.
+        // CreateButton's layout flexes to fill a column; here that would push the label out.
         var element = button.GetComponent<LayoutElement>();
         element.preferredWidth = 30f;
         element.minWidth = 30f;
@@ -778,8 +745,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private void SelectAction(TriggerAction action)
     {
-        // A second click on the same row clears it, so the outline can be dismissed without
-        // selecting something else.
         _selectedAction = _selectedAction == action ? null : action;
 
         RebuildActionList();
@@ -794,8 +759,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private static readonly Color TargetColour = new(0.35f, 1f, 0.4f, 1f);
 
-    // Rebuilt every frame rather than once on selection: a target can be dragged (or, for the
-    // players, moved by the game) while the outline is up.
+    // Rebuilt every frame: a target can move while the outline is up.
     private void SyncTargetHighlight()
     {
         _targetBounds.Clear();
@@ -817,10 +781,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             if (_targetBoxes[i] != null && _targetBoxes[i].activeSelf) _targetBoxes[i].SetActive(false);
     }
 
-    // The resolved target for the selected row, re-resolved at most twice a second: the resolve
-    // itself is a scene-wide sweep on a miss (ResolveObject falls back to every Transform in the
-    // scene, the NPC case to every CustomNpcBehaviour), and it used to run per frame. Bounds are
-    // still read live each frame so a dragged target tracks; only the lookup is throttled.
+    // Resolve is a scene-wide sweep on a miss, so the lookup is throttled to twice a second;
+    // bounds are still read live each frame so a dragged target tracks.
     private static TriggerAction _resolvedFor;
     private static string _resolvedTarget;
     private static GameObject _resolvedObject;
@@ -846,8 +808,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             case TriggerActionType.MovePlayersToTrigger:
             {
                 var trigger = TriggerActions.FindTrigger(action.Target);
-                // From the volume's own rectangle: a trigger has no renderer to measure, and its
-                // gizmo is only there while this tool is open.
+                // A trigger has no renderer to measure; use the volume's own rectangle.
                 if (trigger != null)
                     into.Add(new Bounds(trigger.transform.position,
                         new Vector3(trigger.Size.x, trigger.Size.y, 0.1f)));
@@ -868,8 +829,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             {
                 var go = ResolveTargetCached(action, () => TriggerActions.ResolveObject(action.Target));
                 if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
-                // The object is not in this room; the authored position is still where the players
-                // would be sent, so it is marked instead of showing nothing.
+                // Missing object: mark the authored fallback position instead.
                 else into.Add(new Bounds(action.Position, new Vector3(1.5f, 1.5f, 0.1f)));
                 break;
             }
@@ -891,7 +851,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.PlayPlayerAnimation:
             {
-                // Every player, because that is who performs it.
                 foreach (var player in TriggerActions.LivePlayers())
                 {
                     if (MapEditorGizmos.TryGetBounds(player.gameObject, out var bounds)) into.Add(bounds);
@@ -940,8 +899,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         var group = ActionGroups[index];
 
-        // A group of one is a category in name only; opening a submenu to show its single entry
-        // would be one click of nothing.
         if (group.Length == 1)
         {
             StartAction(group[0]);
@@ -959,8 +916,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         OpenTargets(TargetStage.Category, labels);
     }
 
-    // Everything a chosen action needs before it can be added: a target to pick, a duration to
-    // choose, a caption to type, or nothing at all.
+    // Asks whatever the chosen action still needs before it can be added.
     private void StartAction(TriggerActionType type)
     {
         _pendingType = type;
@@ -975,8 +931,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 _targetKeys.Clear();
                 foreach (var trigger in _triggers)
                 {
-                    // Its own volume is excluded: walking the players into the trigger that just
-                    // fired is a loop waiting to happen.
+                    // Its own volume is excluded: walking the players back in would loop.
                     if (trigger == null || trigger == _selected) continue;
                     _targetKeys.Add(trigger.Id);
                 }
@@ -1031,8 +986,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.PlayCutscene:
             {
-                // The folder first, so a custom video of the same name as a vanilla one is the
-                // one offered; both are played the same way from here on.
+                // Custom folder first: a custom video shadows a vanilla one of the same name.
                 _targetKeys.Clear();
                 var labels = new List<string>();
 
@@ -1081,8 +1035,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 _targetKeys.Clear();
                 var names = new List<string>();
 
-                // Read live: an NPC registered by another mod is as valid a target as ours, and
-                // the registry is the only place both appear.
+                // Read live: NPCs registered by other mods are valid targets too.
                 foreach (var pair in APIHelper.CustomNpcManager.CustomNpcList)
                 {
                     if (pair.Value == null) continue;
@@ -1102,8 +1055,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.PlayPlayerAnimation:
             {
-                // Straight off the player's own skeleton: typing names by hand produced silent
-                // no-ops, because an animation the skeleton does not have simply never plays.
+                // Listed from the player's skeleton: an animation it lacks never plays, silently.
                 var animations = TriggerActions.PlayerAnimationNames();
                 if (animations.Count == 0)
                 {
@@ -1118,8 +1070,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.ApplyLighting:
             {
-                // Vanilla is always on the list - a trigger that only puts the biome's own
-                // lighting back is a legitimate sequence ender.
+                // Slot 0 is vanilla lighting; its key is the empty string.
                 _targetKeys.Clear();
                 _targetKeys.Add("");
                 var names = new List<string> { "Vanilla lighting" };
@@ -1134,9 +1085,25 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 break;
             }
 
+            case TriggerActionType.OpenWorldMap:
+            {
+                var maps = CTWorldMapSerialization.ListNames();
+                if (maps.Count == 0)
+                {
+                    _editor.SetStatus("No world maps: save one, or drop a folder in CustomWorldMaps.",
+                        StatusSeverity.Warning);
+                    return;
+                }
+
+                _targetKeys.Clear();
+                foreach (var map in maps) _targetKeys.Add(map);
+
+                OpenTargets(TargetStage.WorldMap, maps);
+                break;
+            }
+
             case TriggerActionType.ChangeMusic:
             {
-                // Same FMOD enumeration the music tool uses, so both pickers show one list.
                 var tracks = MusicTool.MusicEvents();
                 if (tracks.Count == 0)
                 {
@@ -1169,8 +1136,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _targetDropdown.Open();
     }
 
-    // The add-action controls belong to a selected trigger, and the target dropdown only to a
-    // half-finished action, so both come and go rather than sitting there inert.
     private void UpdateActionControls()
     {
         var addRoot = _addDropdown?.Root;
@@ -1185,14 +1150,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _editor.RequestOptionsResize();
     }
 
-    // Loop lengths rather than a free number: the only thing an author actually wants to say is
-    // "hold this pose for a beat / a while", and a typed seconds field is another modal prompt.
     private static readonly string[] AnimationModes = ["Play once", "Loop 2 seconds", "Loop 5 seconds", "Loop 10 seconds"];
     private static readonly float[] AnimationDurations = [0f, 2f, 5f, 10f];
 
-    // Same shape for the lighting swap: how long it cross-fades over. Instant is last because it
-    // is the old cut, kept for a lightning-strike moment rather than as the normal answer. A
-    // negative duration is what TriggerAction reads as "no fade".
+    // A negative duration is what TriggerAction reads as "no fade".
     private static readonly string[] LightingFadeModes =
         ["Fade 1 second", "Fade 2 seconds", "Fade 4 seconds", "Instant (no fade)"];
 
@@ -1238,8 +1199,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 break;
 
             case TargetStage.Lighting:
-                // Slot 0 is "Vanilla lighting", whose key is the empty string - so the pending
-                // target is legitimately blank here, and only the stage says it was answered.
+                // Vanilla lighting's key is the empty string; a blank pending target is valid.
                 _pendingLighting = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value;
                 OpenTargets(TargetStage.LightingFade, LightingFadeModes);
                 break;
@@ -1254,6 +1214,14 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                         : TriggerAction.DefaultLightingFade
                 });
                 _pendingLighting = null;
+                break;
+
+            case TargetStage.WorldMap:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.OpenWorldMap,
+                    Target = index >= 0 && index < _targetKeys.Count ? _targetKeys[index] : value
+                });
                 break;
 
             case TargetStage.Music:
@@ -1315,8 +1283,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         }
     }
 
-    // The last step of every action that ends with a duration. What it builds depends on which
-    // action asked the question, which is what _pendingType is for.
+    // Last step of every action ending with a duration; _pendingType says which one asked.
     private void FinishTimedAction(float seconds)
     {
         switch (_pendingType)
@@ -1371,10 +1338,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private bool _capturingOffset;
     private Vector3 _offsetOrigin;
 
-    // The offset is authored by eye: the view snaps back to where the camera normally sits (on
-    // the players), the author pans it to the framing they want, and V takes the difference. It
-    // is stored relative to the follow target, not as a world position, because at run time the
-    // players are somewhere else entirely.
+    // Offset is stored relative to the follow target: at run time the players are elsewhere.
     private void BeginOffsetCapture()
     {
         var players = TriggerActions.LivePlayers();
@@ -1410,10 +1374,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     // ---- caption text ---------------------------------------------------------------------------
 
-    // The same dialog the map save uses, with its overwrite check disabled - there is nothing to
-    // collide with - and a longer limit, because a caption is a sentence rather than a name.
-    // Two dialogs, because the text is two lines of different sizes. The second can be left
-    // empty - a title on its own is a perfectly good caption.
     private void PromptForText(TriggerActionType type)
     {
         var titled = false;
@@ -1427,10 +1387,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 _pendingText = title.Trim();
                 _pendingType = type;
             },
-            // The second dialog opens from the first one's *close*, not its confirm: opening it
-            // from the confirm meant two of the game's name menus alive at once, with the one
-            // going away taking the editor's modal state with it - so the editor read WASD and
-            // tool shortcuts underneath the dialog still being typed into.
+            // Chain from close, not confirm: two name menus alive at once broke the editor's
+            // modal state, so shortcuts fired under the dialog being typed into.
             onClosed: () =>
             {
                 if (!titled)
@@ -1454,8 +1412,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 answered = true;
                 _pendingSubtext = string.IsNullOrWhiteSpace(subtext) ? "" : subtext.Trim();
             },
-            // Cancelled is a legitimate answer here - a title on its own is a caption - so the
-            // duration question is asked either way.
+            // Cancel is a valid answer; the duration question is asked either way.
             onClosed: () =>
             {
                 if (!answered) _pendingSubtext = "";
@@ -1468,8 +1425,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         var picked = SelectTool.PickWorldObject(world);
 
-        // One exception the select tool has no reason to make: our own volumes are gizmos, not
-        // scenery, and clicking one means the trigger, not a place to walk to.
+        // Our own volumes are gizmos, not scenery to walk to.
         if (picked != null && picked.GetComponentInParent<CTMapTrigger>() != null) picked = null;
 
         if (picked == null)
@@ -1480,8 +1436,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         _pickingObject = false;
 
-        // The camera asks a second question - how long to hold the shot - so it goes through the
-        // duration step; moving the players is complete as soon as the object is named.
+        // Look-at still needs a duration; move-to is complete once the object is named.
         if (_pendingType == TriggerActionType.CameraLookAtObject)
         {
             _pendingTarget = TriggerActions.PathOf(picked);
@@ -1521,7 +1476,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         ShowGizmos(false);
         Select(null);
-        // Leaving the tool answers the question: the button must not still be armed on return.
         Disarm();
         _pickingObject = false;
         _capturingOffset = false;
@@ -1539,7 +1493,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         TickOffsetCapture();
 
-        // Escape gets out of a mis-started object pick without placing anything.
         if (_pickingObject && Input.GetKeyDown(KeyCode.Escape))
         {
             _pickingObject = false;
@@ -1548,14 +1501,11 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             _editor.SetStatus("Target pick cancelled.");
         }
 
-        // While framing an offset the world is the viewfinder: a click there would drop a new
-        // trigger behind the shot being composed.
+        // No placement while framing an offset: the world is the viewfinder.
         if (Input.GetMouseButtonDown(0) && !_capturingOffset && !_editor.PointerOverUi())
         {
             var world = _editor.MouseWorld();
 
-            // While picking a target, a click names an object instead of placing or selecting a
-            // volume - otherwise every attempt to point at scenery would drop a new trigger on it.
             if (_pickingObject)
             {
                 TryPickObject(world);
@@ -1614,8 +1564,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private string NextId()
     {
-        // Ids only have to be unique within the room, and they are what a later phase will use to
-        // address one trigger from a level or another trigger.
         string candidate;
         do
         {
@@ -1649,11 +1597,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         if (_selected != null) _selected.SetHighlighted(false);
         _selected = trigger;
 
-        // The highlighted action belonged to the trigger being left behind.
         _selectedAction = null;
         SyncTargetHighlight();
 
-        // A half-answered "which target?" question does not survive changing triggers either.
         _stage = TargetStage.None;
         _pickingObject = false;
 
@@ -1669,8 +1615,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _selected.SetHighlighted(true);
         PushSelectionToPanel();
 
-        // Only on selection, never from the drag path below: rebuilding the rows every frame of a
-        // resize would destroy and recreate the whole list continuously.
+        // Never from the drag path: that would rebuild the rows every frame of a resize.
         RebuildActionList();
         UpdateActionControls();
         _editor.SetStatus(placed
@@ -1701,8 +1646,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         if (_selected == null) return;
 
-        // SetValueWithoutNotify would still be re-entered through the slider's own drag, so the
-        // guard covers both directions.
+        // SetValueWithoutNotify is still re-entered through the slider's own drag; guard both ways.
         _syncingSliders = true;
         _widthSlider?.SetValueWithoutNotify(_selected.Size.x);
         _heightSlider?.SetValueWithoutNotify(_selected.Size.y);
@@ -1738,8 +1682,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     // ---- handles ------------------------------------------------------------------------------
 
-    // Screen-space grips rather than world-space quads: the same approach the select tool uses,
-    // so they stay the same size at any zoom and are registered click blockers.
+    // Screen-space grips: constant size at any zoom, and registered click blockers.
     private void SyncHandles()
     {
         if (_selected == null)
@@ -1816,7 +1759,6 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         return go;
     }
 
-    // Called by the drag handles.
     internal void DragTo(TriggerHandle.Mode mode, Vector3 world, Vector3 grabOffset)
     {
         if (_selected == null) return;
@@ -1863,8 +1805,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         SetHandlesActive(false);
         ClearTargetHighlight();
 
-        // A sequence belonging to the room being replaced must not keep the global lock (or the
-        // players' InActive state) into the new one.
+        // A replaced room's sequence must not keep the global lock or the players' InActive state.
         CTMapTrigger.ResetSequenceState();
         RebuildActionList();
         UpdateActionControls();
@@ -1908,8 +1849,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     }
 }
 
-// Drags the selected trigger's centre or corner. The grab offset is captured on mouse-down so a
-// move does not snap the volume's centre onto the cursor.
+// Grab offset captured on mouse-down so a move does not snap the centre onto the cursor.
 public class TriggerHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
 {
     public enum Mode

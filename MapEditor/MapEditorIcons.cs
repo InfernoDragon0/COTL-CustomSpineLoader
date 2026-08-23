@@ -15,8 +15,7 @@ public static class MapEditorIcons
     private const string IconFolder = "Assets/EditorIcons";
     private const string PlaceholderFile = "Assets/colorwheel.png";
 
-    // Null is a real, cached answer here: "this tool has no art on disk" must not re-hit the
-    // filesystem on every panel rebuild.
+    // Null is a real, cached answer: "no art on disk" must not re-hit the filesystem.
     private static readonly Dictionary<string, Sprite> _diskIcons = [];
     private static Sprite _placeholder;
     private static bool _placeholderTried;
@@ -25,8 +24,6 @@ public static class MapEditorIcons
     private static readonly Dictionary<string, Sprite> _propIcons = [];
     private static readonly HashSet<string> _propIconsFailed = [];
 
-    // The icon shown on a tool's dock button. Falls back to the shared placeholder, so the dock
-    // is never a row of blank squares.
     public static Sprite GetToolIcon(string toolName)
     {
         if (string.IsNullOrEmpty(toolName)) return Placeholder;
@@ -37,6 +34,18 @@ public static class MapEditorIcons
         var sprite = LoadFromDisk(Path.Combine(Plugin.PluginPath, IconFolder, toolName + ".png"));
         _diskIcons[toolName] = sprite;
         return sprite != null ? sprite : Placeholder;
+    }
+
+    // Null rather than the placeholder, for callers that would rather draw something of their own.
+    public static Sprite GetToolIconOrNull(string toolName)
+    {
+        if (string.IsNullOrEmpty(toolName)) return null;
+
+        if (_diskIcons.TryGetValue(toolName, out var cached)) return cached;
+
+        var sprite = LoadFromDisk(Path.Combine(Plugin.PluginPath, IconFolder, toolName + ".png"));
+        _diskIcons[toolName] = sprite;
+        return sprite;
     }
 
     public static Sprite Placeholder
@@ -81,8 +90,7 @@ public static class MapEditorIcons
 
         var sprite = known;
 
-        // Structures registered by other mods are not in the scene's placement list at all, but
-        // COTL_API keeps their icon on the registration itself.
+        // Other mods' structures are not in the scene's placement list; COTL_API keeps their icon.
         if (sprite == null)
         {
             try
@@ -113,9 +121,7 @@ public static class MapEditorIcons
     {
         if (onLoaded == null || string.IsNullOrEmpty(prefabPath)) return;
 
-        // Fake-null check on the hit: these sprites belong to addressable prefabs, and a cached
-        // entry that has been unloaded must become a reload rather than a destroyed sprite
-        // handed straight to Image.sprite.
+        // Fake-null check: an unloaded addressable sprite must become a reload, not reach Image.sprite.
         if (_propIcons.TryGetValue(prefabPath, out var cached) && cached != null) { onLoaded(cached); return; }
         if (_propIconsFailed.Contains(prefabPath)) { onLoaded(null); return; }
 
@@ -123,13 +129,10 @@ public static class MapEditorIcons
         if (host != null && !_draining) host.StartCoroutine(DrainPropQueue());
     }
 
-    // Cancels everything not yet started. Switching prop groups makes the previous group's
-    // pending loads pure waste, and they would fill in cells that no longer exist.
+    // Cancels loads not yet started; they would fill cells that no longer exist.
     public static void CancelPendingPropIcons() => _propQueue.Clear();
 
-    // Bumped by ClearSceneScopedCache: completions belonging to a previous session must not
-    // decrement the fresh session's counter (a negative _inFlight would disable the throttle
-    // for good).
+    // Bumped per session so stale completions cannot drive _inFlight negative.
     private static int _session;
 
     private static IEnumerator DrainPropQueue()
@@ -172,8 +175,7 @@ public static class MapEditorIcons
             return;
         }
 
-        // The handle is deliberately never released: releasing it unloads the sprite the icon
-        // is still drawing. They are cached for the session, exactly like the tools' own loads.
+        // Never released: releasing the handle unloads the sprite the icon still draws.
         handle.Completed += op =>
         {
             Sprite sprite = null;
@@ -193,15 +195,12 @@ public static class MapEditorIcons
         };
     }
 
-    // Anything sourced from the live scene stops being valid when that scene goes; disk icons
-    // and their textures survive (they are ours, and flagged not to unload).
+    // Scene-sourced icons die with the scene; disk icons survive (flagged not to unload).
     public static void ClearSceneScopedCache()
     {
         _structureIcons.Clear();
         _propQueue.Clear();
-        // The drain coroutine died with its host; without resetting these, the next editor
-        // would queue requests that nothing ever picks up. The session bump makes stragglers
-        // from the old session no-ops instead of corrupting the fresh counter.
+        // The drain coroutine died with its host; reset, and bump the session so stragglers are no-ops.
         _session++;
         _inFlight = 0;
         _draining = false;

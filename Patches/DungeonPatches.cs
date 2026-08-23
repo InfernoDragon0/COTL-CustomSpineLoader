@@ -28,6 +28,25 @@ namespace CustomSpineLoader.Patches
             LastDoorDirection = null;
         }
 
+        [HarmonyPatch(typeof(GameManager), nameof(GameManager.IsDungeon))]
+        [HarmonyPrefix]
+        private static bool GameManager_IsDungeon(GameManager __instance, FollowerLocation location, ref bool __result)
+        {
+            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(location)) return true;
+            // Plugin.Log.LogInfo("GameManager ISDungeon custom " + location);
+            __result = true;
+            return false;
+        }
+
+        [HarmonyPatch(typeof(LocationManager), nameof(LocationManager.LocationIsDungeon))]
+        [HarmonyPrefix]
+        public static bool LocationManager_LocationIsDungeon(LocationManager __instance, FollowerLocation location, ref bool __result)
+        {
+            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(location)) return true;
+            __result = true;
+            return false;
+        }
+
         // Every route into a floor from the adventure map goes through here, so it is where an
         // authored node hands its level over. A postfix rather than a prefix because the vanilla
         // body is what sets up the floor this then adjusts - and it is still early enough:
@@ -45,6 +64,70 @@ namespace CustomSpineLoader.Patches
             catch (Exception e)
             {
                 Plugin.Log.LogError("MapEditor: dungeon map node entry failed: " + e);
+            }
+        }
+
+        [HarmonyPatch(typeof(HUD_DisplayName), nameof(HUD_DisplayName.Play))]
+        [HarmonyPatch([typeof(string), typeof(int), typeof(HUD_DisplayName.Positions), typeof(HUD_DisplayName.textBlendMode), typeof(int)])]
+        [HarmonyPrefix]
+        public static bool HUD_DisplayName_Play(ref string Name,
+        ref HUD_DisplayName.Positions Position,
+        ref HUD_DisplayName.textBlendMode blend,
+        ref int winterSeverity)
+        {
+            if (BiomeGenerator.Instance == null) return true;
+            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return true;
+            Plugin.Log.LogInfo("Custom Dungeon HUD_DisplayName_Play for " + BiomeGenerator.Instance.DungeonLocation);
+
+            var data = CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation];
+            Position = data.TitleTextPosition;
+            blend = data.TitleTextBlendMode;
+            winterSeverity = data.Difficulty;
+
+            return true;
+        }
+
+        [HarmonyPatch(typeof(HUD_DisplayName), nameof(HUD_DisplayName.Show))]
+        [HarmonyPrefix]
+        public static bool HUD_DisplayName_Show(ref string Name)
+        {
+            if (BiomeGenerator.Instance == null) return true;
+            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return true;
+            Plugin.Log.LogInfo("Custom Dungeon HUD_DisplayName_Show for " + BiomeGenerator.Instance.DungeonLocation);
+
+            var data = CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation];
+            Name = data.DungeonName;
+            return true;
+        }
+
+        // Room lighting is global state on LightingManager, so every arrival has to re-assert what
+        // the arriving room asked for. Generation is the wrong signal on its own: the game builds a
+        // room once and only re-activates it afterwards, so walking back into one announced nothing
+        // and its lighting never changed - the symptom being a custom mood that follows the player
+        // out of the room that set it and a revisited room that comes back plain.
+        //
+        // Both arrival points are hooked because they answer different halves of it: SetRoom is the
+        // moment the current room changes, which is early enough that the swap happens behind the
+        // transition's fade, while RoomBecameActive covers arrivals that do not go through it.
+        // LightingTool ignores the second announcement of the same arrival, so the pair is safe.
+        [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.SetRoom))]
+        [HarmonyPostfix]
+        public static void BiomeGenerator_SetRoom() => AssertRoomLighting();
+
+        [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.RoomBecameActive))]
+        [HarmonyPostfix]
+        public static void BiomeGenerator_RoomBecameActive() => AssertRoomLighting();
+
+        // A lighting slip is not worth taking a room change down with it.
+        private static void AssertRoomLighting()
+        {
+            try
+            {
+                MapEditor.Tools.LightingTool.OnRoomEntered();
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning("MapEditor: room-change lighting failed: " + e.Message);
             }
         }
 
@@ -132,16 +215,6 @@ namespace CustomSpineLoader.Patches
 
         }
 
-        [HarmonyPatch(typeof(GameManager), nameof(GameManager.IsDungeon))]
-        [HarmonyPrefix]
-        private static bool GameManager_IsDungeon(GameManager __instance, FollowerLocation location, ref bool __result)
-        {
-            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(location)) return true;
-            // Plugin.Log.LogInfo("GameManager ISDungeon custom " + location);
-            __result = true;
-            return false;
-        }
-
         [HarmonyPatch(typeof(Door), nameof(Door.OnTriggerEnter2D))] //*** THIS IS TEMPORARY, change to Health.DealDamage
         [HarmonyPrefix]
         public static bool Door_OnTriggerEnter2D(Door __instance, Collider2D collision)
@@ -201,79 +274,6 @@ namespace CustomSpineLoader.Patches
 
             return door.ConnectionType != MMRoomGeneration.GenerateRoom.ConnectionTypes.False &&
                    door.ConnectionType != MMRoomGeneration.GenerateRoom.ConnectionTypes.LeaderBoss;
-        }
-
-        [HarmonyPatch(typeof(LocationManager), nameof(LocationManager.LocationIsDungeon))]
-        [HarmonyPrefix]
-        public static bool LocationManager_LocationIsDungeon(LocationManager __instance, FollowerLocation location, ref bool __result)
-        {
-            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(location)) return true;
-            __result = true;
-            return false;
-        }
-
-        [HarmonyPatch(typeof(HUD_DisplayName), nameof(HUD_DisplayName.Play))]
-        [HarmonyPatch([typeof(string), typeof(int), typeof(HUD_DisplayName.Positions), typeof(HUD_DisplayName.textBlendMode), typeof(int)])]
-        [HarmonyPrefix]
-        public static bool HUD_DisplayName_Play(ref string Name,
-        ref HUD_DisplayName.Positions Position,
-        ref HUD_DisplayName.textBlendMode blend,
-        ref int winterSeverity)
-        {
-            if (BiomeGenerator.Instance == null) return true;
-            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return true;
-            Plugin.Log.LogInfo("Custom Dungeon HUD_DisplayName_Play for " + BiomeGenerator.Instance.DungeonLocation);
-
-            var data = CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation];
-            Position = data.TitleTextPosition;
-            blend = data.TitleTextBlendMode;
-            winterSeverity = data.Difficulty;
-
-            return true;
-        }
-
-        [HarmonyPatch(typeof(HUD_DisplayName), nameof(HUD_DisplayName.Show))]
-        [HarmonyPrefix]
-        public static bool HUD_DisplayName_Show(ref string Name)
-        {
-            if (BiomeGenerator.Instance == null) return true;
-            if (!CustomDungeonManager.CustomDungeonList.ContainsKey(BiomeGenerator.Instance.DungeonLocation)) return true;
-            Plugin.Log.LogInfo("Custom Dungeon HUD_DisplayName_Show for " + BiomeGenerator.Instance.DungeonLocation);
-
-            var data = CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation];
-            Name = data.DungeonName;
-            return true;
-        }
-
-        // Room lighting is global state on LightingManager, so every arrival has to re-assert what
-        // the arriving room asked for. Generation is the wrong signal on its own: the game builds a
-        // room once and only re-activates it afterwards, so walking back into one announced nothing
-        // and its lighting never changed - the symptom being a custom mood that follows the player
-        // out of the room that set it and a revisited room that comes back plain.
-        //
-        // Both arrival points are hooked because they answer different halves of it: SetRoom is the
-        // moment the current room changes, which is early enough that the swap happens behind the
-        // transition's fade, while RoomBecameActive covers arrivals that do not go through it.
-        // LightingTool ignores the second announcement of the same arrival, so the pair is safe.
-        [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.SetRoom))]
-        [HarmonyPostfix]
-        public static void BiomeGenerator_SetRoom() => AssertRoomLighting();
-
-        [HarmonyPatch(typeof(BiomeGenerator), nameof(BiomeGenerator.RoomBecameActive))]
-        [HarmonyPostfix]
-        public static void BiomeGenerator_RoomBecameActive() => AssertRoomLighting();
-
-        // A lighting slip is not worth taking a room change down with it.
-        private static void AssertRoomLighting()
-        {
-            try
-            {
-                MapEditor.Tools.LightingTool.OnRoomEntered();
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogWarning("MapEditor: room-change lighting failed: " + e.Message);
-            }
         }
 
         [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.Generate), MethodType.Enumerator)]

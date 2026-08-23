@@ -375,6 +375,11 @@ public class FollowerSpineLoader
         CustomFollowerSkins.Add(skinVariantName, repackedSkin);
         DataManager.SetFollowerSkinUnlocked(skinVariantName);
 
+        // The repack just baked every part's pixels into its own atlas; the parts are never
+        // pixel-read again, so their CPU copies - half of each texture's memory - come back.
+        foreach (var built in skinData)
+            SpineFolderLoader.Seal(built.Item3);
+
         return skinVariantName;
     }
     

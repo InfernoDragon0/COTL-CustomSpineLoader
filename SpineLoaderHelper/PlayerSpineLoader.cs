@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using UnityEngine;
@@ -99,6 +100,7 @@ public class PlayerSpineLoader
         public SkeletonData Parsed;
         public string Error;
         public long ParseMs;
+        public long ParseBytes;
     }
 
     private static readonly object WarmLock = new();
@@ -131,6 +133,10 @@ public class PlayerSpineLoader
         {
             WarmPending.Enqueue(new WarmUpJob { Name = name, Asset = asset, Atlas = atlas, Json = json });
             _warmQueued++;
+
+            // Lazy loads queue parses long after the boot batch drained; the pump must wake
+            // back up or the result would sit in WarmFinished forever.
+            _warmDrained = false;
         }
     }
 
@@ -170,6 +176,10 @@ public class PlayerSpineLoader
             }
 
             var watch = Stopwatch.StartNew();
+
+            // Process-wide, so a collection mid-parse skews it low - but parses run one at a
+            // time on this thread, so the delta is a fair per-skeleton attribution.
+            var heapBefore = GC.GetTotalMemory(false);
             try
             {
                 // Reads the Atlas, never writes it, so sharing it with the main thread is safe.
@@ -182,6 +192,7 @@ public class PlayerSpineLoader
             }
 
             job.ParseMs = watch.ElapsedMilliseconds;
+            job.ParseBytes = GC.GetTotalMemory(false) - heapBefore;
             job.Json = null;
 
             lock (WarmLock) WarmFinished.Enqueue(job);
@@ -235,6 +246,7 @@ public class PlayerSpineLoader
             // Worn before its turn came up, so spine-unity parsed it already. Overwriting now would
             // leave a live Skeleton pointing at data its own asset no longer holds.
             Plugin.Log.LogInfo($"{job.Name} was already parsed on demand; warm-up result dropped.");
+            ReleaseJson(job.Asset);
         }
         else
         {
@@ -255,7 +267,9 @@ public class PlayerSpineLoader
                 if (job.Asset.GetSkeletonData(true) == null || job.Asset.GetAnimationStateData() == null)
                     throw new Exception("the asset was still incomplete afterwards");
 
-                Plugin.Log.LogInfo($"Warmed {job.Name} in {job.ParseMs}ms.");
+                Plugin.Log.LogInfo($"Warmed {job.Name} in {job.ParseMs}ms " +
+                                   $"(~{job.ParseBytes / 1048576f:F0}MB of parsed skeleton data).");
+                ReleaseJson(job.Asset);
             }
             catch (Exception e)
             {
@@ -273,7 +287,24 @@ public class PlayerSpineLoader
 
         _warmWatch?.Stop();
         Plugin.Log.LogWarning($"TIMING WARM-UP: {_warmApplied} skeleton(s) parsed off the main thread in " +
-                              $"{_warmWatch?.ElapsedMilliseconds ?? 0}ms.");
+                              $"{_warmWatch?.ElapsedMilliseconds ?? 0}ms. Managed heap now " +
+                              $"{GC.GetTotalMemory(false) / 1048576f:F0}MB; Unity native " +
+                              $"{UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / 1048576f:F0}MB " +
+                              $"used of {UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / 1048576f:F0}MB reserved.");
+    }
+
+    // Once the parsed SkeletonData sits in the asset, the JSON TextAsset it was parsed from is
+    // a dead copy of a file that can run to tens of MB - and there is one per installed spine.
+    // Nothing reads it again: GetSkeletonData returns the cached data, and neither the game nor
+    // COTL_API ever Clear() these assets back to their JSON.
+    private static void ReleaseJson(SkeletonDataAsset asset)
+    {
+        if (asset == null || asset.skeletonData == null || asset.skeletonJSON == null) return;
+
+        var json = asset.skeletonJSON;
+        asset.skeletonJSON = SpineFolderLoader.PlaceholderJson();
+        UnityEngine.Object.Destroy(json);
+        SpineFolderLoader.MarkJsonFreed(asset);
     }
 
     // ---- active spine -------------------------------------------------------------------------
@@ -546,6 +577,18 @@ public class PlayerSpineLoader
             return false;
         }
 
+        // A custom fleece rides a spine that may not be loaded yet; it dresses itself the
+        // moment the load lands rather than failing the cycle.
+        var fleeceSpineName = SpineNameFromFleece(fleeceSkinName);
+        if (fleeceSpineName != null && !FleeceCyclingSpines.ContainsKey(fleeceSpineName) &&
+            Registry.ContainsKey(fleeceSpineName))
+        {
+            var id = playerId;
+            var index = fleeceIndex;
+            EnsureLoaded(fleeceSpineName, () => ApplyFleece(id, index, persist: false));
+            return false;
+        }
+
         var fleeceSkin = ResolveFleeceSkin(fleeceSkinName, player.Spine);
         if (fleeceSkin == null)
         {
@@ -566,13 +609,148 @@ public class PlayerSpineLoader
             case 0:
                 currentFleeceIndexP1 = fleeceIndex;
                 Plugin.CurrentFleeceIndexP1.Value = fleeceIndex;
+                // The NAME as well as the index: an index only resolves once the rotation is
+                // built, but the next boot needs to know which spine to load eagerly before
+                // any rotation exists.
+                if (Plugin.CurrentFleeceNameP1 != null)
+                    Plugin.CurrentFleeceNameP1.Value = FleeceRotation[fleeceIndex];
                 break;
             case 1:
                 currentFleeceIndexP2 = fleeceIndex;
                 Plugin.CurrentFleeceIndexP2.Value = fleeceIndex;
+                if (Plugin.CurrentFleeceNameP2 != null)
+                    Plugin.CurrentFleeceNameP2.Value = FleeceRotation[fleeceIndex];
                 break;
         }
     }
+    // ---- lazy loading -------------------------------------------------------------------------
+
+    // Eighteen installed spines used to pay their full cost at boot - file reads, texture
+    // decodes and above all the parsed skeleton data, measured in whole gigabytes - for looks
+    // nobody was wearing. The folder scan now only reads each spine's config.json into a
+    // registry. The spines actually selected (the API's saved choice per player, and the fleece
+    // the config file remembers) load eagerly exactly as before, so the saved look is on the
+    // player from the first frame; everything else loads the first time it is picked - file IO
+    // on a worker task, texture decodes spread one per frame, the parse on the warm-up thread -
+    // and applies itself the moment it is ready, so the game never stalls.
+    private enum SpineState { NotLoaded, Loading, Ready }
+
+    private sealed class SpineEntry
+    {
+        public string Name;
+        public string Folder;
+        public PlayerSpineConfig Config;
+        public string DefaultSkin = "Lamb";
+        public string[] Skins = [];
+        public bool IsFleece;
+        public SpineState State;
+        public SkeletonDataAsset Asset;
+        public readonly List<Action> OnReady = [];
+    }
+
+    private static readonly Dictionary<string, SpineEntry> Registry = new(StringComparer.OrdinalIgnoreCase);
+
+    // Accepts a bare spine name or the API's "<spine>/<skin>" key - the panel and the API's
+    // saved selection both speak the second form.
+    private static SpineEntry FindEntry(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        if (Registry.TryGetValue(name, out var entry)) return entry;
+
+        var slash = name.IndexOf('/');
+        return slash > 0 && Registry.TryGetValue(name.Substring(0, slash), out entry) ? entry : null;
+    }
+
+    public static bool IsLoaded(string name)
+    {
+        var entry = FindEntry(name);
+        return entry != null && entry.State == SpineState.Ready;
+    }
+
+    // The panel's picker: every wearable "<spine>/<skin>" key, loaded or not - the same keys
+    // AddPlayerSpine mints, one per skin, so selection works exactly as it always did.
+    public static List<string> RegisteredSpineNames()
+    {
+        var names = new List<string>();
+        foreach (var entry in Registry.Values)
+        {
+            if (entry.IsFleece) continue;
+
+            var skins = entry.Skins is { Length: > 0 } ? entry.Skins : [entry.DefaultSkin];
+            foreach (var skin in skins)
+                names.Add(entry.Name.Replace("/", "") + "/" + skin);
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    // The fleece rotation is built from the registry rather than the loaded dictionary, so a
+    // fleece spine appears in the cycle before it has ever been loaded.
+    public static IEnumerable<(string Name, string[] Skins)> FleeceCycleEntries()
+    {
+        foreach (var entry in Registry.Values)
+            if (entry.IsFleece) yield return (entry.Name, entry.Skins);
+    }
+
+    // "CultTweaker_<spine>_<fleece>" -> "<spine>", or null for a vanilla fleece.
+    public static string SpineNameFromFleece(string fleeceSkinName)
+    {
+        if (string.IsNullOrEmpty(fleeceSkinName) || !fleeceSkinName.Contains("CultTweaker_")) return null;
+        var split = fleeceSkinName.Split(['_'], count: 3);
+        return split.Length < 3 ? null : split[1];
+    }
+
+    // Runs onReady once the spine is usable. Already loaded - or not ours at all (another mod's
+    // spine registered straight with the API) - runs it immediately.
+    public static void EnsureLoaded(string name, Action onReady = null, bool announce = true)
+    {
+        var entry = FindEntry(name);
+        if (entry == null || entry.State == SpineState.Ready)
+        {
+            onReady?.Invoke();
+            return;
+        }
+
+        if (onReady != null) entry.OnReady.Add(onReady);
+        if (entry.State == SpineState.Loading) return;
+
+        // No coroutine host this early means we are inside startup; load the old way.
+        if (Plugin.Instance == null)
+        {
+            LoadEntryNow(entry, null);
+            entry.State = SpineState.Ready;
+            FireCallbacks(entry);
+            return;
+        }
+
+        entry.State = SpineState.Loading;
+        Plugin.Instance.StartCoroutine(LoadRoutine(entry, announce));
+    }
+
+    // The looks that must exist the moment the player does. Called at startup and again from
+    // PlayerFarming.Awake: the API may not have read its save yet when the mod loads, so the
+    // selection can appear between the two.
+    public static void EnsureSelectedLoaded()
+    {
+        for (var playerId = 0; playerId < 2; playerId++)
+        {
+            var id = playerId;
+
+            var spine = ActiveSpineName(playerId);
+            if (!string.IsNullOrEmpty(spine) && Registry.ContainsKey(spine) && !IsLoaded(spine))
+                EnsureLoaded(spine, () => ResolvePlayer(id)?.SetSkin());
+
+            var fleece = SpineNameFromFleece(playerId == 0
+                ? Plugin.CurrentFleeceNameP1?.Value : Plugin.CurrentFleeceNameP2?.Value);
+            if (fleece != null && Registry.ContainsKey(fleece) && !IsLoaded(fleece))
+                EnsureLoaded(fleece, () =>
+                {
+                    var index = GetFleeceIndex(id);
+                    if (index >= 0) ApplyFleece(id, index, persist: false);
+                });
+        }
+    }
+
     public static void LoadAllPlayerSpines(Material material = null)
     {
         if (LoadedCustomSpines)
@@ -580,166 +758,256 @@ public class PlayerSpineLoader
             Plugin.Log.LogInfo("Load Player Spines was called again but already loaded!");
             return;
         }
-        //get the plugin path, then find the foler PlayerSkins in it
+
         var playerFolder = Path.Combine(Plugin.PluginPath, "PlayerSkins");
-        //check if the player folder exists
         if (!Directory.Exists(playerFolder))
             Directory.CreateDirectory(playerFolder);
 
-        //get each folder inside the directory
-        var folders = Directory.GetDirectories(playerFolder);
-
-        // Timing: which stage of loading a spine actually costs the wait. Reported per folder and
-        // totalled at the end.
-        var loadWatch = Stopwatch.StartNew();
-        long totalReadMs = 0, totalTextureMs = 0, totalAtlasMs = 0, totalParseMs = 0;
-        long totalSkeletonBytes = 0, totalTextureBytes = 0;
-        var loadedCount = 0;
-
-        foreach (var folder in folders)
+        foreach (var folder in Directory.GetDirectories(playerFolder))
         {
-            var playerSpineName = Path.GetFileName(folder);
+            var name = Path.GetFileName(folder);
+            var entry = new SpineEntry { Name = name, Folder = folder };
 
-            var spineSkeleton = Directory.GetFiles(folder, "*.json", SearchOption.TopDirectoryOnly).Where(x => !x.Contains("config")).ToArray();
-            var spineTextures = Directory.GetFiles(folder, "*.png", SearchOption.TopDirectoryOnly);
-            var spineAtlas = Directory.GetFiles(folder, "*.atlas", SearchOption.TopDirectoryOnly);
-            var config = Directory.GetFiles(folder, "config.json", SearchOption.TopDirectoryOnly);
-
-            var defaultSkinName = "Lamb";
-            var skinList = new string[0];
-            var isFleeceCycleSkin = false;
-            PlayerSpineConfig spineConfig = null;
-
-            if (config.Length > 0)
+            var configPath = Path.Combine(folder, "config.json");
+            if (File.Exists(configPath))
             {
-                var configJson = new TextAsset(File.ReadAllText(config[0]));
-                var configObj = JsonConvert.DeserializeObject<PlayerSpineConfig>(configJson.text);
-                if (configObj != null)
+                try
                 {
-                    spineConfig = configObj;
-                    defaultSkinName = configObj.DefaultSkin;
-                    skinList = configObj.Skins;
-                    isFleeceCycleSkin = configObj.FleeceCyclingOnly;
-                    Plugin.Log.LogInfo($"Using default skin: {defaultSkinName}");
-                    Plugin.Log.LogInfo($"Using skin list: {string.Join(", ", skinList)}");
-
-                    if (configObj.DisableFleeceCycling)
-                        Plugin.Log.LogInfo($"{playerSpineName} keeps its own fleece; transmog will not dress it.");
-                    if (configObj.HiddenSlots is { Length: > 0 })
-                        Plugin.Log.LogInfo($"{playerSpineName} hides {configObj.HiddenSlots.Length} slot(s): " +
-                                           string.Join(", ", configObj.HiddenSlots));
+                    var configObj = JsonConvert.DeserializeObject<PlayerSpineConfig>(File.ReadAllText(configPath));
+                    if (configObj != null)
+                    {
+                        entry.Config = configObj;
+                        entry.DefaultSkin = string.IsNullOrEmpty(configObj.DefaultSkin) ? "Lamb" : configObj.DefaultSkin;
+                        entry.Skins = configObj.Skins ?? [];
+                        entry.IsFleece = configObj.FleeceCyclingOnly;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning($"{name}: config.json unreadable ({e.Message}); defaults used.");
                 }
             }
 
-            if (spineSkeleton.Length > 0 && spineTextures.Length > 0 && spineAtlas.Length > 0)
-            {
-                var stage = Stopwatch.StartNew();
+            Registry[name] = entry;
 
-                Plugin.Log.LogInfo("Reading atlas from " + spineAtlas[0]);
-                var atlasTxt = new TextAsset(File.ReadAllText(spineAtlas[0]));
-
-                Plugin.Log.LogInfo("Reading skeleton from " + spineSkeleton[0]);
-
-                // Kept as a string for the warm-up thread, and handed to a TextAsset as well: the
-                // asset needs it if a spine is worn before the warm-up reaches it.
-                var skeletonText = File.ReadAllText(spineSkeleton[0]);
-                var skele = new TextAsset(skeletonText);
-
-                var readMs = stage.ElapsedMilliseconds;
-                var skeletonBytes = new FileInfo(spineSkeleton[0]).Length;
-
-                stage.Restart();
-                var textures = new Texture2D[spineTextures.Length];
-                long textureBytes = 0;
-
-                foreach (var textureFile in spineTextures)
-                {
-                    Plugin.Log.LogInfo("Reading texture from " + textureFile);
-                    textureBytes += new FileInfo(textureFile).Length;
-                    Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
-                    tex.name = Path.GetFileNameWithoutExtension(textureFile);
-                    // Runtime-built, no asset backing: an UnloadUnusedAssets sweep (every room
-                    // change runs one) that decides nothing references it frees it for good, and
-                    // the skeleton wearing it is left pointing at dead memory.
-                    SpineFolderLoader.Keep(tex);
-                    textures[Array.IndexOf(spineTextures, textureFile)] = tex;
-                }
-
-                var textureMs = stage.ElapsedMilliseconds;
-
-                stage.Restart();
-                var mat = material ?? new Material(SpineFolderLoader.SpineShader());
-                var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
-                SpineFolderLoader.Keep(mat);
-                SpineFolderLoader.Keep(runtimeAtlasAsset);
-                var atlasMs = stage.ElapsedMilliseconds;
-
-                // initialize:false - the third argument is what used to parse the whole skeleton
-                // JSON here on the main thread. The warm-up thread does it instead.
-                stage.Restart();
-                var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, false, SkeletonScale);
-                SpineFolderLoader.Keep(runtimeSkeletonAsset);
-                QueueWarmUp(playerSpineName, runtimeSkeletonAsset, runtimeAtlasAsset, skeletonText);
-                var parseMs = stage.ElapsedMilliseconds;
-
-                totalReadMs += readMs;
-                totalTextureMs += textureMs;
-                totalAtlasMs += atlasMs;
-                totalParseMs += parseMs;
-                totalSkeletonBytes += skeletonBytes;
-                totalTextureBytes += textureBytes;
-                loadedCount++;
-
-                Plugin.Log.LogInfo($"TIMING {playerSpineName}: read={readMs}ms " +
-                                   $"({skeletonBytes / 1048576f:F1}MB skeleton) textures={textureMs}ms " +
-                                   $"({spineTextures.Length} files, {textureBytes / 1048576f:F1}MB) " +
-                                   $"atlas={atlasMs}ms create={parseMs}ms " +
-                                   $"total={readMs + textureMs + atlasMs + parseMs}ms");
-
-                Plugin.Log.LogInfo("Creating skeleton for " + playerSpineName);
-                Plugin.Log.LogInfo("Using material name " + mat.name);
-
-                if (isFleeceCycleSkin)
-                {
-                    Plugin.Log.LogInfo("Skin: " + playerSpineName + " is added as a fleece cycle skin.");
-                    FleeceCyclingSpines.Add(playerSpineName, new(runtimeSkeletonAsset, [.. skinList]));
-                }
-                else
-                {
-                    CustomSkinManager.AddPlayerSpine(playerSpineName, runtimeSkeletonAsset, [.. skinList]);
-                    CustomSkinManager.ChangeSelectedPlayerSpine(playerSpineName + "/" + defaultSkinName);
-
-                    // Same key AddPlayerSpine registers under, so a selected "<spine>/<skin>" finds it.
-                    if (spineConfig != null) SpineConfigs[playerSpineName.Replace("/", "")] = spineConfig;
-                }
-
-
-                // PlayerFarming.Instance.Spine.skeletonDataAsset = runtimeSkeletonAsset;
-                // PlayerFarming.Instance.Spine.initialSkinName = Plugin.Instance?.SkinToLoad;
-                // PlayerFarming.Instance.Spine.Initialize(true);
-            }
-            else
-            {
-                Plugin.Log.LogInfo($"Failed to load player skin {playerSpineName}, ensure that the folder contains at least one of each .json, .png and .atlas file.");
-            }
-
+            // Same key AddPlayerSpine registers under, so a selected "<spine>/<skin>" finds it.
+            if (entry.Config != null) SpineConfigs[name.Replace("/", "")] = entry.Config;
         }
 
-        loadWatch.Stop();
-
-        var accounted = totalReadMs + totalTextureMs + totalAtlasMs + totalParseMs;
-        Plugin.Log.LogWarning(
-            $"TIMING TOTAL: {loadedCount} player spine(s) in {loadWatch.ElapsedMilliseconds}ms | " +
-            $"read {totalReadMs}ms ({totalSkeletonBytes / 1048576f:F0}MB skeleton) | " +
-            $"textures {totalTextureMs}ms ({totalTextureBytes / 1048576f:F0}MB png) | " +
-            $"atlas {totalAtlasMs}ms | create {totalParseMs}ms | " +
-            $"other {loadWatch.ElapsedMilliseconds - accounted}ms");
-
         LoadedCustomSpines = true;
+
+        // The saved looks load now, synchronously, the way every spine used to - the player must
+        // wear their choice on the first frame, not two seconds in.
+        var loadWatch = Stopwatch.StartNew();
+        var eager = 0;
+        foreach (var name in new[]
+                 {
+                     ActiveSpineName(0), ActiveSpineName(1),
+                     SpineNameFromFleece(Plugin.CurrentFleeceNameP1?.Value),
+                     SpineNameFromFleece(Plugin.CurrentFleeceNameP2?.Value)
+                 })
+        {
+            if (string.IsNullOrEmpty(name) || !Registry.TryGetValue(name, out var entry)) continue;
+            if (entry.State != SpineState.NotLoaded) continue;
+
+            LoadEntryNow(entry, material);
+            entry.State = SpineState.Ready;
+            eager++;
+        }
+
+        Plugin.Log.LogWarning($"TIMING TOTAL: {Registry.Count} player spine(s) registered, {eager} " +
+                              $"loaded eagerly in {loadWatch.ElapsedMilliseconds}ms; the rest load when picked.");
 
         // Last, so the worker never competes with the loading loop it is queued from.
         StartWarmUp();
     }
+
+    // The synchronous load: everything a spine needs, on the spot, parse queued to the warm-up
+    // thread. Used at startup for the saved looks and as the no-host fallback.
+    private static void LoadEntryNow(SpineEntry entry, Material material)
+    {
+        var stage = Stopwatch.StartNew();
+
+        var skeletonFile = Directory.GetFiles(entry.Folder, "*.json", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault(f => !f.Contains("config"));
+        var atlasFile = Directory.GetFiles(entry.Folder, "*.atlas", SearchOption.TopDirectoryOnly).FirstOrDefault();
+        var textureFiles = Directory.GetFiles(entry.Folder, "*.png", SearchOption.TopDirectoryOnly);
+
+        if (skeletonFile == null || atlasFile == null || textureFiles.Length == 0)
+        {
+            Plugin.Log.LogWarning($"Failed to load player skin {entry.Name}: the folder needs one " +
+                                  ".json, one .atlas and at least one .png.");
+            return;
+        }
+
+        var skeletonText = File.ReadAllText(skeletonFile);
+        var atlasText = File.ReadAllText(atlasFile);
+
+        var textures = new Texture2D[textureFiles.Length];
+        for (var i = 0; i < textureFiles.Length; i++)
+            textures[i] = LoadSpineTexture(textureFiles[i], File.ReadAllBytes(textureFiles[i]));
+
+        BuildEntryAsset(entry, material, atlasText, skeletonText, textures);
+        Register(entry);
+
+        Plugin.Log.LogInfo($"TIMING {entry.Name}: loaded in {stage.ElapsedMilliseconds}ms " +
+                           $"({new FileInfo(skeletonFile).Length / 1048576f:F1}MB skeleton, " +
+                           $"{textureFiles.Length} texture(s)).");
+    }
+
+    // The asynchronous load: file IO on a worker, texture decodes one per frame, parse on the
+    // warm-up thread, applied by callback when it lands. The screen text is the "is anything
+    // happening?" answer for the seconds the parse takes.
+    private static IEnumerator LoadRoutine(SpineEntry entry, bool announce)
+    {
+        if (announce)
+            MapEditor.Tools.TriggerScreenText.Show(MapEditor.Tools.TriggerScreenText.Mode.Caption,
+                $"Preparing {entry.Name}...", "", 90f);
+
+        string skeletonText = null, atlasText = null, error = null;
+        string[] textureFiles = null;
+        List<byte[]> textureBytes = null;
+
+        // Fully qualified: a game assembly ships its own 'Task' type that wins the name.
+        var reads = System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var skeletonFile = Directory.GetFiles(entry.Folder, "*.json", SearchOption.TopDirectoryOnly)
+                    .FirstOrDefault(f => !f.Contains("config"));
+                var atlasFile = Directory.GetFiles(entry.Folder, "*.atlas", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                textureFiles = Directory.GetFiles(entry.Folder, "*.png", SearchOption.TopDirectoryOnly);
+
+                if (skeletonFile == null || atlasFile == null || textureFiles.Length == 0)
+                {
+                    error = "the folder needs one .json, one .atlas and at least one .png";
+                    return;
+                }
+
+                skeletonText = File.ReadAllText(skeletonFile);
+                atlasText = File.ReadAllText(atlasFile);
+                textureBytes = new List<byte[]>(textureFiles.Length);
+                foreach (var file in textureFiles) textureBytes.Add(File.ReadAllBytes(file));
+            }
+            catch (Exception e)
+            {
+                error = e.Message;
+            }
+        });
+
+        while (!reads.IsCompleted) yield return null;
+
+        if (error != null)
+        {
+            Plugin.Log.LogError($"Player spine {entry.Name} failed to load: {error}");
+            entry.State = SpineState.NotLoaded;
+            entry.OnReady.Clear();
+            if (announce)
+                MapEditor.Tools.TriggerScreenText.Show(MapEditor.Tools.TriggerScreenText.Mode.Caption,
+                    $"{entry.Name} failed to load", "see the log", 4f);
+            yield break;
+        }
+
+        var textures = new Texture2D[textureFiles.Length];
+        for (var i = 0; i < textureFiles.Length; i++)
+        {
+            textures[i] = LoadSpineTexture(textureFiles[i], textureBytes[i]);
+            yield return null;
+        }
+
+        BuildEntryAsset(entry, null, atlasText, skeletonText, textures);
+        StartWarmUp();
+
+        // Registered before the parse lands so the API can already resolve the name; the wearer
+        // is dressed by callback once the data exists, which is what keeps the swap smooth.
+        Register(entry);
+
+        var deadline = Time.unscaledTime + 60f;
+        while (entry.Asset != null && entry.Asset.skeletonData == null && Time.unscaledTime < deadline)
+            yield return null;
+
+        entry.State = SpineState.Ready;
+
+        if (announce)
+            MapEditor.Tools.TriggerScreenText.Show(MapEditor.Tools.TriggerScreenText.Mode.Caption,
+                $"{entry.Name} is ready", "", 2.5f);
+
+        FireCallbacks(entry);
+    }
+
+    private static Texture2D LoadSpineTexture(string file, byte[] bytes)
+    {
+        // Point filtering to match what TextureHelper always produced for these pages.
+        var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point };
+        tex.LoadImage(bytes);
+        tex.name = Path.GetFileNameWithoutExtension(file);
+
+        // Runtime-built, no asset backing: an UnloadUnusedAssets sweep that decides nothing
+        // references it frees it for good. And a player spine is a whole replacement skeleton
+        // that nothing ever repacks, so the decoded CPU copy is dead weight.
+        SpineFolderLoader.Keep(tex);
+        SpineFolderLoader.Seal(tex);
+        return tex;
+    }
+
+    private static void BuildEntryAsset(SpineEntry entry, Material material, string atlasText,
+        string skeletonText, Texture2D[] textures)
+    {
+        var atlasTxt = new TextAsset(atlasText);
+        var skele = new TextAsset(skeletonText);
+
+        var mat = material != null ? material : new Material(SpineFolderLoader.SpineShader());
+        var atlas = SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
+        SpineFolderLoader.Keep(mat);
+        SpineFolderLoader.Keep(atlas);
+
+        // initialize:false - the third argument is what used to parse the whole skeleton JSON
+        // on the main thread. The warm-up thread does it instead.
+        var asset = SkeletonDataAsset.CreateRuntimeInstance(skele, atlas, false, SkeletonScale);
+        SpineFolderLoader.Keep(asset);
+
+        entry.Asset = asset;
+        QueueWarmUp(entry.Name, asset, atlas, skeletonText);
+    }
+
+    // Hands the spine to whoever owns its kind. Deliberately NOT ChangeSelectedPlayerSpine: the
+    // old loader selected every spine as it registered it, which left the last folder worn on
+    // every boot regardless of what the player had picked. The API's own saved selection rules.
+    private static void Register(SpineEntry entry)
+    {
+        if (entry.Asset == null) return;
+
+        if (entry.IsFleece)
+        {
+            if (!FleeceCyclingSpines.ContainsKey(entry.Name))
+            {
+                Plugin.Log.LogInfo("Skin: " + entry.Name + " is added as a fleece cycle skin.");
+                FleeceCyclingSpines.Add(entry.Name, new(entry.Asset, [.. entry.Skins]));
+            }
+        }
+        else
+        {
+            CustomSkinManager.AddPlayerSpine(entry.Name, entry.Asset, [.. entry.Skins]);
+        }
+    }
+
+    private static void FireCallbacks(SpineEntry entry)
+    {
+        var callbacks = entry.OnReady.ToArray();
+        entry.OnReady.Clear();
+        foreach (var callback in callbacks)
+        {
+            try
+            {
+                callback();
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"Spine ready callback for {entry.Name} failed: {e.Message}");
+            }
+        }
+    }
+
 }
 
 public class PlayerSpineConfig

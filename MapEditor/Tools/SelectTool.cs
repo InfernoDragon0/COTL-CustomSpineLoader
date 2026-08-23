@@ -21,8 +21,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     private GameObject _resizeNode;
     private Canvas _gripCanvas;
 
-    // Captured on mouse-down on the resize node: what the object measured before the drag, so
-    // every frame scales from that rather than compounding the previous frame's result.
+    // Captured on resize mouse-down; each frame scales from this, never the previous frame.
     private Vector3 _resizeStartScale;
     private Vector3 _resizeStartCentre;
     private Vector3 _resizeStartGrab;
@@ -48,10 +47,10 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Select object"),
-        ("Ctrl", "+ drag to clone"),
-        ("Drag", "Yellow node moves, blue node resizes"),
-        ("Shift", "+ drag blue node to stretch one axis"),
+        ("LMB", "Select Object"),
+        ("Ctrl + LMB", "Clone"),
+        ("Drag", "Yellow = move, Blue = resize"),
+        ("Shift + LMB", "Blue Node stretch"),
         ("Del", "Delete selected")
     ];
 
@@ -98,8 +97,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
-        // A cloned podium carries post-Awake state and self-destroys or misbehaves on enable;
-        // the podium tool is the supported way to add more.
+        // A cloned podium carries post-Awake state and self-destroys on enable; use the podium tool.
         if (source.GetComponentInChildren<Interaction_WeaponSelectionPodium>(true) != null)
         {
             _editor.SetStatus("Weapon podiums cannot be cloned. Use the Podium tool instead.");
@@ -121,8 +119,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             : $"Cloned {source.name}. Release to drop.");
     }
 
-    // Returns true while a clone drag is in progress so the normal click handling stays out of
-    // the way for that frame.
+    // True while a clone drag is in progress; the caller skips normal click handling then.
     private bool HandleCloneDrag()
     {
         if (!_cloneDragging) return false;
@@ -141,7 +138,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return true;
     }
 
-    // Keeps the outline and grip on the selection as it is dragged or nudged.
     private void SyncGizmos()
     {
         if (_selected == null) return;
@@ -164,14 +160,11 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     public static GameObject PickWorldObject(Vector3 world)
     {
-        // Only trust a physics hit if the thing is actually drawn. The room is littered with
-        // invisible trigger and particle colliders that would otherwise swallow every click.
+        // Trust a physics hit only if the thing is drawn; the room is full of invisible trigger colliders.
         var hit = Physics2D.OverlapPoint(world);
         if (hit != null && IsSelectable(hit.gameObject))
             return SelectionRoot(hit.gameObject);
 
-        // Fall back to the smallest visible renderer whose bounds contain the point, so clicking
-        // overlapping dressing picks the most specific object rather than a huge backdrop.
         GameObject best = null;
         var bestSize = float.MaxValue;
 
@@ -195,7 +188,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return best != null ? SelectionRoot(best) : null;
     }
 
-    // Particle systems are invisible dressing for our purposes and were being picked constantly.
     private static bool IsVisibleRenderer(Renderer renderer)
     {
         if (renderer == null || !renderer.enabled) return false;
@@ -205,8 +197,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return renderer is SpriteRenderer || renderer is MeshRenderer || renderer is SkinnedMeshRenderer;
     }
 
-    // Enemy HP bars are sprite objects spawned as SIBLINGS of their enemy, so they are not
-    // caught by any enemy check and were being picked as ordinary scenery.
+    // Enemy HP bars are spawned as siblings of their enemy, so no enemy check catches them.
     private static bool IsPickIgnored(GameObject go)
     {
         return go.GetComponentInParent<HPBar>() != null;
@@ -266,14 +257,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         _editor.SetStatus("Selected: " + _selected.name);
     }
 
-    // Tinting alone was too subtle to read against the busy biome art, so the selection also gets
-    // a bright box drawn around the combined bounds of every renderer under it.
-    //
-    // The tint is applied per renderer without touching materials: SpriteRenderer has its own
-    // per-renderer colour, and everything else takes a MaterialPropertyBlock. The old
-    // renderer.material.color write cloned the material per renderer, and the clone survived
-    // deselection - every selection permanently traded a batched shared material for a private
-    // copy that nothing ever destroyed.
+    // Tint per renderer, never via renderer.material.color - that clones the material and the
+    // clone survives deselection.
     private void ApplyHighlight(GameObject go)
     {
         foreach (var renderer in go.GetComponentsInChildren<Renderer>())
@@ -310,11 +295,9 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         _resizeNode = CreateHandle("Resize", ResizeColour, SelectHandle.Mode.Resize, 24f);
     }
 
-    // The trigger tool's resize node in the same blue, so the two tools read alike.
+    // Same blue as the trigger tool's resize node.
     private static readonly Color ResizeColour = new(0.25f, 0.85f, 1f, 0.95f);
 
-    // Yellow grip at the selection's centre, matching the shape tool's move node; blue node on
-    // the outline's top-right corner for resizing.
     private GameObject CreateHandle(string name, Color colour, SelectHandle.Mode mode, float size)
     {
         var go = new GameObject("MapEditor_Selection" + name);
@@ -351,23 +334,20 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     public Vector3 SelectedPosition => _selected != null ? _selected.transform.position : Vector3.zero;
 
-    // Z is preserved so dragging never reorders depth; that is what the Z buttons are for.
+    // Z preserved: dragging never reorders depth.
     public void SetSelectedPosition(Vector3 world)
     {
         if (_selected == null) return;
         var z = _selected.transform.position.z;
         _selected.transform.position = new Vector3(world.x, world.y, z);
 
-        // Moving anything out of its culling area would otherwise see it deactivated when
-        // culling resumes, exactly as happened with doors.
+        // Anything moved out of its culling area would be deactivated when culling resumes.
         _editor.KeepCullingSuspended = true;
     }
 
     // ---- resizing -------------------------------------------------------------------------
 
-    // Captures what the object measured before the drag. False when the selection cannot be
-    // resized, or when the grab landed on the centre - a footprint that small has no direction
-    // to scale along, and the ratio would be a division by nothing.
+    // False when the grab landed on the centre - no direction to scale along, ratio divides by nothing.
     public bool BeginResize(Vector3 world)
     {
         if (_selected == null) return false;
@@ -393,8 +373,6 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return true;
     }
 
-    // Uniform by default: arbitrary room dressing distorts badly when its axes are scaled apart,
-    // so stretching one axis at a time is the deliberate choice (Shift), not the accident.
     public void ResizeTo(Vector3 world, bool perAxis)
     {
         if (_selected == null) return;
@@ -416,9 +394,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         _selected.transform.localScale = scale;
 
-        // Grow about the visible centre. The transform's own pivot is wherever the artist put it,
-        // often a corner or a floor line, and scaling around that would walk the object out from
-        // under the cursor.
+        // Grow about the visible centre, not the pivot - pivots often sit on a corner or floor line.
         var centre = MapEditorGizmos.GripPosition(_selected);
         var drift = _resizeStartCentre - centre;
         var position = _selected.transform.position;
@@ -428,8 +404,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         _editor.SetStatus($"{_selected.name} scale {scale.x:0.##} x {scale.y:0.##}");
     }
 
-    // A grab that started with almost no reach along this axis leaves it alone: the ratio there
-    // is noise, and it would snap the axis to an extreme on the first pixel of movement.
+    // A grab with almost no reach along this axis leaves it alone: the ratio there is noise.
     private static float AxisScale(float startScale, float grab, float startGrab)
     {
         if (Mathf.Abs(startGrab) < 0.05f) return startScale;
@@ -533,9 +508,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     }
 }
 
-// Drags the selected object's centre or its corner, the same pair of nodes the trigger tool
-// uses. The move grab offset is captured on mouse-down so the object does not snap its centre to
-// the cursor; the resize drag captures the object's starting size for the same reason.
+// Drags the selection's move (centre) or resize (corner) node; offsets captured on mouse-down.
 public class SelectHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
 {
     public enum Mode
@@ -567,8 +540,7 @@ public class SelectHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
             return;
         }
 
-        // A refused resize latches off for the whole drag, so a door does not report its warning
-        // once per frame.
+        // A refused resize latches off for the whole drag, so the warning fires once, not per frame.
         _resizing = _tool.BeginResize(_editor.ScreenToWorld(eventData.position));
     }
 

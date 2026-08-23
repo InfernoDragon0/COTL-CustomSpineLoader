@@ -24,8 +24,7 @@ public class ClearTool : IMapEditorTool
 
     public void OnEnter() => _editor.SetStatus("Scenery removes props; terrain also removes shapes.");
 
-    // What the editor itself put in the room, as opposed to what the biome generated. Kept
-    // separate because wiping your own work is a different intention from wiping the backdrop.
+    // Only what the editor placed, not what the biome generated.
     public int ClearPlaced()
     {
         var removed = 0;
@@ -58,8 +57,7 @@ public class ClearTool : IMapEditorTool
         destroyed += DestroyChildren(room.SceneryTransform != null ? room.SceneryTransform.transform : null);
         destroyed += DestroyChildren(room.HeavyAssetsTransform);
 
-        // Much of the biome backdrop hangs directly off the room root ("Entrance Room Dungeon
-        // 1(Clone)") rather than under SceneryTransform, so it has to be swept separately.
+        // Much of the backdrop hangs off the room root, not SceneryTransform; swept separately.
         destroyed += ClearRoomRoot(room, includeTerrain: false);
 
         SceneRefs.RescanNavigation();
@@ -114,8 +112,7 @@ public class ClearTool : IMapEditorTool
         _editor.SetStatus($"Cleared {destroyed} terrain object(s). Doors kept.");
     }
 
-    // Sweeps the room root itself. The structural containers are skipped: CustomTransform holds
-    // the editor's own content, and the other three are cleared through their own passes.
+    // Sweeps the room root; the structural containers are cleared through their own passes.
     private static int ClearRoomRoot(MMRoomGeneration.GenerateRoom room, bool includeTerrain)
     {
         var keep = new HashSet<Transform>();
@@ -127,8 +124,7 @@ public class ClearTool : IMapEditorTool
         return ClearRecursive(room.transform, keep, includeTerrain, 0);
     }
 
-    // A node that holds a door is not destroyed, but is descended into, so background dressing
-    // sharing a parent with a door still gets removed.
+    // Protected nodes are descended into, not destroyed, so shared-parent dressing still goes.
     private static int ClearRecursive(Transform node, HashSet<Transform> keep, bool includeTerrain, int depth)
     {
         if (depth > 6) return 0;

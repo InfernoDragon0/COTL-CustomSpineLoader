@@ -20,13 +20,13 @@ public static class MapNamePrompt
     // which is what "controls go through while typing" was.
     private static int _openCount;
 
-    private static void OpenModal(RuntimeMapEditor editor)
+    private static void OpenModal(IMapEditorHost editor)
     {
         _openCount++;
         editor.ModalOpen = true;
     }
 
-    private static void CloseModal(RuntimeMapEditor editor)
+    private static void CloseModal(IMapEditorHost editor)
     {
         if (_openCount > 0) _openCount--;
         if (_openCount == 0) editor.ModalOpen = false;
@@ -39,7 +39,7 @@ public static class MapNamePrompt
 
     // existsCheck/existsNoun drive the overwrite warning; the default is the map store, because
     // that is what the prompt was built for. The lighting tool passes its own profile store.
-    public static void Show(RuntimeMapEditor editor, string prefill, string title,
+    public static void Show(IMapEditorHost editor, string prefill, string title,
         Action<string> onConfirmed, Action onClosed = null,
         Func<string, bool> existsCheck = null, string existsNoun = "map", int characterLimit = NameLimit)
     {
@@ -73,7 +73,7 @@ public static class MapNamePrompt
         }
     }
 
-    private static void Build(RuntimeMapEditor editor, UIManager uiManager, string prefill, string title,
+    private static void Build(IMapEditorHost editor, UIManager uiManager, string prefill, string title,
         Action<string> onConfirmed, Action onClosed, Func<string, bool> existsCheck, string existsNoun, int characterLimit)
     {
         UICultNameMenuController menu;
@@ -104,6 +104,8 @@ public static class MapNamePrompt
         menu.SetTitle(title);
         menu.RequiresName = true;
 
+        editor.StartCoroutine(MuteBackdrop(menu));
+
         try
         {
             menu._nameInputField.characterLimit = characterLimit > 0 ? characterLimit : NameLimit;
@@ -119,6 +121,45 @@ public static class MapNamePrompt
 
         editor.StartCoroutine(FocusWhenShown(menu));
         editor.StartCoroutine(TrackLifetime(editor, menu, onClosed));
+    }
+
+    // The cult-naming screen dresses itself in the game's ritual red - a full-screen backdrop
+    // plus a red confirm highlight - which glares when it pops over the editor's muted panels.
+    // Every near-full-screen image is pressed to translucent black instead (a black tint turns
+    // red art into a dark silhouette, so the criterion is size, not colour), and the highlight
+    // swaps to the black sprite the controller already ships. Styling only, one frame after
+    // Show so the stretch-anchored rects have a layout to measure; the dialog works fine red
+    // if any of this ever misses.
+    private static IEnumerator MuteBackdrop(UICultNameMenuController menu)
+    {
+        yield return null;
+        if (menu == null) yield break;
+
+        try
+        {
+            menu._buttonHighlight.SetAsBlack();
+            var highlight = menu._buttonHighlight.Image;
+            if (highlight != null) highlight.color = new Color(1f, 1f, 1f, 0.75f);
+        }
+        catch (Exception)
+        {
+        }
+
+        try
+        {
+            foreach (var image in menu.GetComponentsInChildren<UnityEngine.UI.Image>(true))
+            {
+                if (image == null) continue;
+                var rect = image.rectTransform.rect;
+                if (rect.width < 1000f || rect.height < 700f) continue;
+
+                image.color = new Color(0f, 0f, 0f, Mathf.Clamp01(image.color.a) * 0.85f);
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: name dialog restyle skipped: " + e.Message);
+        }
     }
 
     private static IEnumerator FocusWhenShown(UICultNameMenuController menu)
@@ -190,7 +231,7 @@ public static class MapNamePrompt
 
     // The modal destroys itself on hide, and a cancel reports nothing - so the close is detected
     // by watching for the object to go rather than by a callback.
-    private static IEnumerator TrackLifetime(RuntimeMapEditor editor, UICultNameMenuController menu,
+    private static IEnumerator TrackLifetime(IMapEditorHost editor, UICultNameMenuController menu,
         Action onClosed)
     {
         while (menu != null) yield return null;

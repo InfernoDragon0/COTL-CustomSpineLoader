@@ -409,6 +409,131 @@ public class CultTweakerPanel : MonoBehaviour
         _ui.CreateHeader(_content, "- Extras -", 22);
         BuildDungeonPicker();
         _ui.CreateButton(_content, "Dump Follower Spine Atlas", DumpFollowerSlots);
+
+        _ui.CreateHeader(_content, "- World Maps -", 22);
+        BuildWorldMapSection();
+
+        _ui.CreateHeader(_content, "- Hubs -", 22);
+        BuildHubSection();
+    }
+
+    // Saved world maps, openable from anywhere in game. Listed fresh on every open for the same
+    // reason the dungeon picker is: saving a map changes the list.
+    private void BuildWorldMapSection()
+    {
+        var names = MapEditor.CTWorldMapSerialization.ListNames();
+        if (names.Count == 0)
+        {
+            Note("No world maps are saved yet.");
+        }
+        else
+        {
+            // An action dropdown like Enter Dungeon: picking is the gesture.
+            _ui.CreateDropdown(_content, "Open World Map", names, (index, _) =>
+            {
+                if (index < 0 || index >= names.Count) return;
+                OpenWorldMap(names[index]);
+            });
+
+            _ui.CreateDropdown(_content, "Edit World Map", names, (index, _) =>
+            {
+                if (index < 0 || index >= names.Count) return;
+                OpenWorldMap(names[index], edit: true);
+            });
+        }
+
+        Note("F6 flips an open map between playing and editing.");
+
+        _ui.CreateButton(_content, "New World Map", () =>
+        {
+            // A named folder is the map's identity, so a name comes first - the next free one in
+            // the series, so this button always opens an empty canvas instead of handing back
+            // whatever was last saved as "untitledworld". Rename it from the editor's File tool.
+            var fresh = new MapEditor.CTWorldMap
+            {
+                MapName = MapEditor.CTWorldMapSerialization.FreeName("untitledworld")
+            };
+
+            fresh.Nodes.Add(new MapEditor.CTWorldMapNode
+            {
+                Id = "start",
+                DisplayName = "Start",
+                NodeType = "Base",
+                InitialState = "Selectable"
+            });
+            MapEditor.CTWorldMapSerialization.Save(fresh);
+            OpenWorldMap(fresh.MapName, edit: true);
+        });
+    }
+
+    // Hubs are authored in the game's own town room rather than in a dungeon, so their entry point
+    // is here rather than in the F4 editor's Level tool: the editor can only be reached once the
+    // room it edits is standing.
+    private void BuildHubSection()
+    {
+        Note("A hub is built in the DLC town room, cleared out.");
+
+        var hubs = new List<string>();
+        foreach (var level in MapEditor.CTLevelSerialization.LoadAll())
+            if (level is { IsHub: true } && !string.IsNullOrWhiteSpace(level.LevelName))
+                hubs.Add(level.LevelName);
+        hubs.Sort(System.StringComparer.OrdinalIgnoreCase);
+
+        if (hubs.Count > 0)
+        {
+            _ui.CreateDropdown(_content, "Edit Hub", hubs, (index, _) =>
+            {
+                if (index < 0 || index >= hubs.Count) return;
+                BeginHub(hubs[index]);
+            });
+
+            _ui.CreateDropdown(_content, "Visit Hub", hubs, (index, _) =>
+            {
+                if (index < 0 || index >= hubs.Count) return;
+                EnterHub(hubs[index]);
+            });
+        }
+        else
+        {
+            Note("No hubs saved yet.");
+        }
+
+        _ui.CreateButton(_content, "New Hub", () => BeginHub(MapEditor.HubSession.FreeName()));
+    }
+
+    private void BeginHub(string hubName)
+    {
+        // Closed first: the trip runs a transition and the editor takes the screen.
+        Close();
+
+        var error = MapEditor.HubSession.Author(hubName);
+        if (error != null) Plugin.Log.LogWarning("CultTweaker: " + error);
+        else Plugin.Log.LogInfo($"CultTweaker: authoring hub '{hubName}'.");
+    }
+
+    private void EnterHub(string hubName)
+    {
+        Close();
+
+        var error = MapEditor.HubSession.Play(hubName);
+        if (error != null) Plugin.Log.LogWarning("CultTweaker: " + error);
+    }
+
+    private void OpenWorldMap(string mapName, bool edit = false)
+    {
+        var screen = MapEditor.WorldMap.WorldMapScreen.Instance;
+        if (screen == null)
+        {
+            Plugin.Log.LogWarning("CultTweaker: the world map screen is not available.");
+            return;
+        }
+
+        Plugin.Log.LogInfo($"CultTweaker: opening world map '{mapName}'.");
+
+        // Closed FIRST: both hold the pause and the screen, and the map's guard refuses to
+        // open over the panel.
+        Close();
+        screen.Open(mapName, startInEditMode: edit);
     }
 
     // Every custom dungeon registered this session, not just the first one found: the map
@@ -534,15 +659,21 @@ public class CultTweakerPanel : MonoBehaviour
 
     private static void ApplySpine(int playerId, string spineKey)
     {
-        try
+        // Loads first when the spine is not resident yet - a caption on screen covers the wait,
+        // and the swap lands the moment the skeleton is parsed. Already-loaded spines (and
+        // other mods' spines) swap on the spot exactly as before.
+        PlayerSpineLoader.EnsureLoaded(spineKey, () =>
         {
-            CustomSkinManager.ChangeSelectedPlayerSpine(spineKey, playerId);
-            Plugin.Log.LogInfo($"Player {playerId + 1} spine set to {spineKey}.");
-        }
-        catch (System.Exception e)
-        {
-            Plugin.Log.LogWarning("Spine swap failed: " + e.Message);
-        }
+            try
+            {
+                CustomSkinManager.ChangeSelectedPlayerSpine(spineKey, playerId);
+                Plugin.Log.LogInfo($"Player {playerId + 1} spine set to {spineKey}.");
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogWarning("Spine swap failed: " + e.Message);
+            }
+        });
     }
 
     // ---- COTL_API internals ---------------------------------------------------------------------
@@ -559,15 +690,19 @@ public class CultTweakerPanel : MonoBehaviour
                 .Field("CustomPlayerSpines")
                 .GetValue<Dictionary<string, SkeletonDataAsset>>();
 
-            if (dict == null) return [];
+            // Ours come from the lazy loader's registry - present whether loaded yet or not -
+            // and anything another mod registered straight with the API is appended after.
+            var result = PlayerSpineLoader.RegisteredSpineNames();
 
-            var result = new List<string>(dict.Count);
+            if (dict == null) return result;
+
             foreach (var pair in dict)
             {
                 // The API registers this one purely so its settings dropdown has an entry to
                 // show before any mod adds a real spine; selecting it does nothing.
                 if (pair.Key.StartsWith("Placeholder/")) continue;
-                result.Add(pair.Key);
+                if (!result.Exists(name => string.Equals(name, pair.Key, System.StringComparison.OrdinalIgnoreCase)))
+                    result.Add(pair.Key);
             }
 
             return result;

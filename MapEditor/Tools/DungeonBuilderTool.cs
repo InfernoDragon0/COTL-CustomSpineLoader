@@ -6,14 +6,8 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Authors a dungeon as its adventure map - the node graph the game shows between rooms, where one
-// node is one level blueprint. The side panel keeps the tool's usual shape (new / open / save /
-// enter); the graph itself is edited on a grid overlay, because a graph is a spatial thing and a
-// column of buttons is the wrong shape for it.
-//
-// The grid is not a simplification of a freeform canvas: the game's renderer lays every node out
-// at point * 300 plus its own random jitter, so the integer cell IS the position. Authoring
-// anything finer would be thrown away the first time the map opened.
+// Authors a dungeon as the game's adventure-map node graph, edited on a grid overlay.
+// The renderer positions nodes at point * 300 plus jitter, so the integer cell IS the position.
 public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 {
     public string Name => "Dungeon Builder";
@@ -57,10 +51,8 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         ("LMB again", "Deselect")
     ];
 
-    // Right-click is polled rather than taken from the EventSystem: this game installs Rewired's
-    // pointer module, which the editor already works around for left clicks, and a link gesture
-    // that silently never fires would be worse than a hit test of our own. The canvas is
-    // ScreenSpaceOverlay, so a null camera is the correct argument here.
+    // Polled, not EventSystem: Rewired's pointer module drops right clicks. The canvas is
+    // ScreenSpaceOverlay, so the null camera below is correct.
     private void HandleRightClick()
     {
         if (_overlay == null || !Input.GetMouseButtonDown(1)) return;
@@ -140,8 +132,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 
         _dynamic.Add(_ui.CreateButton(_panel, "Edit Nodes", OpenOverlay));
 
-        // Save is also rename: the dialog opens on the current name, so saving under a different
-        // one writes a second dungeon rather than needing a button of its own.
+        // Save doubles as rename: the dialog opens prefilled with the current name.
         _dynamic.Add(_ui.CreateButton(_panel, "Save Dungeon", SaveMap));
         _dynamic.Add(_ui.CreateButton(_panel, "Enter Dungeon", EnterDungeon));
         _dynamic.Add(_ui.CreateButton(_panel, "Close Dungeon", () =>
@@ -172,8 +163,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         _map.Columns = Mathf.Clamp(columns, MinGrid, MaxColumns);
         _map.Layers = Mathf.Clamp(layers, MinGrid, MaxLayers);
 
-        // Nodes outside the new grid go, and so does every link that pointed at them - a link to
-        // a node that is not there any more is what the renderer crashes on.
+        // Drop nodes outside the new grid, plus links to them - dangling links crash the renderer.
         var dropped = _map.Nodes.RemoveAll(n => n == null || n.X >= _map.Columns || n.Y >= _map.Layers);
         foreach (var node in _map.Nodes)
             node.Outgoing.RemoveAll(l => l == null || _map.NodeAt(l.X, l.Y) == null);
@@ -205,9 +195,6 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         return "untitleddungeon";
     }
 
-    // The same name dialog the map save uses, rather than the inline prompt: it is a save screen,
-    // it warns about overwriting on its own - which is what the old press-twice-to-confirm was
-    // for - and confirming under a different name is how a dungeon gets renamed.
     private void SaveMap()
     {
         MapNamePrompt.Show(_editor, _map.MapName, "NAME THIS DUNGEON", name =>
@@ -215,8 +202,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
             _map.MapName = MapEditorSerialization.Sanitize(
                 string.IsNullOrWhiteSpace(name) ? _map.MapName : name);
 
-            // Saved even when it is not playable: a half-built dungeon is worth keeping on disk,
-            // and the status says what is still missing.
+            // Save always writes, playable or not; the status says what is missing.
             var problem = DungeonMapBuilder.Validate(_map);
             var path = CTDungeonMapSerialization.Save(_map);
 
@@ -226,13 +212,11 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
                 return;
             }
 
-            // Saving is what makes the dungeon enterable: registration reads the folder back, and
-            // one already registered keeps its minted location and just takes the new graph.
+            // Registration is what makes the dungeon enterable; already-registered maps just
+            // take the new graph.
             CTMapDungeon.RegisterAll();
             Rebuild();
 
-            // Playable but worth a word: a boss node with no level behind it is an icon making a
-            // promise the vanilla floor will not keep.
             var advisory = problem == null ? DungeonMapBuilder.Advisory(_map) : null;
 
             _editor.SetStatus(
@@ -262,8 +246,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 
         CloseOverlay();
 
-        // The scene change destroys the editor host, so it closes first - the same hand-off Play
-        // Level makes.
+        // Scene change destroys the editor host; close first (same hand-off as Play Level).
         _editor.ExitForPlayback();
 
         try
@@ -315,8 +298,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         overlayRt.offsetMin = Vector2.zero;
         overlayRt.offsetMax = Vector2.zero;
 
-        // Absorbs clicks so laying out nodes never drops a prop into the room behind, and is
-        // registered as a blocker for the same reason the dropdown overlay is.
+        // Absorbs clicks so laying out nodes never drops a prop into the room behind.
         var catcher = _overlay.AddComponent<Image>();
         catcher.color = new Color(0f, 0f, 0f, 0.65f);
         _editor.RegisterUiBlocker(overlayRt);
@@ -353,8 +335,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = Vector2.zero;
 
-        // Centred on the grid area rather than the panel: the header and the button row below are
-        // not part of the graph, and a grid centred on the whole panel drifts under them.
+        // Centred on the grid area, not the panel, so the grid stays clear of header and buttons.
         rt.anchoredPosition = new Vector2(0f, (GridInsetBottom - GridInsetTop) * 0.5f);
         return rt;
     }
@@ -380,8 +361,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 
             _pendingType = typeNames[index];
 
-            // Picking a type with a node selected retypes it; with nothing selected it is the
-            // type the next placed node gets.
+            // With a selection: retype it; otherwise set the type the next placed node gets.
             if (_selected != null)
             {
                 _selected.NodeType = _pendingType;
@@ -448,8 +428,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         Place(done, new Vector2(200f, buttonRowY), new Vector2(200f, 40f));
     }
 
-    // The level dropdown belongs to whichever node is selected, so its caption follows the
-    // selection rather than the last thing picked.
+    // The caption follows the selection, not the last thing picked.
     private void SyncLevelDropdown()
     {
         if (_levelDropdown == null) return;
@@ -458,8 +437,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         _levelDropdown.SetSelected(index);
     }
 
-    // The shared widgets build themselves for a vertical layout column; the overlay places them
-    // by hand, so their rects are pinned here rather than left to a layout group that is not there.
+    // The shared widgets expect a layout column; the overlay pins their rects by hand.
     private static void Place(GameObject go, Vector2 position, Vector2 size)
     {
         var rt = go.GetComponent<RectTransform>();
@@ -496,8 +474,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         return Mathf.Min(width, height, 110f);
     }
 
-    // y counts upward on screen exactly as it does in the game: layer 0 is the bottom, where the
-    // run starts, and the top row is the end of the run.
+    // Layer 0 is the bottom row on screen, matching the game.
     private Vector2 CellPosition(int x, int y)
     {
         var cell = CellSize();
@@ -558,8 +535,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 
         if (node == null) return;
 
-        // A bound node is marked rather than relabelled: the icon is what says which node this
-        // is, and the level name never fits in a cell.
+        // Bound nodes get a badge, not a relabel: the level name never fits in a cell.
         if (!string.IsNullOrEmpty(node.Level))
         {
             var badge = new GameObject("Bound");
@@ -597,8 +573,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         }
         else
         {
-            // No blueprint sprite (or no MapManager to read one from): the name still says what
-            // the node is, which beats an empty square.
+            // No blueprint sprite: show the type name instead of an empty square.
             var label = _ui.CreateLabel(go.transform, Shorten(node.NodeType), 12, TextAlignmentOptions.Center);
             Stretch(label);
             label.GetComponent<TMP_Text>().raycastTarget = false;
@@ -645,8 +620,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 
     // ---- editing ------------------------------------------------------------------------------
 
-    // Left click never links. It places on an empty cell and selects on a node, so clicking a
-    // second node always means "I want that one now" rather than sometimes meaning "join these".
+    // Left click never links: it places on an empty cell, selects on a node.
     private void OnCellClicked(int x, int y)
     {
         var node = _map.NodeAt(x, y);
@@ -656,9 +630,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
             var placed = new CTDungeonMapNode { X = x, Y = y, NodeType = _pendingType };
             _map.Nodes.Add(placed);
 
-            // Placing one layer from the selected node links the two straight away. That is
-            // unambiguous now that left click cannot mean anything else, and it is what makes
-            // laying out a path one click per step.
+            // Placing one layer from the selection links immediately - a path in one click per step.
             if (_selected != null && TryLink(_selected, placed, out var message)) SetHint(message);
             else SetHint($"Placed {_pendingType} at ({x},{y}).");
 
@@ -714,8 +686,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         RefreshOverlay();
     }
 
-    // Toggles the link between two nodes. Returns false when they are not a layer apart, which
-    // reads as "select this one instead" rather than an error.
+    // Toggles the link; false when the nodes are not a layer apart.
     private bool TryLink(CTDungeonMapNode a, CTDungeonMapNode b, out string message)
     {
         message = null;
@@ -723,14 +694,12 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
 
         if (Mathf.Abs(a.Y - b.Y) != 1)
         {
-            // Vanilla only ever joins neighbouring layers, and the player walks one layer per
-            // move, so a longer link draws a line across the map that nothing can use.
+            // The player moves one layer per step; a longer link draws a line nothing can use.
             message = "Links only join neighbouring layers.";
             return false;
         }
 
-        // The lower node is always the source: the run climbs, and outgoing is what the game
-        // follows forward.
+        // Lower node is always the source: outgoing is what the game follows forward.
         var lower = a.Y < b.Y ? a : b;
         var upper = a.Y < b.Y ? b : a;
 
@@ -768,9 +737,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         SetHint($"Deleted the node at ({x},{y}).");
     }
 
-    // The types the loaded dungeon config has blueprints for. Without a MapManager (the editor
-    // opened somewhere with no adventure map) the list falls back to the handful of types worth
-    // authoring, so the tool still lays out a map that a dungeon scene can open later.
+    // Types the loaded config has blueprints for; with no MapManager, fall back to a fixed list.
     private static List<string> TypeNames()
     {
         var names = new List<string>();

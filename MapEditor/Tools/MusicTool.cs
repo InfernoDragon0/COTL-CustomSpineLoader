@@ -53,8 +53,7 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
         _editor.SetStatus("Pick a track to preview and assign it.");
     }
 
-    // Filled on entry, not when the panel is built: the FMOD banks are not guaranteed to be
-    // loaded at that point.
+    // Filled on entry: FMOD banks may not be loaded when the panel is built.
     private void RefreshOptions()
     {
         if (_dropdown == null) return;
@@ -100,8 +99,7 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
     public static string ShortName(string eventPath) =>
         eventPath.StartsWith(MusicPrefix + "/") ? eventPath.Substring(MusicPrefix.Length + 1) : eventPath;
 
-    // Enumerated once from the loaded FMOD banks; the game loads its banks at startup, so the
-    // set is stable for the session. Public for the trigger tool's Change-music action.
+    // Enumerated once; banks load at startup, so the set is stable. Public for the trigger tool.
     public static List<string> MusicEvents()
     {
         if (_musicEvents != null) return _musicEvents;
@@ -139,8 +137,7 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
 
     public void ContributeTo(CTNodeBlueprint map)
     {
-        // MusicEvent is edited directly on the live blueprint; nothing to copy. The hook exists
-        // so a future refactor that moves the field cannot silently skip this tool.
+        // Edited live on the blueprint; hook guards against a refactor dropping it.
         map.MusicEvent = _editor.Map.MusicEvent;
         map.MusicLoop = _editor.Map.MusicLoop;
     }

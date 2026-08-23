@@ -21,7 +21,6 @@ public static class MapAssetsTab
     public static bool IsOurCategory(AestheticCategory category) =>
         _ourCategory != null && ReferenceEquals(category, _ourCategory);
 
-    // Every structure type known to the game plus everything COTL_API registered at runtime.
     // Runtime-minted enum values do not appear in Enum.GetValues, hence the union.
     public static List<StructureBrain.TYPES> BuildCatalog()
     {
@@ -52,8 +51,7 @@ public static class MapAssetsTab
                 return false;
             }
 
-            // Instantiate under an inactive holder so Awake does not run until the clones are
-            // wired to each other; otherwise MMTab.Awake binds the clone to the original menu.
+            // Inactive holder: MMTab.Awake would bind the clone to the original menu before rewiring.
             var holder = new GameObject("CultTweaker_TabHolder");
             holder.SetActive(false);
             holder.transform.SetParent(source.transform.parent, false);
@@ -67,7 +65,6 @@ public static class MapAssetsTab
             tab.name = "MapAssetsTab";
             tab._menu = category;
 
-            // Move the clones into the real hierarchy and let them wake up.
             category.transform.SetParent(source.transform.parent, false);
             tab.transform.SetParent(sourceTab.transform.parent, false);
             holder.SetActive(true);
@@ -106,7 +103,6 @@ public static class MapAssetsTab
     // Fills our cloned page with the full catalog instead of the aesthetic content.
     public static void PopulateMapAssets(AestheticCategory category)
     {
-        // Hide the section headers and sibling containers we are not using.
         HideIfPresent(category._dlcHeader, category._majorDlcHeader, category._majorDlcWoolhavenHeader,
             category._majorDlcEwefallHeader, category._majorDlcRotHeader, category._specialEventsHeader);
 
@@ -170,7 +166,7 @@ public static class MapAssetsTab
         if (ForceUnlockAll) __result = false;
     }
 
-    // These only greyed entries out, but a map builder should be able to place anything.
+    // These only greyed entries out.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(StructuresData), nameof(StructuresData.RequiresTempleToBuild))]
     private static void StructuresData_RequiresTempleToBuild(ref bool __result)

@@ -90,6 +90,10 @@ public static class SpineFolderLoader
             // the skeleton wearing them is left pointing at freed memory. Room changes run that
             // sweep, and it is what the crash-time asset collector thread walks.
             Keep(texture);
+
+            // These skeletons (structures, NPCs, enemies, world maps) render directly and are
+            // never repacked, so the decoded CPU copy is dead weight.
+            Seal(texture);
             textures[i] = texture;
         }
 
@@ -113,6 +117,15 @@ public static class SpineFolderLoader
         var data = SkeletonDataAsset.CreateRuntimeInstance(skeletonText, atlas,
             true, scale > 0f ? scale : DefaultScale);
         Keep(data);
+
+        // initialize:true above parsed the skeleton, so the JSON TextAsset is a dead copy of
+        // the file from here on - GetSkeletonData answers from the cached data.
+        if (data.skeletonData != null)
+        {
+            data.skeletonJSON = PlaceholderJson();
+            UnityEngine.Object.Destroy(skeletonText);
+            MarkJsonFreed(data);
+        }
         return data;
     }
 
@@ -122,5 +135,52 @@ public static class SpineFolderLoader
     public static void Keep(UnityEngine.Object asset)
     {
         if (asset != null) asset.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+    }
+
+    // Assets whose JSON TextAsset has been freed after parsing. The game occasionally calls
+    // Clear() + GetSkeletonData() on an asset to force a re-parse (the entrance shrine's statue
+    // does it to refresh the player dummy's look); on these assets there is no JSON left to
+    // re-parse from, so Clear() is skipped for them instead - the cached data IS the file.
+    private static readonly HashSet<SkeletonDataAsset> JsonFreed = [];
+
+    public static void MarkJsonFreed(SkeletonDataAsset asset)
+    {
+        if (asset != null) JsonFreed.Add(asset);
+    }
+
+    public static bool IsJsonFreed(SkeletonDataAsset asset) =>
+        asset != null && JsonFreed.Contains(asset);
+
+    // GetSkeletonData refuses to answer at all - cached data or not - when skeletonJSON is
+    // null, so a freed asset keeps this stand-in instead. It is never parsed: the cached data
+    // short-circuits the read, and Clear() (the only thing that could wipe the cache) is
+    // skipped for freed assets.
+    private static TextAsset _placeholderJson;
+
+    public static TextAsset PlaceholderJson()
+    {
+        if (_placeholderJson == null)
+        {
+            _placeholderJson = new TextAsset("{}");
+            Keep(_placeholderJson);
+        }
+        return _placeholderJson;
+    }
+
+    // Frees the CPU half of a texture that only the GPU will ever sample again - LoadImage
+    // keeps every decoded PNG readable, which doubles its memory for nothing once it is on an
+    // atlas. NOT for anything the skin repacker may still read: player and follower spines go
+    // through the game's dressing pipeline, which pulls pixels back off their pages.
+    public static void Seal(Texture2D texture)
+    {
+        if (texture == null) return;
+        try
+        {
+            texture.Apply(false, true);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"Texture '{texture.name}' could not be sealed: {e.Message}");
+        }
     }
 }

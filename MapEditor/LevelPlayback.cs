@@ -29,20 +29,12 @@ public static class LevelPlayback
 
     public static bool SuppressVanillaContent { get; private set; }
 
-    // The narrow escape hatch for a suppression flag left set with nothing around to clear it:
-    // it drops the flag WITHOUT ending the run. A level run legitimately spans scene loads (the
-    // dungeon map's selector, the transition before Dungeon1 comes up), so "not in Dungeon1" is
-    // never by itself a reason to Stop() - doing that is exactly what once killed every custom
-    // level on arrival. The flag is re-armed per room by OnRoomGenerated, so clearing it between
-    // scenes costs nothing.
+    // Drops the flag WITHOUT ending the run: a level run legitimately spans scene loads, so
+    // "not in Dungeon1" is never by itself a reason to Stop().
     public static void ClearContentSuppression() => SuppressVanillaContent = false;
 
-    // Ticks when BiomeGenerator fires OnBiomeChangeRoom - which it does immediately AFTER its
-    // fire-and-forget Resources.UnloadUnusedAssets() call in ChangeRoomRoutine. That call is the
-    // repeat crash-to-desktop: its asset sweep runs on a worker thread while this loader floods
-    // the scene with a couple hundred addressable spawns and mass-releases the previous room's
-    // instances, and the two collide inside Mono's heap walk. Waiting for this tick, then for a
-    // sweep of our own to finish, is what keeps the rebuild strictly AFTER the game's sweep.
+    // Ticks on OnBiomeChangeRoom, fired right after ChangeRoomRoutine's fire-and-forget
+    // UnloadUnusedAssets - the rebuild must stay strictly after that sweep (overlap crashes).
     private static int _roomChangeTick;
 
     public static void NoteBiomeRoomChanged() => _roomChangeTick++;
@@ -53,9 +45,8 @@ public static class LevelPlayback
         public int Slot;
         public string EntryDirection;
 
-        // True when this apply came through a door, i.e. the game's ChangeRoomRoutine is running
-        // alongside and will fire its own asset unload partway through. The boot-time entrance
-        // has no such routine and must not wait for a signal that never comes.
+        // Door entries run alongside ChangeRoomRoutine and its asset unload; the boot-time
+        // entrance has no such routine and must not wait for a signal that never comes.
         public bool AwaitRoomChange;
 
         public void ArmCompletionFlag()
@@ -74,8 +65,7 @@ public static class LevelPlayback
         return $"'{_level.LevelName}' ({_resolvedRooms.Count} rooms)";
     }
 
-    // Resolves every room up front so a run never dead-ends mid-way on an empty pool, then
-    // enters CTLevelDungeon. Returns null on success, otherwise the reason it can't start.
+    // Returns null on success, otherwise the reason it can't start.
     public static string Start(CTLevelBlueprint level, RuntimeMapEditor editor)
     {
         if (level == null || editor == null) return "No level to play.";
@@ -100,8 +90,7 @@ public static class LevelPlayback
         Plugin.Log.LogInfo($"MapEditor: level '{level.LevelName}' started - rooms: {string.Join(", ", resolved)}. " +
                            "Entering CTLevelDungeon.");
 
-        // The scene change destroys the editor host; close it first so timeScale/HUD/camera
-        // are sane for the transition (mirrors what Reset does before EnterDungeon).
+        // The scene change destroys the editor host; close it first.
         editor.ExitForPlayback();
         try
         {
@@ -116,8 +105,8 @@ public static class LevelPlayback
         return null;
     }
 
-    // Picks one node blueprint per level room up front, so a run never dead-ends mid-way on an
-    // empty pool. Null means the level cannot run, with the reason in `error`.
+    // Picks one node blueprint per level room up front so a run never dead-ends on an empty
+    // pool. Null means the level cannot run, with the reason in `error`.
     private static List<string> Resolve(CTLevelBlueprint level, out string error)
     {
         error = null;
@@ -151,9 +140,8 @@ public static class LevelPlayback
         return resolved;
     }
 
-    // Binds a level to the floor the adventure map is about to generate. Deliberately does not
-    // enter a dungeon the way Start does: MapManager.EnterNode has already queued a Regenerate of
-    // the floor in place, and re-entering would throw that run away.
+    // No EnterDungeon here: MapManager.EnterNode has already queued a Regenerate of the floor
+    // in place, and re-entering would throw that run away.
     public static string StartForMapNode(CTLevelBlueprint level)
     {
         if (level == null) return "No level bound to this node.";
@@ -176,9 +164,7 @@ public static class LevelPlayback
         return null;
     }
 
-    // The caller is named because a level run ending early is invisible otherwise: the symptom
-    // shows up rooms later, as a floor that generated vanilla content, with nothing in the log
-    // tying it to whoever ended the run.
+    // Logs its caller: an early end is otherwise invisible until rooms later.
     public static void Stop()
     {
         if (Active)
@@ -195,8 +181,7 @@ public static class LevelPlayback
         if (CTLevelDungeon.Instance != null) CTLevelDungeon.Instance.Level = null;
         if (_editor != null) _editor.SetMusicLoop(null);
 
-        // The run's last room may have left a lighting override in place; it is global state,
-        // so it would follow the player out of the level. The run's rooms are done with too.
+        // The lighting override is global and would follow the player out of the level.
         Tools.LightingTool.ClearOverride();
         Tools.LightingTool.ForgetRoomLighting();
     }
@@ -205,8 +190,7 @@ public static class LevelPlayback
     {
         try
         {
-            // Frame 0 is Stop's own caller; two frames is enough to tell a deliberate stop from
-            // one that arrived through a patch.
+            // Frame 0 is Stop's own caller; two frames tell a deliberate stop from a patch.
             var trace = new System.Diagnostics.StackTrace(2, false);
             var names = new List<string>();
 
@@ -225,18 +209,15 @@ public static class LevelPlayback
         }
     }
 
-    // Called by every freshly created editor host (one per scene load). The entrance room's
-    // generation hook can fire before the host exists, so a deferred apply is picked up here.
+    // The entrance room's generation hook can fire before the host exists, so a deferred
+    // apply is picked up here.
     public static void OnEditorReady(RuntimeMapEditor editor)
     {
         _editor = editor;
 
         if (!Active || _pendingApply == null)
         {
-            // A hold whose apply routine died with the previous scene would otherwise keep
-            // MMTransition marked playing forever. Same for the suppression flag: it is set
-            // before the coroutine that clears it is guaranteed to start, and three prefixes
-            // keep skipping vanilla content for as long as it stays true.
+            // A hold or suppression flag orphaned by the previous scene must be cleared here.
             SuppressVanillaContent = false;
             if (_holdingResume) ReleaseHold();
             return;
@@ -274,25 +255,20 @@ public static class LevelPlayback
         Plugin.Log.LogInfo($"MapEditor: level room generated - applying slot {slot + 1}/{_resolvedRooms.Count} " +
                            $"('{_resolvedRooms[slot]}', {connectionType}).");
 
-        // Set before generation continues past this first step, so the content phases it is
-        // about to run are skipped outright rather than waited on.
+        // Set before generation continues so its content phases are skipped, not waited on.
         SuppressVanillaContent = _resolvedRooms[slot] != CTLevelRoom.VanillaNode;
 
         var state = new ApplyState
         {
             Room = room,
             Slot = slot,
-            // Enter through the side the player came out of: opposite the used door. The
-            // first room has no prior door and uses the blueprint's own entrance.
+            // Opposite the used door; the first room uses the blueprint's own entrance.
             EntryDirection = Opposite(DungeonPatches.LastDoorDirection),
-            // A prior door means ChangeRoomRoutine is running and will fire its asset unload;
-            // the boot-time entrance has no door behind it and no routine to wait for.
             AwaitRoomChange = DungeonPatches.LastDoorDirection != null
         };
         state.ArmCompletionFlag();
 
-        // Keep the room-change fade black until the blueprint is in; without this the vanilla
-        // room is revealed first and then visibly swapped.
+        // Hold the fade black until the blueprint is in, or the vanilla room shows first.
         if (MMTransition.IsPlaying && !_holdingResume)
         {
             MMTransition.CanResume = false;
@@ -312,8 +288,7 @@ public static class LevelPlayback
         var token = ++_applyToken;
         if (_editor == null)
         {
-            // Scene still booting; OnEditorReady picks this up. The subscription above is
-            // already live, so a generation finishing in the meantime is not missed.
+            // Scene still booting; OnEditorReady picks this up.
             _pendingApply = state;
             return;
         }
@@ -330,8 +305,7 @@ public static class LevelPlayback
         // The room owning the exit door is the Exit slot wherever the walk placed it.
         if (HasExitConnection(biomeRoom)) return last;
 
-        // Everything else consumes the middle slots in discovery order, clamped so extra
-        // rooms reuse the final Normal slot rather than stealing the Exit one.
+        // Middle slots in discovery order; extra rooms reuse the last one, never Exit's.
         _normalCursor++;
         return Mathf.Clamp(_normalCursor, 1, Mathf.Max(1, last - 1));
     }
@@ -366,14 +340,11 @@ public static class LevelPlayback
             Plugin.Log.LogInfo($"MapEditor: room shell ready in {Time.unscaledTime - startedAt:0.00}s; " +
                                "rebuilding behind the fade.");
 
-        // A pool slot can ask for the room the game generated, so a level mixes authored and
-        // vanilla rooms. Nothing to rebuild - just lift the fade on what is already there.
+        // Vanilla slot: nothing to rebuild, just lift the fade on what is already there.
         if (_resolvedRooms[state.Slot] == CTLevelRoom.VanillaNode)
         {
             Plugin.Log.LogInfo($"MapEditor: slot {state.Slot + 1} is a vanilla room; left as generated.");
-            // A previous room's lighting override is global and outlives the room that set it,
-            // so a vanilla slot falls back to whatever this room itself asked for - usually
-            // nothing, which drops the override.
+            // The lighting override is global; fall back to what this room itself asks for.
             Tools.LightingTool.OnRoomEntered();
             ReleaseHold();
             yield break;
@@ -390,11 +361,8 @@ public static class LevelPlayback
             yield break;
         }
 
-        // Strictly after the game's own unload. ChangeRoomRoutine calls UnloadUnusedAssets
-        // without yielding on it and announces OnBiomeChangeRoom right after; once that has
-        // fired, a sweep of our own is queued behind the in-flight one and waited out, so the
-        // clear-and-respawn below never overlaps an asset sweep. The cap covers door types that
-        // skip ChangeRoomRoutine - proceeding is then no worse than it ever was.
+        // Queue our sweep behind the game's in-flight one so the clear-and-respawn never
+        // overlaps an asset sweep. The cap covers door types that skip ChangeRoomRoutine.
         if (state.AwaitRoomChange)
         {
             var signalDeadline = Time.unscaledTime + 4f;
@@ -412,8 +380,7 @@ public static class LevelPlayback
             yield return null;
         }
 
-        // The boot-time entrance had no CurrentRoom to key its slot under; record it now so a
-        // revisit finds the same slot instead of consuming a fresh one.
+        // Boot-time entrance had no CurrentRoom yet; record its slot so a revisit reuses it.
         var current = BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
         if (current != null && !_roomSlots.ContainsKey(current)) _roomSlots[current] = state.Slot;
 
@@ -426,8 +393,7 @@ public static class LevelPlayback
             yield break;
         }
 
-        // The whole load runs behind the held black cover; the walk-in it queues at the end
-        // starts moving when the resume below restores time.
+        // Runs behind the held cover; the queued walk-in starts when the resume restores time.
         _editor.Loader.Load(bp, state.EntryDirection);
         while (_editor != null && _editor.Loader.IsLoading)
         {
@@ -440,8 +406,7 @@ public static class LevelPlayback
             try
             {
                 RoomLockController.RoomCompleted();
-                // RoomCompleted opens every lock in the room, including the barriers standing in
-                // for doors that lead nowhere - so those have to be sealed again after it.
+                // RoomCompleted also opens the barriers standing in for dead-end doors; reseal.
                 _editor.GetTool<Tools.DoorTool>()?.SealDoorsWithoutNeighbours();
                 Plugin.Log.LogInfo("MapEditor: no enemies in this room; doors unlocked.");
             }
@@ -454,12 +419,10 @@ public static class LevelPlayback
         ReleaseHold();
     }
 
-    // A newer room apply or a Stop() invalidates this routine. Stop/newer-token paths release
-    // the hold themselves (Stop directly, a newer apply by re-holding then releasing).
+    // A newer room apply or Stop() invalidates this routine; those paths release the hold.
     private static bool Abort(int token) => !Active || token != _applyToken;
 
-    // Lets the room-change transition finish: the fade lifts on the blueprint room. Safe to
-    // call when nothing is held or playing.
+    // Lets the room-change transition finish. Safe when nothing is held or playing.
     private static void ReleaseHold()
     {
         if (!_holdingResume) return;
@@ -476,8 +439,7 @@ public static class LevelPlayback
             MMTransition.CanResume = true;
             MMTransition.StopCurrentTransition();
 
-            // StopCurrentTransition only clears the flag when a transition coroutine is still
-            // referenced; an orphaned one leaves IsPlaying stuck true.
+            // StopCurrentTransition leaves IsPlaying stuck true for an orphaned coroutine.
             if (MMTransition.IsPlaying)
             {
                 Plugin.Log.LogInfo("MapEditor: clearing a stuck transition before dungeon entry.");
@@ -490,7 +452,7 @@ public static class LevelPlayback
             Plugin.Log.LogWarning("MapEditor: transition reset failed: " + e.Message);
         }
 
-        // The fade-out that normally restores time never ran for a forced-idle transition.
+        // The fade-out that normally restores time never ran.
         if (Time.timeScale <= 0f) Time.timeScale = 1f;
     }
 
@@ -525,8 +487,7 @@ public static class LevelPlayback
         }
     }
 
-    // Decorations and critters: hundreds of pooled spawns, every one of them destroyed by the
-    // rebuild that follows.
+    // Decorations and critters: hundreds of pooled spawns the rebuild would destroy anyway.
     [HarmonyPatch(typeof(GenerateRoom), "SpawnDecorations")]
     private static class GenerateRoom_SpawnDecorations_Patch
     {

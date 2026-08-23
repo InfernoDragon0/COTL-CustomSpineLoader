@@ -16,16 +16,13 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 {
     public string Name => "Enemies";
 
-    // Enemies sit in three address spaces, not one. The two below "Assets/Prefabs/Enemies/" are
-    // left over from the pre-Addressables Resources folder and were never re-addressed, so
-    // scanning only the first hid 103 prefabs - the bishops, and most of the Dungeon 1-4 roster.
+    // Three address spaces: the last two are pre-Addressables leftovers holding 103 prefabs.
     private static readonly string[] VanillaPrefixes =
         ["Assets/Prefabs/Enemies/", "Assets/Resources_moved/Enemies/", "Enemies/"];
 
     private static readonly string[] ExcludedFolders = ["Dead Bodies", "Weapons"];
 
-    // The bosses are addressed by what they are rather than who they are; nobody looking for
-    // Leshy searches for "Worm Boss". Only the bishops are aliased - the rest read fine.
+    // Boss prefabs are named for what the boss is, not who; only the bishops need aliasing.
     private static readonly Dictionary<string, string> Aliases = new()
     {
         ["Enemy Forest Worm Boss"] = "Leshy (Worm Boss)",
@@ -60,7 +57,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        // The group picker leads: nothing below it means anything until a group is chosen.
         _groupKeys.Clear();
         var options = new List<string>();
         foreach (var group in Catalog().Keys)
@@ -69,8 +65,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             options.Add($"{group} ({Catalog()[group].Count})");
         }
 
-        // Not part of the cached vanilla catalog: mods register enemies at their own pace, so
-        // this group is read live every time it is picked.
+        // Not cached: mods register enemies at their own pace, so this group is read live.
         _groupKeys.Add(null);
         options.Add("Custom (mods)");
 
@@ -103,8 +98,6 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public void OnEnter()
     {
-        // Open on the first group rather than an empty grid: an empty panel says nothing about
-        // what the tool does.
         if (_grid != null && _groupDropdown != null && _groupDropdown.SelectedIndex < 0)
         {
             _groupDropdown.SetSelected(0);
@@ -336,10 +329,8 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return _catalog;
     }
 
-    // CustomEnemyList is internal to COTL_API, so it is read via Harmony's traverse rather than
-    // depending on a publicized COTL_API build. The dictionary object itself is stable for the
-    // session (COTL_API mutates it in place), so the traverse runs once, not per spawn and per
-    // thumbnail.
+    // Internal to COTL_API, read via Traverse; COTL_API mutates the dictionary in place, so one
+    // read serves the session.
     private static Dictionary<Enemy, CustomEnemy> _customEnemies;
 
     private static Dictionary<Enemy, CustomEnemy> CustomEnemies()
@@ -375,8 +366,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.StartCoroutine(BuildPreview(_pendingKey, _pendingIsCustom));
     }
 
-    // Resolves an enemy key to its prefab. Shared with the thumbnail renderer, which needs the
-    // same two lookups (addressable for vanilla, COTL_API's prefab list for custom).
+    // Key to prefab; shared with the thumbnail renderer.
     internal static IEnumerator ResolvePrefabRoutine(string key, bool isCustom, System.Action<GameObject> done)
     {
         if (isCustom)
@@ -490,8 +480,8 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _preview = ghost;
     }
 
-    // The enemy controller's serialized Spine field, read generically since the concrete
-    // controller type varies per enemy; first skeleton in the hierarchy as fallback.
+    // The controller's serialized Spine field (concrete type varies per enemy); first skeleton
+    // in the hierarchy as fallback.
     internal static SkeletonAnimation MainSkeleton(GameObject ghost)
     {
         var unit = ghost.GetComponentInChildren<UnitObject>(true);
