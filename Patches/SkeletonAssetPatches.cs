@@ -21,11 +21,7 @@ public static class SkeletonAssetPatches
     }
 }
 
-// The game's skeleton-LOD manager dereferences UIManager.Instance on its first line, and the
-// game tears that singleton down during every scene switch (its own loader literally waits on
-// "UIManager.Instance == null") - so each transition spams NullReferenceExceptions from
-// SkeletonAnimationLODGlobalManager.Update. Vanilla noise, but it buries real errors; the
-// update is skipped for the frames where its first dereference would throw.
+// Temp fix for a vanilla bug: the global LOD manager updates even when the UI is not present
 [HarmonyPatch]
 public static class SkeletonLodPatches
 {

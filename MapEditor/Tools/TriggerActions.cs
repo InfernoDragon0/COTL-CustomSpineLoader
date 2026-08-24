@@ -49,7 +49,12 @@ public enum TriggerActionType
     OpenWorldMap,
 
     // No target: sends the players home, the way the dungeon portal does. A hub's way out.
-    ReturnToBase
+    ReturnToBase,
+
+    // No target, and nothing happens when it runs: the trigger carrying it marks where the player
+    // arrives in a hub, and HubSession reads it off the trigger's position. A hub cannot be saved
+    // without one - see HubSession.SpawnPoint.
+    HubSpawnPoint
 }
 
 // One sequence step; the runtime twin of MapTriggerActionData.
@@ -109,6 +114,7 @@ public class TriggerAction
         TriggerActionType.ShowTitleText => $"Title: {Quote(Target)}{SubtextNote()}",
         TriggerActionType.OpenWorldMap => $"World map: {Target}",
         TriggerActionType.ReturnToBase => "Return to base",
+        TriggerActionType.HubSpawnPoint => "Hub spawn point",
         _ => Type.ToString()
     };
 
@@ -272,7 +278,7 @@ public static class TriggerActions
             case TriggerActionType.OpenWorldMap:
             {
                 var screen = WorldMap.WorldMapScreen.Instance;
-                if (screen == null || !CTWorldMapSerialization.Exists(action.Target))
+                if (screen == null || !CTWorldMapSerialization.Available(action.Target))
                 {
                     Plugin.Log.LogWarning($"MapEditor: trigger action targets world map " +
                                           $"'{action.Target}', which is not saved here.");
@@ -286,6 +292,12 @@ public static class TriggerActions
                     yield return new WaitForSecondsRealtime(0.1f);
                 break;
             }
+
+            // A mark, not a step: the hub's arrival reads the trigger's position before the player
+            // is ever put down, so by the time the volume can be walked into there is nothing left
+            // for it to do.
+            case TriggerActionType.HubSpawnPoint:
+                break;
 
             case TriggerActionType.ReturnToBase:
                 // The run state has to go first: the scene load lands in the base, where a level

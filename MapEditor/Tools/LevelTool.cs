@@ -262,7 +262,7 @@ public class LevelTool : IMapEditorTool
         for (var i = 1; i < 1000; i++)
         {
             var candidate = stem + i;
-            if (!CTLevelSerialization.Exists(candidate)) return candidate;
+            if (!CTLevelSerialization.Available(candidate)) return candidate;
         }
         return stem;
     }

@@ -129,12 +129,29 @@ public static class CTWorldMapSerialization
 
     public static string RootPath => Path.Combine(Plugin.PluginPath, FolderName);
 
+    // Where a map of this name is written: always our own folder.
     public static string FolderFor(string mapName) =>
         Path.Combine(RootPath, MapEditorSerialization.Sanitize(mapName));
 
+    // Where a map of this name is read from: ours if we have it, else whichever other mod ships it
+    // (see ModContentPaths). A map is its folder - the config and all its art - so everything that
+    // reads a map's files goes through this, not FolderFor.
+    public static string FolderForRead(string mapName)
+    {
+        var own = FolderFor(mapName);
+        if (File.Exists(Path.Combine(own, ConfigFile))) return own;
+
+        return APIHelper.ModContentPaths.FindDirectory(FolderName,
+            MapEditorSerialization.Sanitize(mapName), ConfigFile) ?? own;
+    }
+
     public static string PathFor(string mapName) => Path.Combine(FolderFor(mapName), ConfigFile);
 
+    // Exists = ours, the overwrite question. Available = ours or any other mod's, the load question.
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
+
+    public static bool Available(string mapName) =>
+        File.Exists(Path.Combine(FolderForRead(mapName), ConfigFile));
 
     // The first name in the series nothing is saved under: untitledworld, untitledworld2, and so
     // on. A "new map" button that reused a taken name would hand back the old map, not a new one.
@@ -143,12 +160,14 @@ public static class CTWorldMapSerialization
         if (string.IsNullOrWhiteSpace(stem)) stem = "untitledworld";
         stem = MapEditorSerialization.Sanitize(stem);
 
-        if (!Exists(stem)) return stem;
+        // Available, not Exists: a name another mod already uses is a name that would be shadowed
+        // by ours, which is a confusing thing for a "new map" button to hand back.
+        if (!Available(stem)) return stem;
 
         for (var suffix = 2; suffix < 1000; suffix++)
         {
             var candidate = stem + suffix;
-            if (!Exists(candidate)) return candidate;
+            if (!Available(candidate)) return candidate;
         }
 
         return stem + Guid.NewGuid().ToString("N").Substring(0, 4);
@@ -197,7 +216,9 @@ public static class CTWorldMapSerialization
     {
         if (string.IsNullOrWhiteSpace(fromMapName) || string.IsNullOrWhiteSpace(toMapName)) return 0;
 
-        var from = FolderFor(fromMapName);
+        // Read side for the source: saving another mod's map under a new name is how it is adopted
+        // for editing, and its art has to come along into our own folder for that to mean anything.
+        var from = FolderForRead(fromMapName);
         var to = FolderFor(toMapName);
         if (!Directory.Exists(from) ||
             string.Equals(Path.GetFullPath(from), Path.GetFullPath(to), StringComparison.OrdinalIgnoreCase))
@@ -263,7 +284,8 @@ public static class CTWorldMapSerialization
 
     public static CTWorldMap LoadByName(string mapName)
     {
-        var path = PathFor(mapName);
+        var folder = FolderForRead(mapName);
+        var path = Path.Combine(folder, ConfigFile);
 
         try
         {
@@ -273,7 +295,7 @@ public static class CTWorldMapSerialization
             if (map == null) return null;
 
             // The folder name is the identity, not the name stored in the file.
-            map.MapName = Path.GetFileName(FolderFor(mapName));
+            map.MapName = Path.GetFileName(folder);
             DropUnknowns(map);
             return map;
         }
@@ -290,10 +312,8 @@ public static class CTWorldMapSerialization
 
         try
         {
-            if (!Directory.Exists(RootPath)) return names;
-
-            foreach (var folder in Directory.GetDirectories(RootPath))
-                if (File.Exists(Path.Combine(folder, "config.json")))
+            foreach (var folder in APIHelper.ModContentPaths.DirectoriesIn(FolderName))
+                if (File.Exists(Path.Combine(folder, ConfigFile)))
                     names.Add(Path.GetFileName(folder));
         }
         catch (Exception e)

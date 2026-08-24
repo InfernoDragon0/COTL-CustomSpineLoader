@@ -52,7 +52,9 @@ public static class CustomCutsceneLoader
         try
         {
             EnsureFolder();
-            foreach (var file in Directory.GetFiles(RootPath))
+
+            // Ours and any other mod's CultTweaker/CustomCutscenes (see ModContentPaths).
+            foreach (var file in ModContentPaths.FilesIn(FolderName, "*"))
             {
                 var extension = Path.GetExtension(file);
                 if (Array.IndexOf(Extensions, extension.ToLowerInvariant()) < 0) continue;
@@ -79,8 +81,8 @@ public static class CustomCutsceneLoader
             EnsureFolder();
             foreach (var extension in Extensions)
             {
-                var path = Path.Combine(RootPath, name + extension);
-                if (File.Exists(path)) return path;
+                var path = ModContentPaths.FindFile(FolderName, name + extension);
+                if (path != null) return path;
             }
         }
         catch (Exception e)
@@ -107,8 +109,8 @@ public static class CustomCutsceneLoader
             EnsureFolder();
             foreach (var extension in AudioExtensions)
             {
-                var path = Path.Combine(RootPath, name + extension);
-                if (File.Exists(path)) return path;
+                var path = ModContentPaths.FindFile(FolderName, name + extension);
+                if (path != null) return path;
             }
         }
         catch (Exception e)
@@ -151,7 +153,9 @@ public static class CustomCutsceneLoader
 
     // Windows' own decoder first, and ffmpeg only if that cannot be used. The first needs nothing
     // installed and produces a .wav; the second is smaller output but somebody has to have
-    // downloaded it. Either way the file lands next to the video and is found from then on.
+    // downloaded it. Either way the file lands in OUR folder - even for a video another mod shipped,
+    // which is not ours to write into - and AudioPathFor looks there first, so it is found from
+    // then on.
     private static void ExtractOne(string name)
     {
         var video = PathFor(name);

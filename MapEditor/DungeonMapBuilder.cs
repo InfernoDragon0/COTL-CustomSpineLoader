@@ -56,7 +56,7 @@ public static class DungeonMapBuilder
         foreach (var node in map.Nodes)
         {
             if (node == null || string.IsNullOrEmpty(node.Level)) continue;
-            if (!CTLevelSerialization.Exists(node.Level))
+            if (!CTLevelSerialization.Available(node.Level))
                 return $"Node ({node.X},{node.Y}) plays level '{node.Level}', which is not saved.";
         }
 

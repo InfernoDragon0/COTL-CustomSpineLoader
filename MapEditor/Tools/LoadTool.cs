@@ -59,6 +59,20 @@ public class LoadTool : IMapEditorTool
         _previews.Clear();
     }
 
+    // The room blueprint each saved hub is dressed with.
+    private static HashSet<string> HubBlueprintNames()
+    {
+        var names = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+
+        foreach (var level in CTLevelSerialization.LoadAll())
+        {
+            var blueprint = HubSession.BlueprintFor(level);
+            if (blueprint != null) names.Add(blueprint);
+        }
+
+        return names;
+    }
+
     private void RefreshList()
     {
         ClearEntries();
@@ -67,7 +81,22 @@ public class LoadTool : IMapEditorTool
 
         var results = MapEditorSerialization.LoadAll();
 
-        if (results.Count == 0)
+        // In a hub session the room being edited is a hub, and the only blueprints worth offering
+        // are the other hubs' - a dungeon room loaded into the town would arrive with doors and
+        // enemies the town has no use for.
+        if (HubSession.Active)
+        {
+            var hubBlueprints = HubBlueprintNames();
+            results.RemoveAll(bp => bp == null || !hubBlueprints.Contains(bp.MapName));
+
+            if (results.Count == 0)
+            {
+                _entries.Add(_ui.CreateLabel(_panel, "No other hubs saved yet.", 16,
+                    TextAlignmentOptions.Center));
+                return;
+            }
+        }
+        else if (results.Count == 0)
         {
             _entries.Add(_ui.CreateLabel(_panel, "No saved blueprints yet.", 16, TextAlignmentOptions.Center));
             return;

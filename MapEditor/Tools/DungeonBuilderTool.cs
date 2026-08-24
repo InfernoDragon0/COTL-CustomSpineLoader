@@ -190,7 +190,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts
         for (var i = 1; i < 1000; i++)
         {
             var candidate = "untitleddungeon" + i;
-            if (!CTDungeonMapSerialization.Exists(candidate)) return candidate;
+            if (!CTDungeonMapSerialization.Available(candidate)) return candidate;
         }
         return "untitleddungeon";
     }

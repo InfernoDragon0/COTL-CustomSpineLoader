@@ -688,7 +688,7 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         var result = new List<string>();
         try
         {
-            var folder = CTWorldMapSerialization.FolderFor(mapName);
+            var folder = CTWorldMapSerialization.FolderForRead(mapName);
             if (Directory.Exists(folder))
                 foreach (var file in Directory.GetFiles(folder, "*.png", SearchOption.TopDirectoryOnly))
                     result.Add(Path.GetFileName(file));

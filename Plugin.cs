@@ -73,6 +73,15 @@ namespace CustomSpineLoader
             CurrentFleeceNameP1 = Config.Bind("Fleece", "CurrentFleeceNameP1", "", "Current fleece skin name for Player 1 (kept alongside the index so its spine can load at boot)");
             CurrentFleeceNameP2 = Config.Bind("Fleece", "CurrentFleeceNameP2", "", "Current fleece skin name for Player 2 (kept alongside the index so its spine can load at boot)");
 
+            // Before any loader runs, so the log says which other mods are handing us content
+            // through their own CultTweaker folder (see ModContentPaths) before it says what loaded.
+            ModContentPaths.LogWhatIsThere(
+                "PlayerSkins", "FollowerSpines", "FollowerSkins", "BuildingOverrides",
+                "CustomInventoryItems", "CustomMeals", "CustomTarotCards", "CustomStructures",
+                "CustomNpcs", "CustomEnemies", "CustomCutscenes", "CustomShapeProfiles",
+                MapEditor.MapEditorSerialization.FolderName, MapEditor.CTLevelSerialization.FolderName,
+                MapEditor.CTDungeonMapSerialization.FolderName, MapEditor.CTWorldMapSerialization.FolderName);
+
             SpineMemory.Phase("PlayerSpines", () => PlayerSpineLoader.LoadAllPlayerSpines());
             Log.LogInfo("Cult Tweaker is loading! For more information or templates on how to use this mod, go to the NexusMods page!");
             CustomFollowerCommandManager.Add(new CustomColorCommand());

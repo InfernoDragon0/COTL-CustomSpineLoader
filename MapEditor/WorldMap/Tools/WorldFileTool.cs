@@ -24,18 +24,10 @@ public class WorldFileTool : IMapEditorTool
         ui.CreateHeader(panel, "- Map -", 22);
         Note(ui, panel, $"Editing: {map.MapName}");
 
-        ui.CreateButton(panel, "Save", () =>
-        {
-            if (CTWorldMapSerialization.Save(map) != null)
-            {
-                _editor.Screen?.MarkSaved();
-                _editor.SetStatus($"Saved '{map.MapName}'.");
-            }
-            else
-                _editor.SetStatus("Save failed, see log.", StatusSeverity.Error);
-        });
-
-        ui.CreateButton(panel, "Rename / Save As...", () =>
+        // One button, the way the room editor's Save is also its rename: the dialog opens on the
+        // current name, so confirming it saves and changing it saves a copy under the new one.
+        // Ctrl+S is the same save with no dialog at all.
+        ui.CreateButton(panel, "Save Map...", () =>
             MapNamePrompt.Show(_editor, map.MapName, "World map name", chosen =>
             {
                 var previous = map.MapName;
@@ -48,6 +40,16 @@ public class WorldFileTool : IMapEditorTool
                     return;
                 }
 
+                _editor.NoteSaved(map.MapName);
+
+                if (string.Equals(previous, map.MapName, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    _editor.Screen?.MarkSaved();
+                    _editor.RebuildActivePanel();
+                    _editor.SetStatus($"Saved '{map.MapName}'.", StatusSeverity.Success);
+                    return;
+                }
+
                 // A map is its folder, so the new name is an empty folder until its art follows.
                 var copied = CTWorldMapSerialization.CopyArt(previous, map.MapName);
                 WorldMapAssets.ForgetFailures();
@@ -57,7 +59,7 @@ public class WorldFileTool : IMapEditorTool
                 _editor.RebuildActivePanel();
                 _editor.SetStatus(copied > 0
                     ? $"Saved as '{map.MapName}', with {copied} art file(s) copied over."
-                    : $"Saved as '{map.MapName}'.");
+                    : $"Saved as '{map.MapName}'.", StatusSeverity.Success);
             }, existsCheck: CTWorldMapSerialization.Exists, existsNoun: "world map"));
 
         ui.CreateButton(panel, "New Map...", () =>

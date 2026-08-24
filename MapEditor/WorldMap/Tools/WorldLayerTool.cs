@@ -10,11 +10,12 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 {
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("Left click", "Select layer / drag"),
-        ("Ctrl+Left", "Clone layer, drag to place"),
-        ("Drag corner", "Resize the selection"),
-        ("Click empty", "Clear the selection"),
-        ("Del", "Delete selected layer")
+        ("LMB", "Select layer / drag"),
+        ("RMB", "Select top layer here"),
+        ("Ctrl+LMB", "Drag to Clone layer"),
+        ("Corners", "B:Resize; Y:Rotate"),
+        ("Click empty", "Clear selection"),
+        ("Del", "Delete current layer")
     ];
 
     private readonly WorldMapEditor _editor;
@@ -71,30 +72,7 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             _editor.SetStatus($"Map folder re-read: {sprites} png(s), {skeletons} spine folder(s).");
         });
 
-        // Pickers list what is on disk right now - files can be dropped in mid-session.
-        var pngs = ListPngs(map.MapName);
-        if (pngs.Count > 0)
-        {
-            var spritePicker = ui.CreateDropdown(panel, "Add sprite layer", pngs, (index, _) =>
-            {
-                if (index >= 0 && index < pngs.Count) AddLayer("Sprite", pngs[index]);
-            });
-            WorldMapEditor.Hint(spritePicker, $"Add sprite layer - {pngs.Count} png(s) in the map folder");
-        }
-        else
-            Note(ui, panel, "No .png files in the map folder yet.");
-
-        var spines = ListSpineFolders(map.MapName);
-        if (spines.Count > 0)
-        {
-            var spinePicker = ui.CreateDropdown(panel, "Add spine layer", spines, (index, _) =>
-            {
-                if (index >= 0 && index < spines.Count) AddLayer("Spine", spines[index]);
-            });
-            WorldMapEditor.Hint(spinePicker, $"Add spine layer - {spines.Count} spine folder(s) in the map folder");
-        }
-        else
-            Note(ui, panel, "No spine subfolders (skeleton .json + .atlas + pages).");
+        BuildAddPickers(panel, ui, map);
 
         var selected = SelectedLayer();
         if (selected == null)
@@ -104,8 +82,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         }
 
         ui.CreateHeader(panel, "- Selected: " + selected.Id + " -", 20);
-        Note(ui, panel, $"Scale {selected.Scale?.X ?? 1f:0.##} - drag the blue corner node.");
-        Note(ui, panel, $"Rotation {selected.RotationZ:0} - drag the yellow one.");
 
         ui.CreateSlider(panel, "Parallax distance", 0f, 1f, selected.ParallaxDistance,
             value => selected.ParallaxDistance = value);
@@ -121,6 +97,7 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             var animations = WorldMapAssets.AnimationNames(_editor.Map.MapName, selected.Asset);
             if (animations.Count > 0)
             {
+                Label(ui, panel, "Animation");
                 var animPicker = ui.CreateDropdown(panel, "Animation", animations, (index, value) =>
                 {
                     selected.Animation = value;
@@ -128,11 +105,14 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
                 });
                 var current = animations.IndexOf(selected.Animation);
                 if (current >= 0) animPicker.SetSelected(current);
+                WorldMapEditor.Hint(animPicker,
+                    $"Animation - {animations.Count} on this skeleton");
             }
 
             var skins = WorldMapAssets.SkinNames(_editor.Map.MapName, selected.Asset);
             if (skins.Count > 1)
             {
+                Label(ui, panel, "Skin");
                 var skinPicker = ui.CreateDropdown(panel, "Skin", skins, (index, value) =>
                 {
                     selected.Skin = value;
@@ -140,6 +120,7 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
                 });
                 var current = skins.IndexOf(selected.Skin);
                 if (current >= 0) skinPicker.SetSelected(current);
+                WorldMapEditor.Hint(skinPicker, $"Skin - {skins.Count} on this skeleton");
             }
 
             ui.CreateToggle(panel, "Loop animation", selected.Loop, value =>
@@ -157,6 +138,57 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 
         BuildLayerList(panel, ui);
     }
+
+    // ---- adding art ---------------------------------------------------------------------------
+
+    // Two steps rather than one dropdown per kind, the way the trigger tool picks an action and
+    // then its target: what kind of layer, then which file. The second list is filled from the
+    // first pick and stays filled across panel rebuilds, so adding two sprites is two clicks the
+    // second time.
+    private static readonly string[] AddKinds = ["Sprite", "Spine"];
+
+    private string _addKind;
+    private MapEditorDropdown _addAssetPicker;
+
+    private void BuildAddPickers(RectTransform panel, MapEditorUI ui, CTWorldMap map)
+    {
+        Label(ui, panel, "Add layer");
+        var kindPicker = ui.CreateDropdown(panel, "Add layer", AddKinds, (index, _) =>
+        {
+            _editor.BlockWorldClicks();
+            _addKind = index == 1 ? "Spine" : "Sprite";
+
+            var options = AssetsFor(map.MapName, _addKind);
+            _addAssetPicker?.SetOptions(options);
+
+            _editor.SetStatus(options.Count > 0
+                ? $"Pick which {_addKind.ToLowerInvariant()} to add."
+                : _addKind == "Spine"
+                    ? "No spine subfolders in the map folder (skeleton .json + .atlas + pages)."
+                    : "No .png files in the map folder yet.");
+        });
+
+        if (_addKind != null)
+            kindPicker.SetSelected(System.Array.IndexOf(AddKinds, _addKind));
+
+        // Listed on every build - files can be dropped into the folder mid-session.
+        var assets = _addKind != null ? AssetsFor(map.MapName, _addKind) : [];
+
+        _addAssetPicker = ui.CreateDropdown(panel, "Select Art", assets, (index, value) =>
+        {
+            if (_addKind == null || index < 0 || index >= assets.Count) return;
+            AddLayer(_addKind, value);
+        });
+
+        WorldMapEditor.Hint(_addAssetPicker, _addKind == null
+            ? "Select Art - choose type above first"
+            : $"Select Art - {assets.Count} {_addKind.ToLowerInvariant()}(s) in the map folder");
+    }
+
+    private static List<string> AssetsFor(string mapName, string kind) =>
+        string.Equals(kind, "Spine", System.StringComparison.OrdinalIgnoreCase)
+            ? ListSpineFolders(mapName)
+            : ListPngs(mapName);
 
     // ---- the layer list ---------------------------------------------------------------------
 
@@ -328,6 +360,21 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             var doomed = SelectedLayer();
             if (doomed != null) DeleteLayer(doomed);
             else _editor.SetStatus("No layer selected.");
+            return;
+        }
+
+        // Right click ignores the selection's own priority and takes the front-most layer here.
+        // Without it a backdrop, once selected, is under the cursor everywhere and left click can
+        // never reach anything in front of it.
+        if (Input.GetMouseButtonDown(1) && !_editor.PointerOverEditorUi())
+        {
+            var front = HitLayer(preferSelected: false);
+
+            Select(front?.Id);
+            _editor.RebuildActivePanel();
+            _editor.SetStatus(front != null
+                ? $"Selected '{front.Id}' - the front layer here."
+                : "Nothing here to select.");
             return;
         }
 
@@ -566,7 +613,9 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 
     // The front-most layer under the cursor, so clicking a stack picks what the eye sees - except
     // for the selected one, which wins wherever it sits, so a layer behind others stays draggable.
-    private CTWorldMapLayer HitLayer()
+    // preferSelected false is the right-click pick: pure front-most, which is the way back out when
+    // the selection is a backdrop the cursor is always inside.
+    private CTWorldMapLayer HitLayer(bool preferSelected = true)
     {
         CTWorldMapLayer best = null;
 
@@ -576,7 +625,8 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             if (!_editor.Screen.LayerRects.TryGetValue(layer.Id, out var rect) || rect == null) continue;
             if (!ContainsPointer(rect, layer)) continue;
 
-            if (string.Equals(layer.Id, _editor.SelectedLayerId, System.StringComparison.OrdinalIgnoreCase))
+            if (preferSelected &&
+                string.Equals(layer.Id, _editor.SelectedLayerId, System.StringComparison.OrdinalIgnoreCase))
                 return layer;
 
             if (best == null || layer.SortOrder >= best.SortOrder) best = layer;
@@ -669,7 +719,7 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         var result = new List<string>();
         try
         {
-            var folder = CTWorldMapSerialization.FolderFor(mapName);
+            var folder = CTWorldMapSerialization.FolderForRead(mapName);
             if (!Directory.Exists(folder)) return result;
             foreach (var file in Directory.GetFiles(folder, "*.png", SearchOption.TopDirectoryOnly))
                 result.Add(Path.GetFileName(file));
@@ -686,7 +736,7 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         var result = new List<string>();
         try
         {
-            var folder = CTWorldMapSerialization.FolderFor(mapName);
+            var folder = CTWorldMapSerialization.FolderForRead(mapName);
             if (!Directory.Exists(folder)) return result;
             foreach (var sub in Directory.GetDirectories(folder))
                 if (Directory.GetFiles(sub, "*.atlas", SearchOption.TopDirectoryOnly).Length > 0)
@@ -703,5 +753,13 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
     {
         var label = ui.CreateLabel(parent, text, 15);
         label.GetComponent<TMP_Text>().color = new Color(1f, 1f, 1f, 0.7f);
+    }
+
+    // A caption above a dropdown: the widget shows its current value once one is picked, and then
+    // nothing on it says what it sets.
+    private static void Label(MapEditorUI ui, Transform parent, string text)
+    {
+        var label = ui.CreateLabel(parent, text, 14);
+        label.GetComponent<TMP_Text>().color = new Color(1f, 1f, 1f, 0.55f);
     }
 }

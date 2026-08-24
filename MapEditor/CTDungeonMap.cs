@@ -76,7 +76,14 @@ public static class CTDungeonMapSerialization
     public static string PathFor(string mapName) =>
         Path.Combine(RootPath, MapEditorSerialization.Sanitize(mapName) + ".json");
 
+    // Exists = ours, the overwrite question. Available = ours or any other mod's, the load question.
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
+
+    public static bool Available(string mapName) => ReadPathFor(mapName) != null;
+
+    private static string ReadPathFor(string mapName) =>
+        APIHelper.ModContentPaths.FindFile(FolderName,
+            MapEditorSerialization.Sanitize(mapName) + ".json");
 
     public static string Save(CTDungeonMap map)
     {
@@ -124,9 +131,7 @@ public static class CTDungeonMapSerialization
 
         try
         {
-            if (!Directory.Exists(RootPath)) return results;
-
-            foreach (var file in Directory.GetFiles(RootPath, "*.json", SearchOption.TopDirectoryOnly))
+            foreach (var file in APIHelper.ModContentPaths.FilesIn(FolderName, "*.json"))
             {
                 try
                 {

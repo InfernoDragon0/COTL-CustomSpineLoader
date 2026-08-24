@@ -763,7 +763,9 @@ public class PlayerSpineLoader
         if (!Directory.Exists(playerFolder))
             Directory.CreateDirectory(playerFolder);
 
-        foreach (var folder in Directory.GetDirectories(playerFolder))
+        // Ours, plus the same folder in any other mod's CultTweaker folder (ModContentPaths). The
+        // entry keeps the absolute folder it was found in, so the art loads from wherever it lives.
+        foreach (var folder in APIHelper.ModContentPaths.DirectoriesIn("PlayerSkins"))
         {
             var name = Path.GetFileName(folder);
             var entry = new SpineEntry { Name = name, Folder = folder };

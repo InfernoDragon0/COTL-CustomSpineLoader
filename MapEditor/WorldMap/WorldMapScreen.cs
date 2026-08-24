@@ -766,7 +766,7 @@ public class WorldMapScreen : MonoBehaviour
             // The selection wins where a node is both: it is the one being worked on.
             if (!string.IsNullOrEmpty(_markedNodeId) &&
                 string.Equals(view.Data.Id, _markedNodeId, StringComparison.OrdinalIgnoreCase))
-                view.SetMark(WorldMapNodeView.SelectedMark);
+                view.SetMark(WorldMapNodeView.SelectedMark, emphasised: true);
             else if (_requiredMarks.Contains(view.Data.Id))
                 view.SetMark(WorldMapNodeView.RequiredMark);
             else

@@ -50,9 +50,22 @@ public class CTMapTrigger : MonoBehaviour
 
     private void OnDestroy() => All.Remove(this);
 
+    // While this holds, nothing fires: the hub arrival carries the player across (and onto)
+    // authored volumes, and entering one then is the session's doing, not the player's. A walk
+    // that trips a control-locking sequence mid-stride queues SetInactive onto its own end - a
+    // frozen player. _inside is deliberately left false through the mute, so a sequence on the
+    // spawn trigger itself fires the moment the mute lifts, after the player has landed.
+    private static float _mutedUntil;
+
+    public static void MuteFiring(float seconds) =>
+        _mutedUntil = Time.realtimeSinceStartup + Mathf.Max(0f, seconds);
+
+    private static bool Muted => Time.realtimeSinceStartup < _mutedUntil;
+
     // Vanilla's own test (TriggerCallback): the collider has to belong to a player.
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (Muted) return;
         if (other == null) return;
         if (other.GetComponent<PlayerFarming>() == null &&
             other.GetComponentInParent<PlayerFarming>() == null) return;
@@ -198,7 +211,8 @@ public class CTMapTrigger : MonoBehaviour
 
         var inside = AnyPlayerInside();
 
-        if (inside && !_inside) _inside = Fire();
+        if (Muted) { }  // see MuteFiring: _inside stays false so the entry lands when it lifts
+        else if (inside && !_inside) _inside = Fire();
         else _inside = inside;
 
         if (_flashing && _flashUntil <= Time.unscaledTime)
@@ -484,7 +498,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             TriggerActionType.MovePlayersToTrigger,
             TriggerActionType.MovePlayersToObject,
             TriggerActionType.StartConversation,
-            TriggerActionType.PlayPlayerAnimation
+            TriggerActionType.PlayPlayerAnimation,
+            TriggerActionType.HubSpawnPoint
         ],
         [
             TriggerActionType.CameraLookAtObject,
@@ -521,6 +536,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         TriggerActionType.ApplyLighting => "Apply lighting",
         TriggerActionType.OpenWorldMap => "Open world map",
         TriggerActionType.ReturnToBase => "Return to base",
+        TriggerActionType.HubSpawnPoint => "Hub spawn point (player arrives here)",
         TriggerActionType.ChangeMusic => "Change music",
         TriggerActionType.Wait => "Wait for seconds",
         TriggerActionType.CameraOffset => "Set camera offset",
@@ -1017,6 +1033,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             // Nothing left to ask.
             case TriggerActionType.CameraOffsetReset:
             case TriggerActionType.CameraZoomReset:
+            case TriggerActionType.ReturnToBase:
+            case TriggerActionType.HubSpawnPoint:
                 AddAction(new TriggerAction { Type = type });
                 break;
 

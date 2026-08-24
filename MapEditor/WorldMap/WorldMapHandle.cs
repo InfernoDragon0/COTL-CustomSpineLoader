@@ -4,7 +4,7 @@ using UnityEngine.UI;
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
 // The corner nodes the room editor's select tool works by, in canvas terms: small squares riding
-// the corners of whatever is selected. The blue one on the right scales; the yellow one on the left
+// the corners of whatever is selected. The blue one on the right scales; the green one on the left
 // rotates. They hang from the screen's gizmo root like the selection frame, so nothing the map
 // draws can cover them, and the tools do the dragging - a handle only says where it is and whether
 // the pointer is on it.
@@ -17,7 +17,7 @@ internal class WorldMapHandle : MonoBehaviour
     private const float Offset = 6f;
 
     public static readonly Color ScaleColour = CustomSpineLoader.MapEditor.Tools.MapEditorGizmos.BoxColour;
-    public static readonly Color RotateColour = CustomSpineLoader.MapEditor.Tools.MapEditorGizmos.GripColour;
+    public static readonly Color RotateColour = new(0.35f, 0.95f, 0.45f);
 
     private RectTransform _rect;
     private RectTransform _target;

@@ -11,16 +11,21 @@ namespace CustomSpineLoader.SpineLoaderHelper;
 public class StructureBuildingOverrideHelper
 {
     public static Dictionary<string, List<StructureBuildingOverride>> StructureBuildingOverrides { get; private set; } = [];
+
+    // Which folder each building's overrides were read from: ours, or another mod's CultTweaker
+    // folder (ModContentPaths). The sprites are named relative to it, so it has to be remembered
+    // rather than rebuilt from the plugin path.
+    private static readonly Dictionary<string, string> _folders = [];
+
     public static void LoadBuildingOverrides()
     {
         if (!Directory.Exists(Path.Combine(Plugin.PluginPath, $"BuildingOverrides")))
         {
             Directory.CreateDirectory(Path.Combine(Plugin.PluginPath, $"BuildingOverrides"));
             Plugin.Log.LogInfo("Created BuildingOverrides directory.");
-            return;
         }
         //loop through each folder in BuildingOverrides
-        foreach (var dir in Directory.GetDirectories(Path.Combine(Plugin.PluginPath, $"BuildingOverrides")))
+        foreach (var dir in APIHelper.ModContentPaths.DirectoriesIn("BuildingOverrides"))
         {
             var buildingName = new DirectoryInfo(dir).Name;
             var overrides = new List<StructureBuildingOverride>();
@@ -45,6 +50,7 @@ public class StructureBuildingOverrideHelper
             if (overrides.Count > 0)
             {
                 StructureBuildingOverrides[buildingName] = overrides;
+                _folders[buildingName] = dir;
                 Plugin.Log.LogInfo($"Loaded {overrides.Count} overrides for building {buildingName}.");
             }
         }
@@ -70,6 +76,10 @@ public class StructureBuildingOverrideHelper
         }
 
         //convert this list into a list of StructureBuildingOverrideData
+        var folder = _folders.TryGetValue(buildingName, out var known)
+            ? known
+            : Path.Combine(Plugin.PluginPath, "BuildingOverrides/" + buildingName);
+
         var result = new List<CustomStructureBuildingData>();
         foreach (var item in convertibleFormat)
         {
@@ -78,7 +88,7 @@ public class StructureBuildingOverrideHelper
                 Offset = item.Offset.ToVector3(),
                 Scale = item.Scale.ToVector3(),
                 Rotation = item.Rotation.ToVector3(),
-                Sprite = TextureHelper.CreateSpriteFromPath(Path.Combine(Plugin.PluginPath, "BuildingOverrides/" + buildingName + "/" + item.SpriteImageName))
+                Sprite = TextureHelper.CreateSpriteFromPath(Path.Combine(folder, item.SpriteImageName))
             };
             data.Sprite.texture.hideFlags |= HideFlags.DontUnloadUnusedAsset;
             data.Sprite.hideFlags |= HideFlags.DontUnloadUnusedAsset;

@@ -41,7 +41,14 @@ public static class CTLevelSerialization
     public static string PathFor(string levelName) =>
         Path.Combine(RootPath, MapEditorSerialization.Sanitize(levelName) + ".json");
 
+    // Exists = ours, the overwrite question. Available = ours or any other mod's, the load question.
     public static bool Exists(string levelName) => File.Exists(PathFor(levelName));
+
+    public static bool Available(string levelName) => ReadPathFor(levelName) != null;
+
+    private static string ReadPathFor(string levelName) =>
+        APIHelper.ModContentPaths.FindFile(FolderName,
+            MapEditorSerialization.Sanitize(levelName) + ".json");
 
     public static string Save(CTLevelBlueprint level)
     {
@@ -67,8 +74,8 @@ public static class CTLevelSerialization
 
     public static CTLevelBlueprint LoadByName(string levelName)
     {
-        var path = PathFor(levelName);
-        if (!File.Exists(path)) return null;
+        var path = ReadPathFor(levelName);
+        if (path == null) return null;
 
         try
         {
@@ -87,9 +94,7 @@ public static class CTLevelSerialization
 
         try
         {
-            if (!Directory.Exists(RootPath)) return results;
-
-            foreach (var file in Directory.GetFiles(RootPath, "*.json", SearchOption.TopDirectoryOnly))
+            foreach (var file in APIHelper.ModContentPaths.FilesIn(FolderName, "*.json"))
             {
                 try
                 {

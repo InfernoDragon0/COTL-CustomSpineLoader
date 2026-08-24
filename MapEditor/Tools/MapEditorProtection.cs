@@ -9,8 +9,12 @@ public static class MapEditorProtection
     {
         if (go == null) return true;
 
-        // Player and camera.
+        // Player and camera. The player is also checked downwards, as a backstop: the sweeps walk a
+        // room's direct children, and where the player hangs off a unit layer inside one of them,
+        // testing only upwards destroys the container and the player with it. Callers that want a
+        // thorough sweep move the player out of the room first rather than relying on this.
         if (go.GetComponentInParent<PlayerFarming>() != null) return true;
+        if (go.GetComponentInChildren<PlayerFarming>(true) != null) return true;
         if (go.GetComponentInParent<Camera>() != null) return true;
 
         // Doors and room-completion logic.

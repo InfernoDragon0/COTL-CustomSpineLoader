@@ -196,15 +196,173 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private static SpriteShapeController FindSourceShape()
     {
+        // Candidates in preference order; a filled one wins over any of them. New shapes are clones
+        // of this, so a template taken from an edging or a rope profile would draw a hollow outline
+        // where a dungeon's island floor gives a solid piece of ground - which is what the tool is
+        // for. Woolhaven's own terrain is exactly that kind of unfilled decoration.
+        var candidates = new List<SpriteShapeController>();
+
         var room = SceneRefs.Room;
         if (room != null)
         {
-            if (room.RoomSpriteShape != null) return room.RoomSpriteShape;
+            if (room.RoomSpriteShape != null) candidates.Add(room.RoomSpriteShape);
             if (room.SpriteShapeControllers != null)
                 foreach (var c in room.SpriteShapeControllers)
-                    if (c != null) return c;
+                    if (c != null) candidates.Add(c);
         }
-        return Object.FindObjectOfType<SpriteShapeController>();
+
+        foreach (var c in Object.FindObjectsOfType<SpriteShapeController>())
+            if (c != null) candidates.Add(c);
+
+        // FindObjectsOfType only sees active objects, and in the base every shape outside the
+        // current room is switched off with the room that owns it. Scene objects only - this sweep
+        // also reaches assets.
+        foreach (var c in Resources.FindObjectsOfTypeAll<SpriteShapeController>())
+            if (c != null && c.gameObject.scene.IsValid()) candidates.Add(c);
+
+        // Ground before water: a water profile's fill is the water surface, which over an emptied
+        // room draws as nothing at all - the hollow shapes a hub used to get.
+        foreach (var candidate in candidates)
+            if (DrawsAFill(candidate) && !IsWater(candidate.spriteShape))
+            {
+                Plugin.Log.LogInfo("MapEditor: shape template from '" + candidate.name +
+                                   "' (profile '" + ProfileName(candidate) + "', filled).");
+                return candidate;
+            }
+
+        foreach (var candidate in candidates)
+            if (DrawsAFill(candidate))
+            {
+                Plugin.Log.LogInfo("MapEditor: shape template from '" + candidate.name +
+                                   "' (profile '" + ProfileName(candidate) + "', filled with water).");
+                return candidate;
+            }
+
+        var fallback = candidates.Count > 0 ? candidates[0] : null;
+        if (fallback != null)
+            Plugin.Log.LogWarning("MapEditor: no filled sprite shape in this scene; new shapes copy '" +
+                                  fallback.name + "' (profile '" + ProfileName(fallback) +
+                                  "'), which draws edges only.");
+        return fallback;
+    }
+
+    // A shape draws its fill from two things: a profile carrying a fill texture, and a fill
+    // material in the renderer's first slot (the second is the edges). A clone of an edge-only
+    // shape has neither, and comes out as an outline around nothing.
+    private void EnsureFill(SpriteShapeController ctrl)
+    {
+        if (ctrl == null) return;
+
+        if (ctrl.spriteShape == null || ctrl.spriteShape.fillTexture == null || IsWater(ctrl.spriteShape))
+        {
+            var filled = FirstFilledProfile();
+            if (filled != null && filled != ctrl.spriteShape)
+            {
+                ctrl.spriteShape = filled;
+                Plugin.Log.LogInfo($"MapEditor: new shape given the filled profile '{filled.name}'.");
+            }
+            else
+            {
+                Plugin.Log.LogWarning("MapEditor: nothing loaded carries a fill texture, so this " +
+                                      "shape draws its edges only. Pick another profile below.");
+            }
+        }
+
+        var renderer = ctrl.GetComponent<UnityEngine.U2D.SpriteShapeRenderer>();
+        if (renderer == null) return;
+
+        var materials = renderer.sharedMaterials;
+        if (materials.Length >= 2 && materials[0] != null) return;
+
+        var fill = FindFillMaterial();
+        if (fill == null) return;
+
+        // Slot 0 fill, slot 1 edges - the order the renderer draws them in.
+        var edge = materials.Length > 0 && materials[materials.Length - 1] != null
+            ? materials[materials.Length - 1]
+            : fill;
+
+        renderer.sharedMaterials = [fill, edge];
+        Plugin.Log.LogInfo("MapEditor: new shape given a fill material.");
+    }
+
+    // The shoelace sum: negative area means the points run clockwise.
+    private static bool WindsClockwise(Spline spline)
+    {
+        if (spline == null || spline.GetPointCount() < 3) return false;
+
+        var area = 0f;
+        var count = spline.GetPointCount();
+
+        for (var i = 0; i < count; i++)
+        {
+            var a = spline.GetPosition(i);
+            var b = spline.GetPosition((i + 1) % count);
+            area += a.x * b.y - b.x * a.y;
+        }
+
+        return area < 0f;
+    }
+
+    private static bool IsWater(SpriteShape profile) =>
+        profile != null && profile.name.IndexOf("water", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+    // Profiles are assets, so this reaches the ones belonging to rooms that are switched off - the
+    // dungeon and base island profiles among them. Ground first, water only as a last resort.
+    private SpriteShape FirstFilledProfile()
+    {
+        if (_profiles.Count == 0) CollectProfiles();
+
+        SpriteShape water = null;
+
+        foreach (var profile in _profiles)
+        {
+            if (profile == null || profile.fillTexture == null) continue;
+            if (!IsWater(profile)) return profile;
+            water ??= profile;
+        }
+
+        foreach (var profile in Resources.FindObjectsOfTypeAll<SpriteShape>())
+        {
+            if (profile == null || profile.fillTexture == null) continue;
+            if (!IsWater(profile)) return profile;
+            water ??= profile;
+        }
+
+        return water;
+    }
+
+    // Borrowed from whatever shape in the scene already draws one; the biome's own material when
+    // the room offers it.
+    private static Material FindFillMaterial()
+    {
+        var declared = SceneRefs.ShapeMaterial;
+        if (declared != null) return declared;
+
+        foreach (var candidate in Resources.FindObjectsOfTypeAll<UnityEngine.U2D.SpriteShapeRenderer>())
+        {
+            if (candidate == null || !candidate.gameObject.scene.IsValid()) continue;
+
+            var materials = candidate.sharedMaterials;
+            if (materials.Length >= 2 && materials[0] != null) return materials[0];
+        }
+
+        return null;
+    }
+
+    private static string ProfileName(SpriteShapeController ctrl) =>
+        ctrl != null && ctrl.spriteShape != null ? ctrl.spriteShape.name : "none";
+
+    // Two ways a shape can carry a fill: the profile's own fill texture, or a fill material on the
+    // renderer (the renderer's first material slot is the fill, the second the edges).
+    private static bool DrawsAFill(SpriteShapeController ctrl)
+    {
+        if (ctrl == null || ctrl.spriteShape == null) return false;
+        if (ctrl.spriteShape.fillTexture != null) return true;
+
+        var renderer = ctrl.GetComponent<UnityEngine.U2D.SpriteShapeRenderer>();
+        return renderer != null && renderer.sharedMaterials.Length > 1 &&
+               renderer.sharedMaterials[0] != null;
     }
 
     // DecorationList does not always populate every slot, so live scene shapes are scanned too.
@@ -251,7 +409,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private void SpawnShape()
     {
-        var composite = SceneRefs.RoomComposite;
+        // The composite, not the content root: a shape parented anywhere else keeps its own solid
+        // collider and pushes the player off instead of being ground to stand on.
+        var composite = SceneRefs.EnsureRoomComposite();
         var root = composite != null ? composite.transform : SceneRefs.ContentRoot;
         if (root == null)
         {
@@ -276,19 +436,38 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var ctrl = go.GetComponent<SpriteShapeController>();
 
+        // The template is whatever the room had to copy, and a room can have nothing but edging -
+        // Woolhaven does. A new shape is meant to be a piece of ground, so if what was copied
+        // cannot draw a fill it is given a profile and a material that can.
+        EnsureFill(ctrl);
+
         // The template carries the source's baked colliders; strip so this shape bakes its own.
         foreach (var inherited in go.GetComponents<Collider2D>())
             Object.DestroyImmediate(inherited);
 
+        // Wound the same way round as the shape this was copied from. A sprite shape fills the side
+        // its spline turns towards, so a square wound against the template's own direction comes
+        // out inside-out: edges on the inside, fill spread over everything outside it.
+        var clockwise = WindsClockwise(_template.spline);
+
         var spline = ctrl.spline;
         spline.Clear();
-        var corners = new[]
-        {
-            new Vector3(-3f, -3f, 0f),
-            new Vector3(3f, -3f, 0f),
-            new Vector3(3f, 3f, 0f),
-            new Vector3(-3f, 3f, 0f)
-        };
+        var corners = clockwise
+            ?
+            [
+                new Vector3(-3f, -3f, 0f),
+                new Vector3(-3f, 3f, 0f),
+                new Vector3(3f, 3f, 0f),
+                new Vector3(3f, -3f, 0f)
+            ]
+            : new[]
+            {
+                new Vector3(-3f, -3f, 0f),
+                new Vector3(3f, -3f, 0f),
+                new Vector3(3f, 3f, 0f),
+                new Vector3(-3f, 3f, 0f)
+            };
+
         for (var i = 0; i < corners.Length; i++)
         {
             spline.InsertPointAt(i, corners[i]);
@@ -949,7 +1128,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         if (data == null || data.Points == null || data.Points.Count < 3) return null;
 
-        var composite = SceneRefs.RoomComposite;
+        var composite = SceneRefs.EnsureRoomComposite();
         var root = composite != null ? composite.transform : SceneRefs.ContentRoot;
         if (root == null) return null;
 

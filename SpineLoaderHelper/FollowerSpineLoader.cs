@@ -27,8 +27,8 @@ public class FollowerSpineLoader
         if (!Directory.Exists(followerFolder))
             Directory.CreateDirectory(followerFolder);
 
-        //get each folder inside the directory
-        var folders = Directory.GetDirectories(followerFolder);
+        //ours, plus the same folder in any other mod's CultTweaker folder (ModContentPaths)
+        var folders = APIHelper.ModContentPaths.DirectoriesIn("FollowerSpines");
 
         foreach (var folder in folders)
         {
@@ -110,8 +110,8 @@ public class FollowerSpineLoader
         if (!Directory.Exists(followerFolder))
             Directory.CreateDirectory(followerFolder);
 
-        //get each folder inside the directory
-        var folders = Directory.GetDirectories(followerFolder);
+        //ours, plus the same folder in any other mod's CultTweaker folder (ModContentPaths)
+        var folders = APIHelper.ModContentPaths.DirectoriesIn("FollowerSkins");
 
         //each png file represents a single part to override...?
 

@@ -115,6 +115,16 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     public T GetTool<T>() where T : class, IMapEditorTool => _tools.OfType<T>().FirstOrDefault();
 
+    // A hub is a safe town in the game's own base: nothing spawns there, no weapon podium belongs
+    // there, it has no doors to a next room, and it is not part of a level or a dungeon graph. The
+    // tools are still built - the loader and the clear sweeps ask for them by type - they just have
+    // no place on the dock or in the wheel.
+    private static bool HiddenInHub(IMapEditorTool tool) =>
+        tool is EnemyTool or PodiumTool or DoorTool or LevelTool or DungeonBuilderTool;
+
+    private List<IMapEditorTool> DockTools() =>
+        HubSession.Active ? _tools.Where(t => !HiddenInHub(t)).ToList() : _tools;
+
     public MapEditorHistory History { get; } = new();
 
     private void UndoLast()
@@ -125,11 +135,14 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void CycleTool(int direction)
     {
-        if (_tools.Count == 0) return;
+        var tools = DockTools();
+        if (tools.Count == 0) return;
 
-        var index = _activeTool != null ? _tools.IndexOf(_activeTool) : 0;
-        index = (index + direction % _tools.Count + _tools.Count) % _tools.Count;
-        SelectTool(_tools[index]);
+        var index = _activeTool != null ? tools.IndexOf(_activeTool) : 0;
+        if (index < 0) index = 0;
+
+        index = (index + direction % tools.Count + tools.Count) % tools.Count;
+        SelectTool(tools[index]);
     }
 
     // One shared loader so the IsLoading guard covers every consumer.
@@ -164,7 +177,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         if (!_editing) EnterEditorMode();
         SetStatus(bp != null
             ? $"Editing hub '{hubName}'. Save Map keeps it a hub."
-            : $"New hub '{hubName}': the town has been cleared. Build it, then Save Map.");
+            : $"New hub '{hubName}': the town has been cleared. Build it, mark where the player " +
+              "arrives with a trigger's 'Hub spawn point' action, then Save Map.");
     }
 
     // The walk-in entry runs on scaled time; the open editor would re-freeze timeScale.
@@ -347,6 +361,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         RestoreEventSystem();
 
         if (CtrlHeld && Input.GetKeyDown(KeyCode.Z)) UndoLast();
+        if (CtrlHeld && Input.GetKeyDown(KeyCode.S)) QuickSave();
 
         // Chrome hidden: the room is being looked at, not edited. The camera still pans so the
         // shot can be framed, but no tool acts on a click.
@@ -787,14 +802,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         layout.childForceExpandWidth = false;
         layout.childForceExpandHeight = false;
 
-        foreach (var tool in _tools)
+        var tools = DockTools();
+        foreach (var tool in tools)
         {
             var captured = tool;
             _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon(tool.Name), tool.Name,
                 () => SelectTool(captured), out var ring, ToolIconSize, hoverText: tool.Name);
             _toolRings[tool.Name] = ring;
 
-            if (tool is DoorTool) CreateDockSeparator(dock);
+            // The dungeon half ends at the doors - or, with no door tool on the dock, at the one
+            // before the lighting tool.
+            if (tool is DoorTool || (HubSession.Active && tool is NpcTool))
+                CreateDockSeparator(dock);
 
             if (tool is LoadTool)
                 _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
@@ -1010,6 +1029,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             _ui.CreateKeyHint(_shortcutPanel, "Z / X", "Zoom in / out");
             _ui.CreateKeyHint(_shortcutPanel, "Wheel", "Switch tool");
             _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last placement");
+            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+S", "Quicksave under this name");
             _ui.CreateKeyHint(_shortcutPanel, "F6", "Hide UI (stays paused)");
             _ui.CreateKeyHint(_shortcutPanel, "F5", "Reset room");
             _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
@@ -1117,11 +1137,77 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             : TitleText;
     }
 
+    // Ctrl+S: the same save without the dialog, under the name already on the title bar. The first
+    // press that would land on a file this session did not write only warns - the bar goes orange
+    // and the press is armed - so a quicksave can never silently clobber somebody else's map.
+    private bool _quickSaveArmed;
+    private float _quickSaveArmedAt;
+    private string _quickSavedName;
+
+    private const float QuickSaveArmWindow = 5f;
+
+    private void QuickSave()
+    {
+        if (_renaming || ModalOpen) return;
+
+        if (string.IsNullOrWhiteSpace(Map.MapName))
+        {
+            // Nothing to quicksave under; the dialog is the only way to name it.
+            SaveMap();
+            return;
+        }
+
+        var doorTool = HubSession.Active ? null : GetTool<DoorTool>();
+        var missing = doorTool?.MissingDirections();
+        if (missing != null && missing.Count > 0)
+        {
+            SetStatus($"Cannot save: missing {string.Join(", ", missing)} door(s). " +
+                      "Use the Door tool's 'Enable All Doors'.", StatusSeverity.Error);
+            return;
+        }
+
+        var hubBlock = HubSaveBlock();
+        if (hubBlock != null)
+        {
+            SetStatus(hubBlock, StatusSeverity.Error);
+            return;
+        }
+
+        if (_quickSaveArmed && Time.unscaledTime - _quickSaveArmedAt > QuickSaveArmWindow)
+            _quickSaveArmed = false;
+
+        var known = string.Equals(_quickSavedName, Map.MapName, System.StringComparison.OrdinalIgnoreCase);
+        if (!known && !_quickSaveArmed && MapEditorSerialization.Exists(Map.MapName))
+        {
+            _quickSaveArmed = true;
+            _quickSaveArmedAt = Time.unscaledTime;
+            SetStatus($"'{Map.MapName}.json' already exists - Ctrl+S again to overwrite.",
+                StatusSeverity.Warning);
+            return;
+        }
+
+        _quickSaveArmed = false;
+        _quickSavedName = Map.MapName;
+        SetStatus($"Saving '{Map.MapName}'...");
+        WriteMap();
+    }
+
+    // What a dungeon room's four doors are to a hub: a town room has no doors, but it does have to
+    // say where the player lands. Without a spawn point the arrival falls back to the town's own
+    // door - a transform the sweep took away - so a hub is not allowed to be saved without one.
+    private static string HubSaveBlock()
+    {
+        if (!HubSession.Active || HubSession.SpawnPoint().HasValue) return null;
+
+        return "Cannot save: a hub needs a trigger carrying the 'Hub spawn point' action - that is " +
+               "where the player arrives.";
+    }
+
     private void SaveMap()
     {
         // A hub is a town room, not a dungeon room: it has no doors to a next room, and the four
         // the check wants do not exist in Woolhaven at all.
-        var doorTool = HubSession.IsAuthoring ? null : GetTool<DoorTool>();
+        var doorTool = HubSession.Active ? null : GetTool<DoorTool>();
         var missing = doorTool?.MissingDirections();
         if (missing != null && missing.Count > 0)
         {
@@ -1129,6 +1215,15 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
                       "Use the Door tool's 'Enable All Doors'.", StatusSeverity.Error);
             Plugin.Log.LogWarning($"MapEditor: save blocked - '{Map.MapName}' is missing " +
                                   $"{string.Join(", ", missing)} door(s). All four are required.");
+            return;
+        }
+
+        var hubBlock = HubSaveBlock();
+        if (hubBlock != null)
+        {
+            SetStatus(hubBlock, StatusSeverity.Error);
+            Plugin.Log.LogWarning($"MapEditor: save blocked - hub '{Map.MapName}' has no trigger " +
+                                  "carrying the Hub spawn point action.");
             return;
         }
 
@@ -1189,10 +1284,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             yield break;
         }
 
+        // This session wrote it, so Ctrl+S under this name is no longer clobbering anyone.
+        _quickSavedName = Map.MapName;
+
         // Saving in a hub session saves a hub: the record beside the blueprint is what the world
         // map's Hub picker lists and what playback rebuilds. It follows the name the save used, so
         // saving under a new name makes that the hub.
-        if (HubSession.IsAuthoring)
+        if (HubSession.Active)
         {
             HubSession.WriteRecord(Map.MapName, Map.MapName);
             SetStatus($"Saved hub '{Map.MapName}'. World map nodes can target it as a Hub.",

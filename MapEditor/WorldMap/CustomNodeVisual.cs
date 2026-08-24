@@ -42,6 +42,7 @@ internal class CustomNodeVisual : MonoBehaviour
     private bool _editView;
     // The editor's mark on this node, if any: red for the selection, green for a gate member.
     private Color? _mark;
+    private bool _markEmphasised;
 
     public float IconSize { get; private set; } = 96f;
 
@@ -182,10 +183,11 @@ internal class CustomNodeVisual : MonoBehaviour
 
     // The editor's marks, worn on the node's own outline: red for the selection, green for the
     // nodes it is gated on. Null takes the mark off and puts the state's own look back.
-    public void SetMark(Color? colour)
+    public void SetMark(Color? colour, bool emphasised = false)
     {
-        if (Nullable.Equals(_mark, colour)) return;
+        if (Nullable.Equals(_mark, colour) && _markEmphasised == emphasised) return;
         _mark = colour;
+        _markEmphasised = emphasised;
 
         if (colour.HasValue) PaintMark();
         else if (_editView) ApplyEditView();
@@ -196,7 +198,12 @@ internal class CustomNodeVisual : MonoBehaviour
     {
         if (_imageOutline == null || !_mark.HasValue) return;
 
-        if (_selectedOutline != null) _imageOutline.material = _selectedOutline;
+        // The vanilla "selected" outline material carries its own warm tint, which multiplies with
+        // whatever colour is set on top - green through it came out a dark red. Only the selection
+        // wears it; every other mark goes on the plain outline, where the tint reads true.
+        var material = _markEmphasised ? _selectedOutline : _unselectedOutline ?? _normalOutline;
+        if (material != null) _imageOutline.material = material;
+
         _imageOutline.gameObject.SetActive(true);
         _imageOutline.enabled = true;
         _imageOutline.color = _mark.Value;

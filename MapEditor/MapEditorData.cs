@@ -249,7 +249,15 @@ public static class MapEditorSerialization
 
     public static string PathFor(string mapName) => Path.Combine(RootPath, Sanitize(mapName) + ".json");
 
+    // Ours only: this answers "would saving overwrite something of mine", which a blueprint shipped
+    // by another mod is not - saving under that name writes our own copy, it does not touch theirs.
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
+
+    // Ours or any other mod's (see ModContentPaths): "is there a blueprint by this name to load".
+    public static bool Available(string mapName) => ReadPathFor(mapName) != null;
+
+    private static string ReadPathFor(string mapName) =>
+        APIHelper.ModContentPaths.FindFile(FolderName, Sanitize(mapName) + ".json");
 
     public static System.Threading.Tasks.Task<string> SaveAsync(CTNodeBlueprint map)
     {
@@ -328,9 +336,8 @@ public static class MapEditorSerialization
 
         try
         {
-            if (Directory.Exists(RootPath))
-                foreach (var file in Directory.GetFiles(RootPath, "*.json", SearchOption.TopDirectoryOnly))
-                    TryLoad(file, results);
+            foreach (var file in APIHelper.ModContentPaths.FilesIn(FolderName, "*.json"))
+                TryLoad(file, results);
         }
         catch (Exception e)
         {
@@ -342,8 +349,8 @@ public static class MapEditorSerialization
 
     public static CTNodeBlueprint LoadByName(string mapName)
     {
-        var path = PathFor(mapName);
-        if (!File.Exists(path)) return null;
+        var path = ReadPathFor(mapName);
+        if (path == null) return null;
 
         var results = new List<CTNodeBlueprint>();
         TryLoad(path, results);
@@ -351,11 +358,8 @@ public static class MapEditorSerialization
     }
 
     // The save-time screenshot written next to the json; null when the map predates snapshots.
-    public static string SnapshotPathFor(string mapName)
-    {
-        var path = Path.Combine(RootPath, Sanitize(mapName) + ".png");
-        return File.Exists(path) ? path : null;
-    }
+    public static string SnapshotPathFor(string mapName) =>
+        APIHelper.ModContentPaths.FindFile(FolderName, Sanitize(mapName) + ".png");
 
     private static void TryLoad(string path, List<CTNodeBlueprint> results)
     {

@@ -42,10 +42,50 @@ public static class SceneRefs
 
     public static CompositeCollider2D RoomComposite => Room != null ? Room.RoomTransform : null;
 
+    // A room's collision is one merged outline: colliders that belong to the composite become edges
+    // to walk along, while a collider left standing on its own is a solid body that shoves whatever
+    // touches it away. A generated dungeon room ships with that composite; Woolhaven's does not -
+    // its buildings each carry their own baked collider instead - so a shape drawn in a hub was a
+    // solid block the player got pushed out of rather than a piece of ground to stand on. One is
+    // built for the room when it has none, and every tool then works there exactly as in a dungeon.
+    public static CompositeCollider2D EnsureRoomComposite()
+    {
+        var room = Room;
+        if (room == null) return null;
+
+        // Unity's null covers a destroyed one too: the clear sweep can take the room's own composite
+        // with the geometry it was built from.
+        if (room.RoomTransform != null) return room.RoomTransform;
+
+        var go = new GameObject("CultTweaker_RoomCollision");
+        go.transform.SetParent(room.transform, worldPositionStays: false);
+        go.transform.localPosition = Vector3.zero;
+
+        var island = LayerMask.NameToLayer("Island");
+        if (island >= 0) go.layer = island;
+
+        // A composite merges onto a body; static, so the room does not fall out of the world.
+        var body = go.AddComponent<Rigidbody2D>();
+        body.bodyType = RigidbodyType2D.Static;
+        body.simulated = true;
+
+        var composite = go.AddComponent<CompositeCollider2D>();
+        composite.geometryType = CompositeCollider2D.GeometryType.Outlines;
+        composite.generationType = CompositeCollider2D.GenerationType.Manual;
+
+        room.RoomTransform = composite;
+        Plugin.Log.LogInfo($"MapEditor: room '{room.name}' had no collision composite; built one.");
+        return composite;
+    }
+
     public static void RegenerateRoomCollision()
     {
         var room = Room;
         if (room == null) return;
+
+        // Without one the rebuild below throws, and a room with no composite leaves every shape in
+        // it solid.
+        EnsureRoomComposite();
 
         EnsurePiecesComposited(room);
 
@@ -55,7 +95,10 @@ public static class SceneRefs
         }
         catch (System.Exception e)
         {
-            Plugin.Log.LogWarning("MapEditor: room collision rebuild failed, falling back: " + e.Message);
+            // The type as well as the message: the town room throws one with nothing in it, and a
+            // blank warning says nothing about what went wrong.
+            Plugin.Log.LogWarning($"MapEditor: room collision rebuild failed ({e.GetType().Name}: " +
+                                  $"{e.Message}), falling back.");
 
             var composite = RoomComposite;
             if (composite == null) return;

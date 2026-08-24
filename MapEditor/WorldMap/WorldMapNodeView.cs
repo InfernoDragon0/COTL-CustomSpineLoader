@@ -285,11 +285,11 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
     public static readonly Color SelectedMark = new(1f, 0.33f, 0.28f);
     public static readonly Color RequiredMark = new(0.35f, 0.95f, 0.45f);
 
-    public void SetMark(Color? colour)
+    public void SetMark(Color? colour, bool emphasised = false)
     {
         if (_custom != null)
         {
-            _custom.SetMark(colour);
+            _custom.SetMark(colour, emphasised);
             return;
         }
 

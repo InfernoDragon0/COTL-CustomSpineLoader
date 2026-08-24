@@ -28,7 +28,7 @@ public static class WorldMapAssets
         if (Sprites.TryGetValue(key, out var cached) && cached != null) return cached;
         if (Failed.Contains(key)) return null;
 
-        var path = Path.Combine(CTWorldMapSerialization.FolderFor(mapName), fileName);
+        var path = Path.Combine(CTWorldMapSerialization.FolderForRead(mapName), fileName);
         if (!File.Exists(path))
         {
             Plugin.Log.LogWarning($"World map '{mapName}': image '{fileName}' is not in the map's folder.");
@@ -67,7 +67,7 @@ public static class WorldMapAssets
         if (Skeletons.TryGetValue(key, out var cached) && cached != null) return cached;
         if (Failed.Contains(key)) return null;
 
-        var folder = Path.Combine(CTWorldMapSerialization.FolderFor(mapName), folderName);
+        var folder = Path.Combine(CTWorldMapSerialization.FolderForRead(mapName), folderName);
 
         // Scale 1, not world-space 0.005: SkeletonGraphic maps skeleton units onto RectTransform units.
         var data = SpineFolderLoader.Build(folder, "worldmap:" + mapName, scale: 1f);

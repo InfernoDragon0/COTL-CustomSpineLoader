@@ -111,6 +111,52 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         };
     }
 
+    // Ctrl+S: save under the name the map already has, no dialog. The first press that would land
+    // on a file this session did not write only warns - the bar goes orange and the press is armed
+    // - so a quicksave can never quietly write over a map somebody else made.
+    private bool _quickSaveArmed;
+    private float _quickSaveArmedAt;
+    private string _quickSavedName;
+
+    private const float QuickSaveArmWindow = 5f;
+
+    // Called by the File tool when its dialog writes, so the next Ctrl+S under that name is not
+    // treated as clobbering.
+    internal void NoteSaved(string mapName)
+    {
+        _quickSavedName = mapName;
+        _quickSaveArmed = false;
+    }
+
+    public void QuickSave()
+    {
+        var map = Map;
+        if (map == null || string.IsNullOrWhiteSpace(map.MapName)) return;
+
+        if (_quickSaveArmed && Time.unscaledTime - _quickSaveArmedAt > QuickSaveArmWindow)
+            _quickSaveArmed = false;
+
+        var known = string.Equals(_quickSavedName, map.MapName, StringComparison.OrdinalIgnoreCase);
+        if (!known && !_quickSaveArmed && CTWorldMapSerialization.Exists(map.MapName))
+        {
+            _quickSaveArmed = true;
+            _quickSaveArmedAt = Time.unscaledTime;
+            SetStatus($"'{map.MapName}' already exists - Ctrl+S again to overwrite.",
+                StatusSeverity.Warning);
+            return;
+        }
+
+        if (CTWorldMapSerialization.Save(map) == null)
+        {
+            SetStatus("Save failed, see log.", StatusSeverity.Error);
+            return;
+        }
+
+        NoteSaved(map.MapName);
+        Screen?.MarkSaved();
+        SetStatus($"Saved '{map.MapName}'.", StatusSeverity.Success);
+    }
+
     public void ToggleEditMode()
     {
         if (IsEditing) ExitEditMode();
@@ -189,11 +235,18 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         if (!IsEditing || Screen == null) return;
         if (ModalOpen) return;
 
-        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
-            Input.GetKeyDown(KeyCode.Z))
+        var ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
+        if (ctrl && Input.GetKeyDown(KeyCode.Z))
         {
             if (History.Undo(out var description)) SetStatus("Undid: " + description);
             else SetStatus("Nothing to undo.");
+            return;
+        }
+
+        if (ctrl && Input.GetKeyDown(KeyCode.S))
+        {
+            QuickSave();
             return;
         }
 
@@ -458,6 +511,7 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
             // Always last: these work in every tool. Esc does what F6 does and then closes, which
             // is not worth a row of its own.
             _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last change");
+            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+S", "Quicksave");
             _ui.CreateKeyHint(_shortcutPanel, "F6", "Play view");
         }
 

@@ -14,6 +14,7 @@ blueprint** (`CustomLevelBlueprints/<name>.json`) that plays through the mod's o
 | `Z` / `X` | Zoom in / out |
 | Wheel | Switch tool (or scroll the list under the cursor) |
 | `Ctrl+Z` | Undo the last placement |
+| `Ctrl+S` | Quicksave under the current name (both editors) — see below |
 | `Del` | Delete the selection (tool-dependent) |
 
 While the editor is open the game is paused (`timeScale 0`), the HUD is hidden, and the camera is
@@ -63,6 +64,14 @@ volumes, selection outlines) go with the panels, since they are objects in the s
 canvas chrome. All that is left is a *Preview mode - F6 to show UI* line in the bottom left, on a
 canvas of its own because the editor's own is switched off wholesale. Closing the editor restores
 everything.
+
+**Saving.** The save button opens the game's name dialog on the current name, so confirming it
+saves and changing it saves under the new name — the room editor's Save Map and the world editor's
+Save Map both work this way, and both are therefore also the rename. `Ctrl+S` is the same save with
+no dialog, under the name already on the title bar. It refuses to quietly clobber: the first press
+that would land on a file *this session did not write* only arms, turning the status bar orange with
+"already exists - Ctrl+S again to overwrite"; the second press within five seconds writes. Once a
+name has been written this session, `Ctrl+S` under it is a plain quicksave.
 
 **Undo.** One stack for the whole editor. Tools push an entry as they place; `Ctrl+Z` walks the
 single history regardless of which tool is active. Entries return false when the thing they would
@@ -523,17 +532,135 @@ room it edits is standing:
 `HubSession` does all three: get to `Base Biome 1` (`GameManager.ToShip`, picked up again on scene
 load), raise the room, quiet `LambTownController` so it stops driving shops and boards that are
 about to stop existing, clear placed objects / scenery / terrain, then hand over to the editor or
-the blueprint loader. **Before it clears anything it checks that `SceneRefs.Room` really is
+the blueprint loader.
+
+**The players step out of the room for the sweep and back in after it.** In the base the player
+hangs off a unit layer several levels inside the room, and `MapEditorProtection` only looked
+*upwards* for a `PlayerFarming` — so a container holding the player counted as scenery and the sweep
+destroyed both. That is what left a hub with no character in it, and it also explains the F7 panel
+refusing to open there: the panel bails when there is no player. Protection now looks downwards too,
+as a backstop — but a protected container is a piece of town left standing in a finished hub, so the
+session parks the players at the scene root first and nothing has to be spared.
+
+**The trip in happens behind a curtain.** `HubCurtain` is a black full-screen `Image` on its own
+`DontDestroyOnLoad` canvas (sorting order 5100), raised the moment a hub is asked for and dropped
+only once the player is standing in it. Its bottom-right corner is the game's own loading corner:
+the spinning crown is `MMTransition`'s `LoadingIcon` cloned whole (`ForceFifty`, the half-fill the
+vanilla screen shows when it has no real progress), and beside it a label reading *"Entering
+\<hubname\>..."* — built fresh rather than cloned, since a cloned label can carry a localizer that
+would overwrite the message, but wearing the vanilla label's font and material. Everything in between is something nobody should have to
+watch: the base's own arrival playing out in a town that is about to be emptied, the sweep taking it
+apart, and the player being moved onto the hub's floor. That last one is what the *"and then it
+teleports me a few seconds later"* complaint was.
+
+The curtain is **pure UI — it pauses nothing**. Holding the game's own transition over the same
+stretch was tried and reverted: `MMTransition`'s cover is released by `ResumePlay`, and the arrival
+*sets the player up* (state, camera, animation) as part of running to that point, so a hub built
+behind a held cover inherited a half-finished one — an invisible, immovable player. Here the arrival
+runs to its end exactly as it always did; it simply is not on screen. A failsafe uncovers the screen
+after 45 seconds whatever happens, because a black screen with no way out is worse than an ugly
+arrival.
+
+**The arrival itself is the town's own, aimed at the hub's spawn point.**
+`DLCShrineRoomLocationManager.PositionPlayer` is three lines — place the players at the room's door,
+then walk the lamb eight units in with `GoToAndStop(..., IdleOnEnd: true)`. `ArriveAtSpawn` does the
+same thing with the destination the author chose: the players are put down 3.5 units short of the
+mark *while the screen is still black*, the curtain fades, and then the walk plays. The cut happens
+where nobody can see it and what the player watches is a lamb walking into a hub.
+
+The walk plays **only when the navigation graph covers both ends of it** (`GroundUnder`: A*'s
+nearest walkable node within 2.5 units, mid-scan exceptions counting as "no"). `GoToAndStop` paths
+through A*, and a graph that has not caught up with the hub's floor hands it a path starting
+somewhere else entirely — the walk heads the wrong way, vanilla's own bail-outs fire (`maxDuration`,
+or one second of no progress), and `forcePositionOnTimeout` snaps the player across the room. That
+snap is what "it teleported mid-walk" was. No ground, no walk: the player is placed on the mark
+directly. When the walk does play it always ends — `maxDuration: 3`, `forcePositionOnTimeout: true`,
+and a final belt-and-braces snap if it still ended more than two units from the mark.
+
+**Triggers are muted while the walk runs** (`CTMapTrigger.MuteFiring`, walk time plus two seconds).
+The walk crosses — and ends on — authored volumes, and an entry mid-walk is the session carrying the
+player, not the player walking in: a control-locking sequence fired then calls `SetInactive` on a
+player who is `GoToAndStopping`, which wedges `InActive` onto the walk's own end. The mute leaves
+`_inside` false, so a sequence on the spawn trigger itself fires the moment the mute lifts — a
+welcome caption plays right after the player lands, not during the landing.
+
+Nothing forces the player's state: that was an earlier attempt and it lost, because the arrival's
+own coroutines set `CustomAnimation` again on the next frame and a state shoved on top of a running
+animation left the player frozen mid-pose (the black silhouette). What remains is the tail —
+colliders, the conversation lock, the camera, the input maps — plus a watchdog for an arrival that
+still manages to leave the player wedged. The watchdog **stands down for good at its first sight of
+a free, controllable player**: from that moment anything that parks the player — an NPC
+conversation, the F7 panel, a trigger's cutscene — is doing it on purpose, and a watchdog that kept
+running was yanking the player out of dialogue mid-sentence.
+
+**Where the player lands is authored, and compulsory.** A trigger carrying the **Hub spawn point**
+action marks it; `HubSession.SpawnPoint()` finds it by walking `CTMapTrigger.All`. The action does
+nothing when the volume is entered — the position is read long before the player is put down — so a
+trigger may carry it alone or alongside a welcome caption. **Save Map and Ctrl+S both refuse a hub
+that has none** (`RuntimeMapEditor.HubSaveBlock`), the way a dungeon room is refused without its four
+doors. Without one the arrival falls back to `EntranceFromBase` — the town's own door, measured
+*before* the sweep so it survives — which is right for a brand-new hub being authored (the author is
+dropped where the town's door was) and wrong for a finished one.
+
+**Nothing starts until the game has finished arriving.** `BaseLocationManager.PlacePlayer`
+instantiates and positions the player, and a trip in from a dungeon plays a spawn on top of that, so
+the session waits for a real, awake, not-mid-spawn player with no transition still covering the
+screen before it touches anything. Starting early is what left a hub entered from a dungeon with no
+character in it.
+
+The shape tool's template is cloned from a live sprite shape, so it is captured **before** the
+sweep — after it there is nothing left to clone, since `FindObjectOfType` cannot see the base room's
+own shapes once that room is switched off. It also prefers a shape that can actually draw a fill,
+and **ground over water** — a water profile's fill is the water surface, which over an emptied room
+draws as nothing. Failing that, `SpawnShape` imposes one: a profile carrying a `fillTexture` (those
+are assets, so the reach extends to rooms that are switched off) and a fill material in the
+renderer's first slot, borrowed from any shape in the scene that already draws one.
+
+A new shape is also **wound the same way round as the shape it was copied from** (shoelace sum over
+the template's spline). A sprite shape fills the side its spline turns towards, so a square wound
+against the template's direction comes out inside-out — edges facing in, fill spread over everything
+outside the square. That is what a hollow-looking hub shape actually was. Three more things the town room does not arrive with, all handled after the
+sweep:
+
+- **A content root.** Every tool builds into `GenerateRoom.CustomTransform` (`SceneRefs.ContentRoot`).
+  A generated dungeon room is handed one; Woolhaven is hand-authored and has none, so the session
+  gives it one — created *after* the clear, or the clear would take it too.
+- **A collision composite.** A room's collision is one merged outline (`GenerateRoom.RoomTransform`,
+  a `CompositeCollider2D` in `Outlines` mode): a collider that joins it becomes an *edge* to walk
+  along, while a collider left standing on its own is a solid body that pushes whatever touches it
+  away. Woolhaven has no such composite — its buildings each carry a baked collider — so every shape
+  drawn in a hub kept its own `PolygonCollider2D` and shoved the player straight back out of it.
+  `SceneRefs.EnsureRoomComposite()` builds one (static `Rigidbody2D`, `Outlines`, layer `Island`) and
+  assigns it to `RoomTransform`, after which every tool, `JoinRoomComposite` and
+  `SetColliderAndUpdatePathfinding` behave exactly as they do in a dungeon. It also explains the
+  blank `NullReferenceException` the collision rebuild used to log: vanilla's own
+  `SetCollider` dereferences `RoomTransform` unconditionally.
+- **Player control.** The trip in leaves the players inactive, because the arrival that would wake
+  them is a dungeon door's walk-in and a town room has no doors. The session runs the same hand-back
+  `BlueprintLoader` does after an entry: state, colliders, `OnConversationEnd`, the camera, then
+  `ResetMainPlayer` / `RefreshCoopPlayerRewired` — without that last pair only movement survives the
+  trip — and clears any transition still holding the clock.
+
+The dock drops what a town has no use for: **Enemy**, **Podium**, **Door**, **Level** and **Dungeon
+Builder**. The tools are still built, since the loader and the clear sweeps ask for them by type;
+they just have no button and the wheel skips them. **Load Map** lists only other hubs' blueprints —
+a dungeon room loaded into the town would arrive with doors and enemies. **Before it clears anything it checks that `SceneRefs.Room` really is
 `DLC_ShrineRoom`** and bails out if it is not: in this scene the other candidate is the player's own
 base, and there is no undo for emptying that.
 
 Nothing is written to the scene, so **leaving a hub is a reload of `Base Biome 1`** and the town
-comes back untouched. Every scene load ends the session, that reload included.
+comes back untouched. Every scene load ends a *running* session, that reload included — but a
+*pending* trip survives until the base itself arrives, because the way there is not always a single
+load and a transition or loading scene can land first. (Ending the request on the first scene that
+was not the base is what made travelling to a hub from a dungeon appear to do nothing until the
+button was pressed again from the base, where no trip is needed at all.) A trip that never lands
+times out after 90 seconds, so a death warp cannot build a hub around some later arrival.
 
 **Saving is what makes it a hub.** Save Map in a hub session writes the room blueprint and, beside
 it, a `CTLevelBlueprint` with `IsHub` naming that blueprint — the record the world map's Hub picker
 lists and playback rebuilds. The four-door requirement is waived for that save: a town room has no
-doors to a next room, and Woolhaven has none to find. Saving under a different name makes that name
+doors to a next room, and Woolhaven has none to find. In its place stands the spawn-point
+requirement above — a hub has to say where the player arrives. Saving under a different name makes that name
 the hub.
 
 **The portal is authored, not built in.** Dress whatever object reads as a portal, then put a
@@ -736,6 +863,7 @@ still needs. A category holding one action skips its own submenu.
 | Move players to object | a clicked object | walks them to that object (falls back to the authored position) |
 | Talk to custom NPC | a registered `InternalName` | runs that NPC's dialogue tree and waits for it |
 | Play animation on players | an animation on the player skeleton | plays it once, or loops it for 2 / 5 / 10s |
+| Hub spawn point (player arrives here) | — | a mark, not a step: the trigger's position is where a hub's arrival walks the player to. Does nothing when the volume is entered, and a hub cannot be saved without one |
 
 **Camera actions**
 
@@ -1014,6 +1142,27 @@ because their actions address NPCs and objects by name. Everything up to the wal
 editor open at `timeScale 0`; the walk-in needs real time and a fresh A\* graph, so the editor is
 closed first. Every phase logs and continues per item — one bad entry never aborts the load.
 
+**Revisiting an authored room** goes through none of that: `BiomeRoom.Activate` only switches the
+previous room's object off and this one's on, so `Generate` never runs again and the blueprint is
+never re-applied. What *does* run is vanilla's re-entry housekeeping on a room it still believes it
+generated — `GenerateRoom.OnEnable` → `RegenerateDecorationsWithPool` — and three of its steps are
+wrong for an authored room. All three are suppressed by the `CustomRoomMarker` the loader leaves on
+it (`CustomRoomPatches`), which is a *lasting* answer where `LevelPlayback`'s `SuppressVanillaContent`
+is only open during the generation window:
+
+- **`SpawnDecorations`** re-rolls the biome's trees, rocks and critters into the room, and spawns
+  them *inside* sprite shapes — all over the author's own floor. This is what put random trees in a
+  custom room on every revisit. The patch still sets `GeneratedDecorations`, because
+  `BiomeGenerator` blocks the arrival until it turns true.
+- **`DisableDecorationsNearDoor`** switches off any `SceneryTransform` child within three units of a
+  door, on the assumption that everything under there is scattered dressing. In a custom room it is
+  a prop the author put there deliberately.
+- **`OnDisable`** recycles every `SceneryTransform` child on the way out — and `ObjectPool.Recycle`
+  **destroys** anything the pool did not spawn, so authored props were thrown away when the room was
+  left and never came back. `customDecorations` is vanilla's own switch for "this room's scenery is
+  not mine to recycle"; `Mark` sets it (by reflection — it is private) and a real regeneration clears
+  it again along with the marker.
+
 **The save dialog** is the game's own naming modal (`UICultNameMenuController`, the one the cult is
 named through), with its disclaimer line repurposed into a live overwrite warning. The editor
 closes fully before it opens and reopens (restoring camera, zoom and tool) when it closes: the
@@ -1040,6 +1189,7 @@ half-open, visible and permanently unable to take a keystroke.
 | `CustomShapeProfiles.cs` | Disk-loaded SpriteShape profiles (`CultTweaker_*`) |
 | `CTLevelBlueprint.cs`, `CTLevelDungeon.cs`, `LevelPlayback.cs` | Level tier: data, dungeon, run driver |
 | `CustomRoomPatches.cs` | Marks rooms whose contents a blueprint replaced |
+| `../APIHelper/ModContentPaths.cs` | Finds the same content folders inside other mods' `CultTweaker` folders |
 | `Tools/*.cs` | One file per tool, plus shared gizmos, ghosts and protection rules |
 | `Tools/TriggerActions.cs` | Trigger action model and the sequence runner |
 | `Tools/TriggerCameraActions.cs` | Camera offset/zoom/look-at, post-processing effects, cutscenes |
@@ -1049,6 +1199,47 @@ half-open, visible and permanently unable to take a keystroke.
 Anything protected by `MapEditorProtection` is never destroyed by the clear or delete tools — doors
 in particular are `IslandPiece`s carrying the `RoomLockController`, so destroying one soft-locks the
 room: it can never be completed or exited.
+
+### Content shipped by other mods
+
+Every content folder is read from **two** places: our own plugin folder, and the same folder name
+inside any other mod's `CultTweaker` folder. A mod ships content for these loaders without shipping
+any code for them:
+
+```
+BepInEx/plugins/SomeOtherMod/CultTweaker/CustomNodeBlueprints/TheirRoom.json
+BepInEx/plugins/SomeOtherMod/CultTweaker/CustomWorldMaps/TheirMap/config.json
+BepInEx/plugins/SomeOtherMod/CultTweaker/CustomNpcs/TheirNpc/config.json
+```
+
+`APIHelper/ModContentPaths.cs` finds those folders (a bounded walk of `BepInEx/plugins`, three levels
+deep, so nested installs are found without sweeping a large plugins tree) and merges them. It covers
+`CustomNodeBlueprints`, `CustomLevelBlueprints`, `CustomDungeonMaps`, `CustomWorldMaps`,
+`CustomShapeProfiles`, `CustomCutscenes`, `CustomNpcs`, `CustomEnemies`, `CustomStructures`,
+`CustomInventoryItems`, `CustomMeals`, `CustomTarotCards`, `PlayerSkins`, `FollowerSpines`,
+`FollowerSkins` and `BuildingOverrides`.
+
+Three rules make this safe:
+
+- **Reading is shared; writing is not.** Everything the editors save still goes to our own folder, so
+  a foreign mod's files are never edited in place and a mod update cannot clobber the player's work.
+  Saving another mod's world map under a new name copies its art across (`CopyArt` reads through
+  `FolderForRead`), which is how one is adopted for editing.
+- **Ours wins.** Where two mods use the same name for the same kind of thing the local copy is used
+  and the other is skipped with a warning; between two foreign mods, the first found wins. A player's
+  own creation is never shadowed by an installed mod.
+- **`Exists` and `Available` are different questions.** `Exists` is local-only and answers *"would
+  saving overwrite something of mine"* — the overwrite warnings and the name prompts use it, because
+  saving over a foreign name writes our own copy rather than touching theirs. `Available` answers
+  *"is there one of these to load"* and sees every mod's; the trigger action's world-map check, the
+  dungeon map's level validation and the `FreeName` series use that one.
+
+Paths are resolved once and kept absolute, so a foreign entry's art loads from wherever it lives —
+`LoaderResult.FolderPath`, `PlayerSkins`' `SpineEntry.Folder`, `BuildingOverrides`' remembered
+folder, and `CTWorldMapSerialization.FolderForRead` for a world map's images and spine subfolders.
+One thing deliberately stays local: an extracted cutscene soundtrack is cached in *our*
+`CustomCutscenes` folder even when the video came from another mod, since that mod's folder is not
+ours to write into.
 
 
 ## World maps
@@ -1099,14 +1290,27 @@ the selected tool. Its options panel carries the room editor's title bar and `-`
 the quarter of the map it covers can be worked on without leaving the tool. There is no Play
 button: **F6** leaves edit mode. **World File** (save/load/new, background colour, parallax strength, wipe
 progress), **World Layers** (click a layer on the map or its row to select it — the selection wears
-a frame — then drag to move, ctrl+drag to clone, scale, rotate, parallax, flip, spine animation and
-skin pickers, *Refresh art list* for files dropped in mid-session, `Del` for the selected layer,
+a frame — then drag to move, ctrl+drag to clone, scale, rotate, parallax, flip, labelled spine
+animation and skin pickers, a two-step **Add layer** (kind, then which file — the trigger tool's
+action-then-target shape; the second list survives panel rebuilds, so the next sprite is two
+clicks), *Refresh art list* for files dropped in mid-session, `Del` for the selected layer,
 and a layer list with `+`/`-` order and `X` delete for any other), **World Nodes** (a node picker, drag,
-name, icon type, visibility, keys, count gates, links, and the destination picker). Ctrl+Z
-undoes placements, moves, clones, deletions and links.
+name, icon type, visibility, destination, keys, count gates and links). Ctrl+Z
+undoes placements, moves, clones, deletions, rotations, resizes and links.
+
+**Scale and rotation are gizmos, not sliders** — the room editor's grammar, in canvas terms. The
+selection wears two corner nodes: the blue one on the right resizes (the scale follows how far the
+pointer moves from the centre, relative to where the grab started), the green one on the left
+rotates (the layer follows the pointer's angle around its own centre). Nodes carry the blue one
+only. Both hang from the gizmo root, so nothing drawn over the selection can cover them, and both
+are **clamped to the screen**: a background layer's true corner is somewhere off in the dark, so the
+handle rides the corner until it leaves the view and then holds at the edge, still on the same side
+of the centre so the drag reads the same either way.
 
 Picking a layer on the map: the **selected** layer wins wherever it sits in the stack, so one behind
-others stays draggable; otherwise the front-most under the cursor wins. However far a layer is
+others stays draggable; otherwise the front-most under the cursor wins. **Right click** drops that
+priority and takes the front-most regardless — the way out when the selection is a backdrop the
+cursor is inside everywhere, and left click can no longer reach anything in front of it. However far a layer is
 scaled down, its grab box and its selection frame stop shrinking at the same floor — 68 screen
 pixels for a sprite, 110 for a spine, whose skeleton draws well outside the rect it reports
 (`WorldMapSelectionFrame.MinFor`). What is outlined is what can be grabbed, which is what makes a
@@ -1122,8 +1326,15 @@ The node tool has no *Add node* button — ctrl+click the map places one, and th
 place selects a node by name, for nodes sitting under others. **Icon type** is one list: the seven
 node types first, then the map folder's pngs. Picking a png overrides only the drawn icon, so a
 node keeps meaning what its type means (Base closes the map, Key banks keys, Lock spends them)
-whatever face it wears. **Visibility** is the initial state. Both carry a caption above them, since
-a dropdown shows its current value once one is picked and then says nothing about what it sets.
+whatever face it wears. **Visibility** is the initial state and **Destination** is what selecting
+the node enters (`No destination` completes it on the spot). All three carry a caption above them,
+since a dropdown shows its current value once one is picked and then says nothing about what it
+sets.
+
+The selected node's **unlock gate is drawn on the map**: every node in its `RequiredNodes` list
+wears a green outline while it is selected, the same outline the selection wears in red, so picking
+the gate is done by looking at the map rather than by reading a list of ids. Where a node is both,
+red wins — it is the one being worked on.
 
 Nodes are worked with the mouse rather than through modes:
 
@@ -1133,6 +1344,7 @@ Nodes are worked with the mouse rather than through modes:
 | Left drag a node | moves it |
 | Left click empty map | clears the selection |
 | **Ctrl** + left click | places a new node there (the only way to add one) |
+| Drag the blue corner | resizes the selection |
 | **Del** | deletes the selected node (there is no button for it) |
 | Right click a node | links the selection to it, or removes that link if it exists |
 | Right click a link | removes it |

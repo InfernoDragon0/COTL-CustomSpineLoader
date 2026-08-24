@@ -1,0 +1,9 @@
+{
+    "name": "CotLSpineLoader",
+    "version_number": "2.0.0",
+    "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
+    "description": "[PRE-RELEASE] CultTweaker 2.0 experimental build: the Worldshaper map editor, hub editor and world editor. Back up your saves!",
+    "dependencies": [
+        "xhayper-COTL_API-0.3.4"
+    ]
+}
