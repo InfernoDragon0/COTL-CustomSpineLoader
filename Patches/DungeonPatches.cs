@@ -170,6 +170,10 @@ namespace CustomSpineLoader.Patches
             NextRoomConnectionType = ConnectionTypes.Entrance;
             LastDoorDirection = null;
 
+            // A net armed for a room in the biome being left would otherwise wake up in this one
+            // and reconcile the doors of a room it never watched.
+            RoomLockNet.Disarm();
+
             if (CustomDungeonManager.CustomDungeonList.ContainsKey(CustomDungeonManager.EnteringCustomDungeon))
             {
                 Plugin.Log.LogInfo("Entering Custom Dungeon ONENABLE " + CustomDungeonManager.EnteringCustomDungeon);
@@ -177,7 +181,24 @@ namespace CustomSpineLoader.Patches
 
                 Plugin.Log.LogInfo("Custom Room Count for " + __instance.DungeonLocation + ": " + CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation].NumRooms);
                 __instance.NumberOfRooms = CustomDungeonManager.CustomDungeonList[__instance.DungeonLocation].NumRooms;
-                // __instance.StartWithBossRoomDoor = true;
+
+                // Vanilla's "see the boss you are walking towards" room, and it does far more than
+                // decorate: PlaceEntranceAndExit appends a whole extra room for it at (-999, -999)
+                // and then points StartX/StartY at that instead of the entrance. So the floor comes
+                // out a room longer than anything asked for, and the room the player arrives in is
+                // no longer the entrance - which pushed the weapon-podium room to second place, and
+                // second place gets dealt a blueprint.
+                //
+                // Nothing in a custom dungeon sets up the boss progression that room exists to
+                // announce, so it is switched off rather than accounted for. Only ever reachable
+                // under a random walk in any case: an authored layout raises OverrideRandomWalk and
+                // PlaceEntranceAndExit returns before any of this.
+                if (__instance.StartWithBossRoomDoor)
+                {
+                    Plugin.Log.LogInfo("Custom dungeon: turning off StartWithBossRoomDoor - it would " +
+                                       "add an unaccounted room and take over the start position.");
+                    __instance.StartWithBossRoomDoor = false;
+                }
 
                 CustomDungeonManager.EnteringCustomDungeon = FollowerLocation.None;
 
@@ -388,6 +409,12 @@ namespace CustomSpineLoader.Patches
             CustomDungeonManager.CustomDungeonList[BiomeGenerator.Instance.DungeonLocation]
                 .OnRoomGenerated(room, NextRoomConnectionType);
             // complete room manually with (RoomLockController.RoomCompleted(true,true))
+
+            // Nothing above knows yet whether this room should be locked - the encounter system is
+            // still spawning and the player has not arrived. RoomLockNet asks once both are true.
+            // A level run brings its own net (LevelPlayback.LockIfContested), which also knows what
+            // the blueprint put in the room; two of them would fight over the same doors.
+            if (!MapEditor.LevelPlayback.Active) RoomLockNet.Arm(BiomeGenerator.Instance);
         }
     }
 }

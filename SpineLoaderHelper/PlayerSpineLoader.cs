@@ -25,6 +25,34 @@ public class PlayerSpineLoader
     // Kept past loading so DisableFleeceCycling and HiddenSlots can be read whenever a player is
     // dressed. Keyed by folder name, which is the half of "<spine>/<skin>" that COTL_API tracks.
     public static Dictionary<string, PlayerSpineConfig> SpineConfigs = [];
+    // Which fleece each player is wearing, by player id. The source of truth; the two fields below
+    // are the halves of it that survive a restart, kept in step on every write because the config
+    // and the boot path are both written in terms of them.
+    //
+    // Four, because coop seats four - players three and four were previously dressed by whatever
+    // player one had picked, since this was two variables and a switch with two cases.
+    public static readonly int[] FleeceIndexes = [-1, -1, -1, -1];
+
+    // Raised when a player's look has actually landed on their skeleton, with the player's id.
+    //
+    // Not the same moment as asking for it. A fleece whose spine is not resident yet starts a load
+    // and returns, dressing the player by callback seconds later - so a caller that redraws when
+    // ApplyFleece RETURNS redraws the old look, which is why a cross-atlas fleece only appeared
+    // when it was picked a second time.
+    public static Action<int> LookChanged;
+
+    private static void AnnounceLook(int playerId)
+    {
+        try
+        {
+            LookChanged?.Invoke(playerId);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("A look-changed listener threw: " + e.Message);
+        }
+    }
+
     public static int currentFleeceIndexP1 = -1;
     public static int currentFleeceIndexP2 = -1;
 
@@ -53,21 +81,18 @@ public class PlayerSpineLoader
 
     public static int CycleNextFleece(int playerID)
     {
-        var result = 0;
-        switch (playerID)
-        {
-            case 0:
-                //clamp index to 0 to FleeceRotation
-                currentFleeceIndexP1++;
-                if (currentFleeceIndexP1 >= FleeceRotation.Count) currentFleeceIndexP1 = 0;
-                result = currentFleeceIndexP1;
-                break;
-            case 1:
-                currentFleeceIndexP2++;
-                if (currentFleeceIndexP2 >= FleeceRotation.Count) currentFleeceIndexP2 = 0;
-                result = currentFleeceIndexP2;
-                break;
-        }
+        if (FleeceRotation.Count == 0) return -1;
+        if (playerID < 0 || playerID >= FleeceIndexes.Length) return -1;
+
+        var result = FleeceIndexes[playerID] + 1;
+        if (result >= FleeceRotation.Count || result < 0) result = 0;
+
+        FleeceIndexes[playerID] = result;
+
+        // The two that persist are mirrored, because the config and the boot path are written in
+        // terms of them.
+        if (playerID == 0) currentFleeceIndexP1 = result;
+        else if (playerID == 1) currentFleeceIndexP2 = result;
 
         Plugin.Log.LogInfo("Player " + (playerID + 1) + " cycled to fleece index " + result + " (" + FleeceRotation[result] + ")");
 
@@ -537,12 +562,8 @@ public class PlayerSpineLoader
         return playerId == 0 ? PlayerFarming.Instance : null;
     }
 
-    public static int GetFleeceIndex(int playerId) => playerId switch
-    {
-        0 => currentFleeceIndexP1,
-        1 => currentFleeceIndexP2,
-        _ => -1
-    };
+    public static int GetFleeceIndex(int playerId) =>
+        playerId >= 0 && playerId < FleeceIndexes.Length ? FleeceIndexes[playerId] : -1;
 
     // Dresses one player in one fleece. Players beyond the second are dressed but NOT remembered:
     // both the config and the SetSkin patch that re-applies a fleece after a respawn only know
@@ -574,6 +595,9 @@ public class PlayerSpineLoader
             HideSlots(player.Spine, config);
             Plugin.Log.LogInfo($"{ActiveSpineName(playerId)} keeps its own fleece; " +
                                $"{fleeceSkinName} remembered for player {playerId + 1} only.");
+
+            // The skeleton changed even though the fleece was refused: HideSlots stripped it.
+            AnnounceLook(playerId);
             return false;
         }
 
@@ -599,11 +623,19 @@ public class PlayerSpineLoader
         ApplyFleeceAttachments(player.Spine, fleeceSkin, config);
 
         Plugin.Log.LogInfo($"Player {playerId + 1} is wearing {fleeceSkinName}.");
+
+        // Here rather than at the call site, so the deferred landing above announces itself too.
+        AnnounceLook(playerId);
         return true;
     }
 
     private static void RememberFleece(int playerId, int fleeceIndex)
     {
+        if (playerId >= 0 && playerId < FleeceIndexes.Length) FleeceIndexes[playerId] = fleeceIndex;
+
+        // Players three and four are remembered for the session but not written to the config: the
+        // boot path loads a fleece eagerly per player and there are two entries for it, so a third
+        // seat's choice lasts until the game is closed.
         switch (playerId)
         {
             case 0:
@@ -659,6 +691,14 @@ public class PlayerSpineLoader
 
         var slash = name.IndexOf('/');
         return slash > 0 && Registry.TryGetValue(name.Substring(0, slash), out entry) ? entry : null;
+    }
+
+    // A spine that is on its way in. The F7 panel says so where the portrait would be, rather than
+    // leaving an empty box for the seconds a parse takes.
+    public static bool IsPreparing(string name)
+    {
+        var entry = FindEntry(name);
+        return entry != null && entry.State == SpineState.Loading;
     }
 
     public static bool IsLoaded(string name)
@@ -730,11 +770,52 @@ public class PlayerSpineLoader
     // The looks that must exist the moment the player does. Called at startup and again from
     // PlayerFarming.Awake: the API may not have read its save yet when the mod loads, so the
     // selection can appear between the two.
+    // Writes the choice down. Called whenever a spine is picked, so it survives the session.
+    public static void RememberSpine(int playerId, string spineKey)
+    {
+        switch (playerId)
+        {
+            case 0:
+                if (Plugin.SelectedSpineP1 != null) Plugin.SelectedSpineP1.Value = spineKey ?? "";
+                break;
+            case 1:
+                if (Plugin.SelectedSpineP2 != null) Plugin.SelectedSpineP2.Value = spineKey ?? "";
+                break;
+        }
+    }
+
+    // Puts a remembered spine back at startup.
+    //
+    // Only when COTL_API has no selection of its own, which is the whole rule: if the API did keep
+    // the choice, or the player picked one through the API's own settings, that is the newer answer
+    // and this must not talk over it. It is the empty case - the one where the choice was simply
+    // lost - that this exists for.
+    private static void RestoreSelectedSpine(int playerId)
+    {
+        var saved = playerId == 0 ? Plugin.SelectedSpineP1?.Value : Plugin.SelectedSpineP2?.Value;
+        if (string.IsNullOrEmpty(saved)) return;
+
+        if (!string.IsNullOrEmpty(ActiveSpineKey(playerId))) return;
+
+        try
+        {
+            CustomSkinManager.ChangeSelectedPlayerSpine(saved, playerId);
+            Plugin.Log.LogInfo($"Player {playerId + 1} spine restored to {saved}.");
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"Could not restore player {playerId + 1}'s spine " +
+                                  $"'{saved}': {e.Message}");
+        }
+    }
+
     public static void EnsureSelectedLoaded()
     {
         for (var playerId = 0; playerId < 2; playerId++)
         {
             var id = playerId;
+
+            RestoreSelectedSpine(playerId);
 
             var spine = ActiveSpineName(playerId);
             if (!string.IsNullOrEmpty(spine) && Registry.ContainsKey(spine) && !IsLoaded(spine))
@@ -862,7 +943,12 @@ public class PlayerSpineLoader
     // happening?" answer for the seconds the parse takes.
     private static IEnumerator LoadRoutine(SpineEntry entry, bool announce)
     {
-        if (announce)
+        // Not while the F7 panel is up: the caption lands in the bottom-left corner, which is where
+        // the player dock stands, and the dock says it in the card of the player it belongs to -
+        // which is more use anyway, since it names who is waiting rather than only what for.
+        var panelOpen = ModUI.CultTweakerPanel.Active != null && ModUI.CultTweakerPanel.Active.IsOpen;
+
+        if (announce && !panelOpen)
             MapEditor.Tools.TriggerScreenText.Show(MapEditor.Tools.TriggerScreenText.Mode.Caption,
                 $"Preparing {entry.Name}...", "", 90f);
 

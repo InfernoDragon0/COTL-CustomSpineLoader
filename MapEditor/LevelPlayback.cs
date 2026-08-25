@@ -14,6 +14,10 @@ public static class LevelPlayback
 {
     public static bool Active { get; private set; }
 
+    // The level driving the current run, for the generator hooks that have to know the shape of it
+    // before a single room exists. Null when no run is bound.
+    public static CTLevelBlueprint CurrentLevel => _level;
+
     private static CTLevelBlueprint _level;
     private static List<string> _resolvedRooms;
     private static RuntimeMapEditor _editor;
@@ -111,6 +115,16 @@ public static class LevelPlayback
     {
         error = null;
 
+        // Checked before the scene loads rather than at build time, because an authored grid is
+        // built inside the generation coroutine where the only way to report a problem is a log
+        // line and a floor that quietly is not the one that was authored.
+        var problem = LevelLayout.Validate(level);
+        if (problem != null)
+        {
+            error = "Layout: " + problem;
+            return null;
+        }
+
         var saved = MapEditorSerialization.LoadAll();
         if (saved.Count == 0)
         {
@@ -124,6 +138,19 @@ public static class LevelPlayback
         var resolved = new List<string>();
         for (var i = 0; i < level.Rooms.Count; i++)
         {
+            // A room that is one of the game's own - the podium room, the end-of-floor room - is
+            // whatever that prefab makes it. Loading a blueprint over the top clears exactly what it
+            // is there for, so it resolves as vanilla and the apply routine leaves it alone.
+            //
+            // True in both modes. Under a random walk PlaceEntranceAndExit builds those two rooms
+            // whatever the level says, and the level carrying them at its ends is what stops the
+            // first blueprint being dealt onto the weapon podiums.
+            if (level.Rooms[i].VanillaRoom != CTLevelRoom.Generated)
+            {
+                resolved.Add(CTLevelRoom.VanillaNode);
+                continue;
+            }
+
             var pool = new List<string>();
             foreach (var name in level.Rooms[i].NodePool)
                 if (name == CTLevelRoom.VanillaNode || byName.ContainsKey(name)) pool.Add(name);
@@ -241,8 +268,37 @@ public static class LevelPlayback
 
         var biomeRoom = BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
 
+        // Said once, at the first room, because a floor that is not the length the level asked for
+        // is the root of every slot that lands on the wrong room - and counting the per-room lines
+        // by hand is how it was found the last two times.
+        if (_roomSlots.Count == 0 && BiomeGenerator.Instance?.Rooms != null)
+        {
+            var built = BiomeGenerator.Instance.Rooms.Count;
+            var wanted = _resolvedRooms.Count;
+
+            if (built == wanted)
+                Plugin.Log.LogInfo($"MapEditor: floor built with {built} room(s), as the level asks.");
+            else
+                Plugin.Log.LogWarning($"MapEditor: floor built with {built} room(s) for a level of " +
+                                      $"{wanted} - blueprints will not line up with rooms.");
+        }
+
         int slot;
-        if (biomeRoom == null || _roomSlots.Count == 0)
+        if (biomeRoom != null && LevelLayout.IsAuthored(_level))
+        {
+            // An authored level knows exactly which room stands in which cell, so there is nothing
+            // to infer - the guesswork below exists only because a random walk gives the author no
+            // way to say. A cell the level does not know about should not happen (we built the
+            // grid), so it falls back rather than dropping the room's content on the floor.
+            slot = LevelLayout.SlotFor(_level, biomeRoom.x, biomeRoom.y);
+            if (slot < 0)
+            {
+                Plugin.Log.LogWarning($"MapEditor: no authored room at cell ({biomeRoom.x}, " +
+                                      $"{biomeRoom.y}); using the first room's blueprint.");
+                slot = 0;
+            }
+        }
+        else if (biomeRoom == null || _roomSlots.Count == 0)
         {
             slot = 0;
         }
@@ -305,9 +361,16 @@ public static class LevelPlayback
         // The room owning the exit door is the Exit slot wherever the walk placed it.
         if (HasExitConnection(biomeRoom)) return last;
 
-        // Middle slots in discovery order; extra rooms reuse the last one, never Exit's.
+        // Middle slots in discovery order, cycling if the floor came out longer than the level. The
+        // walk's length is vanilla's arithmetic rather than ours, so a floor with more rooms than
+        // the level has blueprints is always possible; cycling deals them round again instead of
+        // dropping every extra room onto the same one.
         _normalCursor++;
-        return Mathf.Clamp(_normalCursor, 1, Mathf.Max(1, last - 1));
+
+        var middles = last - 1;
+        if (middles < 1) return Mathf.Max(0, last);
+
+        return 1 + (_normalCursor - 1) % middles;
     }
 
     private static bool HasExitConnection(BiomeRoom room)

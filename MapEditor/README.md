@@ -854,19 +854,20 @@ actually iterating on are legible at a glance rather than being four identical t
 
 ### Level
 
-Authors `CTLevelBlueprint`s — the room chain a custom level generates from. Create or open a level,
-set how many rooms it has, and pick which node blueprints each room may generate from. **Play
-Level** resolves the chain, re-enters the dungeon scene and loads the entrance room; doors then
-advance through the chain.
+Authors `CTLevelBlueprint`s — the rooms a custom level generates from. Create or open a level, set how
+many rooms it has, and pick which node blueprints each room may generate from. **Play Level** resolves
+them, re-enters the dungeon scene and loads the entrance room; doors then advance through the level.
+
+A level can either leave the floor's shape to the game (the original behaviour, described here) or
+state it outright — see **Authored layouts** below.
 
 **Notes**
 
 - `Rooms[0]` is always the Entrance and `Rooms[^1]` always the Exit; added rooms go between them
   and neither end can be removed.
-- **Everything picked is a dropdown**, the same widget the other tools use: open a level, select the
-  room being edited (pre-selected on rebuild, which is what the old `<` marker did), set its
-  modifier, add to its pool. The panel used to be a stack of buttons that grew by one for every
-  level and every map ever saved.
+- **Everything picked is a dropdown**, the same widget the other tools use: select the room being
+  edited, set its modifier, add to its pool. The panel used to be a stack of buttons that grew by one
+  for every level and every map ever saved.
 - The pool follows the trigger tool's add-and-remove shape rather than a checkbox per blueprint: the
   dropdown offers only what is *not* in the pool, and each member gets an `X` row. So the panel
   scales with the pool, not with the save folder.
@@ -878,14 +879,161 @@ advance through the chain.
 - Playback follows the F5 convention end to end: `EnterDungeon()` reloads the scene,
   `BiomeGenerator` lays out `NumRooms` with its normal walk, doors and room changes are fully
   vanilla, and each generated room is rebuilt from a node blueprint via `OnRoomGenerated`.
+- **`NumberOfRooms` is not a room count.** `CreateRandomWalk` seeds a room *before* its loop and then
+  adds `NumberOfRooms` more, and `PlaceEntranceAndExit` appends the end-of-floor room on top — so a
+  floor arrives at `NumberOfRooms + 2`, and handing it the level's room count straight through made a
+  two-room level generate four. `CTLevelDungeon.NumRooms` subtracts the two, which are the entrance
+  and end-of-floor rooms the level now carries at its ends. It cannot go below one:
+  `PlaceEntranceAndExit` picks the entrance and exit from rooms with exactly one connection, and a
+  lone room has none, so it dereferences null. Authored layouts are unaffected; the walk never runs
+  for them.
 - The room hook fires *inside* vanilla generation while the transition still covers the screen, so
   the apply routine holds that cover (`MMTransition.CanResume`), swaps the blueprint in behind it,
   and only then resumes — the player never sees the vanilla room.
-- Slot mapping: the first generated room takes Entrance, the room owning the exit (NextLayer) door
-  takes Exit, and others consume middle slots in discovery order. Revisited rooms regenerate
-  vanilla content, so their remembered slot re-applies.
+- Slot mapping *without* a layout: the first generated room takes Entrance, the room owning the exit
+  (NextLayer) door takes Exit, and others consume middle slots in discovery order. Revisited rooms
+  regenerate vanilla content, so their remembered slot re-applies.
 - All playback state is static: scene reloads destroy the editor host, and each fresh host re-binds
   via `OnEditorReady`.
+
+#### Authored layouts
+
+A level can also say the shape of the floor itself — a cell per room and a door per side — instead of
+being dealt onto whatever the random walk produced. It is a toggle on the layout screen, **Random
+walk**: cleared, the floor is exactly the grid; ticked, the level is a sequence again and the doors
+are ignored. New levels start laid out; blueprints written before layouts existed load with it ticked
+and play exactly as they always did.
+
+Under a random walk nothing about the grid has to be wired — there is no shape to wire. The rooms
+still stand on cells, because that is how they are seen and picked, but they play in the order they
+are numbered. Ctrl+click adds a room *before* the last one.
+
+**The first and last rooms are the game's, and the level owns them.** A random walk always builds
+two rooms of its own: `PlaceEntranceAndExit` makes the room the player arrives in the
+`EntranceRoomPath` prefab — the weapon podiums — and appends the `EndOfFloorRoomPath` room with the
+way out. They were always on the floor; the level just did not know about them, so its first
+blueprint was being loaded over the podiums and its last over the exit platform. Now they are the
+first and last entries in the level: drawn in their own colours, carrying no pool, and refusing to be
+deleted, because the floor has them whether the author wants them or not.
+
+That is also what makes the count on screen the floor the player walks — `CTLevelDungeon.NumRooms`
+subtracts exactly those two before handing the rest to the walk. A level always keeps at least one
+room of its own between the ends, since the walk cannot be asked for fewer than two rooms
+(`PlaceEntranceAndExit` reads rooms with exactly one connection, and a lone room has none).
+
+Migrating a blueprint written before this **inserts** the two ends rather than taking over the rooms
+already at those positions — those carry pools the author chose, and repurposing them would throw two
+of them away. So an old two-room level becomes four: entrance, its two rooms, exit.
+
+**`StartWithBossRoomDoor` is switched off for every custom dungeon.** It is vanilla's "see the boss
+you are walking towards" room, and it does far more than decorate: `PlaceEntranceAndExit` appends a
+whole extra room for it at `(-999, -999)` and then points `StartX`/`StartY` at *that* instead of the
+entrance. The floor comes out a room longer than anything asked for, and the room the player arrives
+in is no longer the entrance — so the weapon-podium room fell to second place, and second place gets
+dealt a blueprint. It fires on `GameManager.CurrentDungeonFloor == 1`, which is why it only showed up
+sometimes. Nothing in a custom dungeon sets up the boss progression it announces, so it is turned off
+rather than accounted for; an authored layout never reached it anyway.
+
+A one-line check at the first room logs the floor's real size against the level's, so a mismatch
+names itself instead of having to be counted out of the per-room lines.
+
+**What vanilla gives us.** `BiomeGenerator.CreateRandomWalk` drops a room at the origin and then, for
+`NumberOfRooms` iterations, picks a random room already placed and a random one of four directions,
+adding a neighbour wherever the cell is free. `PlaceEntranceAndExit` then flood-fills to choose the
+two furthest-apart dead ends. Neither is consulted when `OverrideRandomWalk` is set — and that flag is
+not a back door: `MapManager.EnterNode` sets it for every dungeon-map node that is not a random floor,
+and the DLC intro dungeon runs on it. It is checked as an early return in `PlaceEntranceAndExit`,
+`GetCriticalPath`, `PlaceLockAndKey`, `PlaceStoryRooms`, `PlaceDynamicCustomRooms` and
+`PlaceFixedCustomRooms`, so raising it stands the whole procedural layer down.
+
+**What we do with it** (`LevelLayout`): a Harmony prefix on `CreateRandomWalk` builds the `BiomeRoom`
+graph from the authored grid, raises the flag, and skips the original. Generation then carries on
+completely unchanged on top of it — room shape and doors follow from the connection types alone, since
+`GenerateRoom.Generate(seed, N, E, S, W)` walks `CreatePaths` and `PlaceDoors` off them.
+
+**Notes**
+
+- `CreateRandomWalk` is the hook rather than `CustomDungeon.OnBiomeReady`, because a floor entered
+  from a dungeon map is regenerated in place (`MapManager.EnterNode` → `Regenerate`), which re-runs
+  `GenerateRoutine` without the biome ever being enabled a second time. `CreateRandomWalk` is the
+  first thing `GenerateRoutine` does on both paths.
+- Vanilla's own `OverrideRooms` list is deliberately **not** used. That path marks every room custom
+  and loads a prefab for it by Addressable path — right for the fixed prefab rooms it was built for,
+  wrong here, where an authored level wants ordinary generated rooms with islands and doors that a
+  blueprint is then pasted onto. Those are what `InstantiatePrefabs` makes for anything left
+  `IsCustom == false`.
+- `RoomEntrance`, `RoomExit`, `lastRoom`, `StartX` and `StartY` are set by hand, because
+  `PlaceEntranceAndExit` is what normally sets them and `Door`/`Interaction_BiomeDoor` dereference
+  `RoomEntrance` without checking it.
+- The minimap hides itself whenever `OverrideRandomWalk` is up — right for what vanilla uses the flag
+  for, a node whose whole floor is one room. A prefix/postfix pair lowers the flag for the length of
+  `MiniMap.OnBiomeGenerated` and raises it again straight after.
+- **Doors follow from the arrangement.** Placing or dragging a room opens a door to everything it now
+  touches (`LevelLayout.WireRoom`) and walls off what it has parted from; the side dropdowns are there
+  to close one again, for a spiral or a room you walk past rather than through. Only the room being
+  moved is rewired, so a door deliberately closed elsewhere survives dragging a third room about.
+- **The two end doors are derived, not placed.** The way in goes on the first room in the level and
+  the way out on the last, on a side facing open grid — south and north for preference, which is
+  vanilla's own. **Start Here** / **Way Out Here** move the selected room to the front or back of the
+  level, which is how you choose which rooms those are. Leaving them to be set by hand meant a level
+  could be dragged into a shape with two ways in, or none, and only find out at the badge.
+- A side facing another room is a wall or a door; a side facing open grid is a wall or one of the two
+  end doors. `LevelLayout.Normalize` re-applies all of that after every edit.
+- **A door is shared, so it is written to both rooms at once** (`LevelLayout.SetShared`). `Normalize`
+  settles disagreements with *"if either side says door, both do"*, which is what lets a room dragged
+  next to another open the door from one side only — and the reason closing one from a single side
+  silently never took: the neighbour was still saying door, so the same pass put it back. Every
+  deliberate door change goes through `SetShared` so the two rooms agree before `Normalize` is asked
+  anything.
+- Sides are **Up / Down / Left / Right** on screen. The compass is the biome's own vocabulary and
+  stays in the data — north is +Y, east is +X — but on a grid drawn face-on it only confused the
+  issue.
+- Room binding stops guessing: `LevelPlayback` looks the slot up by cell, so the blueprint in room 4
+  plays in room 4 rather than in the fourth room the player happened to walk into.
+- The layout is validated before the scene loads (`LevelPlayback.Resolve`), not at build time — inside
+  the generation coroutine the only way to report a problem is a log line and a floor that quietly is
+  not the one that was authored. If the build fails anyway it falls back to the vanilla walk, which is
+  a worse level than the one authored and an enormously better one than a black room.
+- Blueprints without a layout keep the old behaviour exactly: `AuthoredLayout` deserialises false, and
+  every path above is gated on it.
+
+#### The layout screen
+
+The dungeon builder's arrangement one level down — full screen, options floating right, dock along the
+bottom, status bar above it. The dock panel is the list of levels and nothing else; picking one goes
+straight to the screen, so there is no second set of controls and no half-open state to be in.
+
+| Gesture | Does |
+| --- | --- |
+| Ctrl + left click | Add a room in that cell, doored to everything it touches |
+| Left click | Select a room; drag to move it |
+| Right click a room | Open or close the door between it and the selection |
+| Del | Delete the selected room |
+| Ctrl+S | Quicksave · Ctrl+Z undo · Esc close |
+
+- Green edge = the way in, gold = the way out, pale = a door between rooms.
+- **Room kind** picks between a generated room and one of the game's own finished ones: the
+  **vanilla entrance**, which is the room with the weapon podiums a run starts in, and the **vanilla
+  exit**, the end-of-floor room. Both are drawn in their own colour on the grid.
+  - These are `BiomeGenerator.EntranceRoomPath` and `EndOfFloorRoomPath` — *per-biome* fields, so
+    "the podium room" resolves to the right room for whichever dungeon the level is played in rather
+    than to a path baked into the blueprint. `GameManager.Layer2` swaps in the `_P2` variant, the
+    same way vanilla does.
+  - They are built the way `PlaceEntranceAndExit` builds them: `IsCustom` with a `GameObjectPath`,
+    and `Generated` left false so the prefab's own `GenerateRoom` still lays the island and doors
+    around what the prefab brought with it.
+  - A prefab room's pool is ignored and nothing is loaded over it — `LevelPlayback.Resolve` returns
+    `<vanilla>` for it, because pasting a blueprint on would clear exactly what it was picked for.
+  - Where they stand is only an advisory, not a rule: the podiums gate on
+    `GameManager.CurrentDungeonFloor`, not on the room being the entrance, so a podium room works
+    anywhere. It does mean **the podiums only appear on the first floor of a run**.
+- The badge reads **Playable**, or the first thing wrong with the grid; rooms a blocking issue names
+  get a red ring. Unreachable rooms are the failure the grid exists to make visible — the level runs,
+  and part of it is simply never seen.
+- Setting a side to *way in* clears any other, since the player can only arrive through one door.
+- Undo snapshots the whole grid rather than inverting each edit: every edit renormalises the rooms
+  around it, so an inverse would have to carry the neighbours' sides too — a snapshot with extra
+  steps.
 
 ### Hubs
 
@@ -1712,6 +1860,29 @@ named through), with its disclaimer line repurposed into a live overwrite warnin
 closes fully before it opens and reopens (restoring camera, zoom and tool) when it closes: the
 modal's show/hide animations run on **scaled** time, so the editor's `timeScale 0` froze the dialog
 half-open, visible and permanently unable to take a keystroke.
+
+**Room locking in custom dungeons** (`APIHelper/RoomLockNet`) is decided after the arrival, not during
+generation. Whether a room should be locked has one honest answer — is anything alive in it? — and
+that answer does not exist while the room is still being built: the encounter system is still
+spawning and the player has not arrived.
+
+`CustomDungeon.SpawnEnemies` used to call `RoomLockController.RoomCompleted()` from the generation
+hook whenever a dungeon had no custom enemy list of its own, and that is what stopped
+vanilla-populated rooms locking. `RoomCompleted` does not merely open doors: it sets
+`CurrentRoom.Completed` on the `BiomeRoom`, and `BiomeGenerator.PlacePlayer` wraps its **entire**
+arrival block — the enemy count, the walk-in and the `CloseAll` with it — in `if
+(!CurrentRoom.Completed)`. Calling it during generation told the game the room was finished before the
+player had arrived, so the arrival never looked at what was standing there. The vanilla monsters were
+present the whole time; nothing ever asked.
+
+So the net waits for the walk-in to end (`PlacePlayer` parks the players `InActive` and vanilla's own
+`CloseAll` hangs off the end of that walk, so acting sooner would race the code it backs up), then
+reconciles the doors with what is actually in the room: **enemies with the doors open → `CloseAll`**,
+**nothing at all with the doors shut → `RoomCompleted`**. The second half is why the old early call
+existed — a room with nothing in it is locked by vanilla anyway, since `doorsWillClose` defaults true,
+and with nothing to kill there is no way out. Both directions are safe to run on a room the game
+already got right. Level runs bring their own net (`LevelPlayback.LockIfContested`), which also knows
+what the blueprint put in the room, so the two never arm together.
 
 ---
 

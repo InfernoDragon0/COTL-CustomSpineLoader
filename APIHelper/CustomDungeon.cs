@@ -183,11 +183,23 @@ public class CustomDungeon
         {
             case ConnectionTypes.True:
                 Plugin.Log.LogInfo("Spawning true test");
+                // Nothing of ours to add. This used to declare the room complete here, and that
+                // is what stopped vanilla-populated rooms locking.
+                //
+                // RoomCompleted does not just open doors: it sets `CurrentRoom.Completed` on the
+                // BiomeRoom, and BiomeGenerator.PlacePlayer wraps its ENTIRE arrival block in
+                // `if (!CurrentRoom.Completed)` - the enemy count, the walk-in, and the CloseAll
+                // with it. Calling it from here, during generation, told the game the room was
+                // finished before the player had even arrived, so the arrival never looked at what
+                // was standing in the room. The vanilla monsters the encounter system had just
+                // spawned were there the whole time; nothing ever asked.
+                //
+                // The room being empty is a question that can only be answered after it is built
+                // and arrived in, so it is asked there instead - see RoomLockNet.
                 if (NormalEnemyList.Count == 0)
                 {
-                    Plugin.Log.LogWarning("No enemies to spawn for this dungeon.");
-                    if (RoomLockController.RoomLockControllers.Count > 0)
-                        RoomLockController.RoomCompleted();
+                    Plugin.Log.LogInfo("No custom enemies for this dungeon; leaving the room's " +
+                                       "lock to its own arrival.");
                     return;
                 }
 

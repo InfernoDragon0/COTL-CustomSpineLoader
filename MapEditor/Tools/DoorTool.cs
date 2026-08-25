@@ -251,6 +251,10 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _pads[door] = pad;
         }
 
+        // Every refresh rather than only on creation: a pad can also arrive from a load path that
+        // did not go through the branch above, and one drawn pad is one strip of stray floor.
+        HidePad(pad);
+
         var length = PadLengthFor(door);
         BuildPadSpline(pad, door, length);
         PositionPad(pad, door, length);
@@ -279,6 +283,22 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _padLengths[door] = Mathf.Min(current + PadGrowStep, PadMaxLength);
         RefreshPad(door, deferCollision);
         return true;
+    }
+
+    // A pad is floor, not scenery. It exists so a door that has been dragged away from the island
+    // still has ground under it, and the ground it provides is its BoxCollider2D: that is what the
+    // room composite merges, and the composite is what the A* grid is built from
+    // (GenerateRoom.SetColliderAndUpdatePathfinding). The sprite shape is only how it looks.
+    //
+    // And how it looked was wrong. The pad is cloned from a room ground shape, so it arrived
+    // wearing that shape's fill and edge sprites - a strip of the biome's own floor pasted over
+    // whatever the author had actually built there, in a rectangle nobody drew. Switching the
+    // renderer off leaves the shape, the collider and the path exactly as they were, and takes away
+    // only the part that was never wanted.
+    private static void HidePad(SpriteShapeController pad)
+    {
+        var renderer = pad != null ? pad.GetComponent<SpriteShapeRenderer>() : null;
+        if (renderer != null) renderer.enabled = false;
     }
 
     // A box the composite can merge; splines are world-axis on an unrotated transform, so the

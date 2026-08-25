@@ -109,6 +109,8 @@ public class CultTweakerPanel : MonoBehaviour
         _open = true;
         _canvas.enabled = true;
 
+        PlayerSpineLoader.LookChanged += OnLookChanged;
+
         // Rebuilt on every open: player two joins and leaves, mods register content late, and
         // the counts in the About section are only true at the moment they are read.
         BuildContent();
@@ -139,8 +141,14 @@ public class CultTweakerPanel : MonoBehaviour
         if (!_open) return;
 
         _open = false;
+        PlayerSpineLoader.LookChanged -= OnLookChanged;
+
         if (_canvas != null) _canvas.enabled = false;
         _ui.CloseTransientUi();
+
+        // Four render targets, and nothing but the dock ever looks at them.
+        _dock?.Teardown();
+        PlayerPreview.Release();
 
         // Time first: the HUD's show animation needs a running clock.
         Time.timeScale = _savedTimeScale <= 0f ? 1f : _savedTimeScale;
@@ -176,6 +184,10 @@ public class CultTweakerPanel : MonoBehaviour
 
         HandleCamera();
         HandleWheel();
+
+        // The portraits are their own skeletons standing off the edge of the world; this is the
+        // frame they are filmed in.
+        PlayerPreview.Tick();
     }
 
     // ---- ui -----------------------------------------------------------------------------------
@@ -288,15 +300,38 @@ public class CultTweakerPanel : MonoBehaviour
             Destroy(child.gameObject);
 
         BuildAboutSection();
-        BuildFleeceSettings();
-
-        // Players one and two always have a section, present or not: the panel is also how you
-        // set up player two's look BEFORE they join, and a section that appears and disappears
-        // as a controller connects is worse than one that says "not in the game".
-        var playerCount = Mathf.Max(2, PlayerFarming.players != null ? PlayerFarming.players.Count : 0);
-        for (var i = 0; i < playerCount; i++) BuildPlayerSection(i);
-
         BuildControlsSection();
+
+        // The players live in their own dock along the bottom left - see PlayerDock.
+        _dock ??= new PlayerDock(_ui, _canvasGO.transform) { Changed = RefreshDock };
+        _dock.Rebuild();
+    }
+
+    private PlayerDock _dock;
+
+    // The dock is torn down and built again, which it must be when the list of controls itself
+    // changes - a different spine has a different set of animations to offer. Only the spine picker
+    // asks for this; a fleece re-dresses the portrait in place through OnLookChanged below, because
+    // rebuilding the whole dock for a change of clothes is what made it jump about.
+    private void RefreshDock()
+    {
+        if (!_open) return;
+        StartCoroutine(RefreshDockNextFrame());
+    }
+
+    private System.Collections.IEnumerator RefreshDockNextFrame()
+    {
+        yield return null;
+        yield return null;
+
+        if (_open) _dock?.Rebuild();
+    }
+
+    // Raised when a look actually lands on a skeleton, which is not the same moment as asking for
+    // it: a fleece whose spine had to load first arrives seconds later, by callback.
+    private void OnLookChanged(int playerId)
+    {
+        if (_open) PlayerPreview.Redress(playerId);
     }
 
     private void BuildAboutSection()
@@ -321,100 +356,21 @@ public class CultTweakerPanel : MonoBehaviour
         Note($"Saved level blueprints: {FileCount(CTLevelSerialization.FolderName)}");
     }
 
-    private void BuildFleeceSettings()
-    {
-        _ui.CreateHeader(_content, "- Fleece & Skin Settings -", 22);
-
-        // The F9 toggle, given a face. Off, the SetSkin patch stops re-dressing the players, so
-        // the game's own fleece comes back on the next skin rebuild.
-        _ui.CreateToggle(_content, "Fleece cycling enabled", Plugin.FleeceCyclingEnabled.Value, value =>
-        {
-            Plugin.FleeceCyclingEnabled.Value = value;
-
-            if (value)
-            {
-                ReapplyFleeces();
-                return;
-            }
-
-            foreach (var player in TriggerActions.LivePlayers()) player.SetSkin();
-        });
-    }
-
-    private void BuildPlayerSection(int playerId)
-    {
-        var player = PlayerSpineLoader.ResolvePlayer(playerId);
-
-        _ui.CreateHeader(_content, $"- Player {playerId + 1} -", 22);
-        if (player == null) Note("Player 2 not in the game!");
-
-        // ---- fleece
-        var fleeces = PlayerSpineLoader.FleeceRotation;
-        if (fleeces.Count == 0)
-        {
-            Note("No fleeces found yet; enter a level once.");
-        }
-        else
-        {
-            // A label above each picker as well as in it: the dropdown's own caption is replaced
-            // by whatever was chosen, so after one selection the row would no longer say what it
-            // controls.
-            FieldLabel("Fleece Transmog");
-
-            var fleeceDropdown = _ui.CreateDropdown(_content, "Fleece Transmog", fleeces,
-                (index, _) => ApplyFleece(playerId, index));
-
-            var current = PlayerSpineLoader.GetFleeceIndex(playerId);
-            if (current >= 0 && current < fleeces.Count) fleeceDropdown.SetSelected(current);
-
-            // The picker still works and still remembers, it just does not dress this spine - so
-            // say so here rather than leaving a control that looks broken.
-            var spineConfig = PlayerSpineLoader.ConfigFor(playerId);
-            if (spineConfig != null && spineConfig.DisableFleeceCycling)
-                Note($"{PlayerSpineLoader.ActiveSpineName(playerId)} keeps its own fleece; " +
-                     "your choice is saved for other spines.");
-        }
-
-        // ---- spine
-        var spines = PlayerSpines();
-        if (spines.Count == 0)
-        {
-            Note("No custom player spines are registered.");
-            return;
-        }
-
-        // COTL_API tracks a selected spine for players one and two only; a third player's spine
-        // would be written into player one's slot, so the picker is not offered for them.
-        if (playerId > 1)
-        {
-            Note("Spine selection is limited to players 1 and 2.");
-            return;
-        }
-
-        FieldLabel("Player Spine");
-
-        var spineDropdown = _ui.CreateDropdown(_content, "Player Spine", spines,
-            (_, value) => ApplySpine(playerId, value));
-
-        var selected = spines.IndexOf(PlayerSpineLoader.ActiveSpineKey(playerId));
-        if (selected >= 0) spineDropdown.SetSelected(selected);
-    }
-
+    // One section for the three places the panel can send you, because they are the same gesture
+    // three times over and had grown into three headers with five dropdowns between them. Each of
+    // these opens the thing playable; the editor is a key press away once you are inside it, which
+    // is what the second dropdown in each pair used to be for.
     private void BuildControlsSection()
     {
-        _ui.CreateHeader(_content, "- Camera -", 22);
-        Note("WASD / arrows pan, Z and X zoom.");
-        Note("F7 or Esc to close.");
-
-        _ui.CreateHeader(_content, "- Extras -", 22);
+        _ui.CreateHeader(_content, "- Go -", 22);
         BuildDungeonPicker();
-        _ui.CreateButton(_content, "Dump Follower Spine Atlas", DumpFollowerSlots);
-
-        _ui.CreateHeader(_content, "- World Maps -", 22);
+        BuildHubSection();
         BuildWorldMapSection();
 
-        _ui.CreateHeader(_content, "- Hubs -", 22);
-        BuildHubSection();
+        _ui.CreateHeader(_content, "- Extras -", 22);
+        _ui.CreateButton(_content, "Dump Follower Spine Atlas", DumpFollowerSlots);
+        Note("WASD / arrows pan, Z and X zoom.");
+        Note("F7 or Esc to close.");
     }
 
     // Saved world maps, openable from anywhere in game. Listed fresh on every open for the same
@@ -434,15 +390,7 @@ public class CultTweakerPanel : MonoBehaviour
                 if (index < 0 || index >= names.Count) return;
                 OpenWorldMap(names[index]);
             });
-
-            _ui.CreateDropdown(_content, "Edit World Map", names, (index, _) =>
-            {
-                if (index < 0 || index >= names.Count) return;
-                OpenWorldMap(names[index], edit: true);
-            });
         }
-
-        Note("F6 flips an open map between playing and editing.");
 
         _ui.CreateButton(_content, "New World Map", () =>
         {
@@ -471,8 +419,6 @@ public class CultTweakerPanel : MonoBehaviour
     // room it edits is standing.
     private void BuildHubSection()
     {
-        Note("A hub is built in the DLC town room, cleared out.");
-
         var hubs = new List<string>();
         foreach (var level in MapEditor.CTLevelSerialization.LoadAll())
             if (level is { IsHub: true } && !string.IsNullOrWhiteSpace(level.LevelName))
@@ -481,13 +427,10 @@ public class CultTweakerPanel : MonoBehaviour
 
         if (hubs.Count > 0)
         {
-            _ui.CreateDropdown(_content, "Edit Hub", hubs, (index, _) =>
-            {
-                if (index < 0 || index >= hubs.Count) return;
-                BeginHub(hubs[index]);
-            });
-
-            _ui.CreateDropdown(_content, "Visit Hub", hubs, (index, _) =>
+            // Entered rather than opened for editing: this rebuilds the saved hub and leaves the
+            // player standing in it, and F4 edits it from there. Author() is for a hub that does
+            // not exist yet, which is what New Hub is.
+            _ui.CreateDropdown(_content, "Enter Hub", hubs, (index, _) =>
             {
                 if (index < 0 || index >= hubs.Count) return;
                 EnterHub(hubs[index]);
@@ -622,58 +565,11 @@ public class CultTweakerPanel : MonoBehaviour
             : "Follower slot dump failed; see the log above.");
     }
 
+    // The editor's own note size, so the panel and the tool panels read as the same thing.
     private void Note(string text)
     {
-        var label = _ui.CreateLabel(_content, text, 16);
+        var label = _ui.CreateLabel(_content, text, 14);
         label.GetComponent<TMP_Text>().color = new Color(1f, 1f, 1f, 0.75f);
-    }
-
-    // Names the control below it. Brighter than a note, because it is part of the control.
-    private void FieldLabel(string text)
-    {
-        var label = _ui.CreateLabel(_content, text, 17);
-        label.GetComponent<TMP_Text>().color = new Color(0.98f, 0.94f, 0.85f);
-    }
-
-    // ---- actions ----------------------------------------------------------------------------
-
-    private void ApplyFleece(int playerId, int index)
-    {
-        if (!Plugin.FleeceCyclingEnabled.Value)
-        {
-            Plugin.Log.LogWarning("Fleece cycling is disabled; enable it above first.");
-            return;
-        }
-
-        PlayerSpineLoader.ApplyFleece(playerId, index);
-    }
-
-    private void ReapplyFleeces()
-    {
-        for (var i = 0; i < 2; i++)
-        {
-            var index = PlayerSpineLoader.GetFleeceIndex(i);
-            if (index >= 0) PlayerSpineLoader.ApplyFleece(i, index);
-        }
-    }
-
-    private static void ApplySpine(int playerId, string spineKey)
-    {
-        // Loads first when the spine is not resident yet - a caption on screen covers the wait,
-        // and the swap lands the moment the skeleton is parsed. Already-loaded spines (and
-        // other mods' spines) swap on the spot exactly as before.
-        PlayerSpineLoader.EnsureLoaded(spineKey, () =>
-        {
-            try
-            {
-                CustomSkinManager.ChangeSelectedPlayerSpine(spineKey, playerId);
-                Plugin.Log.LogInfo($"Player {playerId + 1} spine set to {spineKey}.");
-            }
-            catch (System.Exception e)
-            {
-                Plugin.Log.LogWarning("Spine swap failed: " + e.Message);
-            }
-        });
     }
 
     // ---- COTL_API internals ---------------------------------------------------------------------
@@ -682,6 +578,8 @@ public class CultTweakerPanel : MonoBehaviour
     // than by depending on a publicized build of it - the same approach the map editor's enemy
     // picker uses for the custom enemy list. The selected spine is read the same way, but by
     // PlayerSpineLoader, which needs it to find the active skin's config.
+    internal static List<string> PlayerSpineNames() => PlayerSpines();
+
     private static List<string> PlayerSpines()
     {
         try

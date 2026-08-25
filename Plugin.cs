@@ -46,9 +46,37 @@ namespace CustomSpineLoader
         public static ConfigEntry<string> CurrentFleeceNameP1 { get; set; }
         public static ConfigEntry<string> CurrentFleeceNameP2 { get; set; }
 
+        // The chosen player spine, remembered here as well. COTL_API holds the selection in a
+        // static of its own (SelectedSpine / SelectedSpine2) and nothing in it looks like it writes
+        // that anywhere, so a look picked in the F7 panel was gone by the next launch. Re-applied at
+        // startup only when the API has no selection of its own - see
+        // PlayerSpineLoader.RestoreSelectedSpine.
+        public static ConfigEntry<string> SelectedSpineP1 { get; set; }
+        public static ConfigEntry<string> SelectedSpineP2 { get; set; }
+
         public static ConfigEntry<bool> DebugDumpFollowerSpineAtlas { get; set; }
 
         public static ConfigEntry<bool> FleeceCyclingEnabled { get; set; }
+
+        // Per seat rather than one switch for everybody: a spine that dresses its own body wants
+        // transmog off while the lamb standing next to it wants it on, and there is no reason those
+        // two players should have to agree. Seeded from the old global switch on first run, so an
+        // existing setting carries over rather than silently flipping back on.
+        public static readonly ConfigEntry<bool>[] FleeceTransmog = new ConfigEntry<bool>[4];
+
+        public static bool TransmogOn(int playerId)
+        {
+            if (playerId < 0 || playerId >= FleeceTransmog.Length) return false;
+
+            var entry = FleeceTransmog[playerId];
+            return entry != null ? entry.Value : FleeceCyclingEnabled == null || FleeceCyclingEnabled.Value;
+        }
+
+        public static void SetTransmog(int playerId, bool on)
+        {
+            if (playerId < 0 || playerId >= FleeceTransmog.Length) return;
+            if (FleeceTransmog[playerId] != null) FleeceTransmog[playerId].Value = on;
+        }
 
         private RuntimeMapEditor runtimeMapEditor;
 
@@ -72,6 +100,9 @@ namespace CustomSpineLoader
             CurrentFleeceIndexP2 = Config.Bind("Fleece", "CurrentFleeceIndexP2", -1, "Current Fleece Index for Player 2");
             CurrentFleeceNameP1 = Config.Bind("Fleece", "CurrentFleeceNameP1", "", "Current fleece skin name for Player 1 (kept alongside the index so its spine can load at boot)");
             CurrentFleeceNameP2 = Config.Bind("Fleece", "CurrentFleeceNameP2", "", "Current fleece skin name for Player 2 (kept alongside the index so its spine can load at boot)");
+
+            SelectedSpineP1 = Config.Bind("Spine", "SelectedSpineP1", "", "Chosen player spine for Player 1");
+            SelectedSpineP2 = Config.Bind("Spine", "SelectedSpineP2", "", "Chosen player spine for Player 2");
 
             // Before any loader runs, so the log says which other mods are handing us content
             // through their own CultTweaker folder (see ModContentPaths) before it says what loaded.
@@ -122,9 +153,17 @@ namespace CustomSpineLoader
                 "If true, will dump the follower spine slots to a json file. May impact performance when enabled. Ensure followerSlots.json is not present before dumping.");
             FleeceCyclingEnabled = Config.Bind("Fleece", "FleeceCyclingEnabled", true, "Enable Fleece Cycling for all players.");
 
+            for (var i = 0; i < FleeceTransmog.Length; i++)
+                FleeceTransmog[i] = Config.Bind("Fleece", $"FleeceTransmogP{i + 1}",
+                    FleeceCyclingEnabled.Value,
+                    $"Dress player {i + 1} in the fleece chosen for them (F7 panel).");
 
             PlayerSpineLoader.currentFleeceIndexP1 = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.currentFleeceIndexP2 = CurrentFleeceIndexP2.Value;
+
+            // The array is what everything reads; these two are the halves of it that persist.
+            PlayerSpineLoader.FleeceIndexes[0] = CurrentFleeceIndexP1.Value;
+            PlayerSpineLoader.FleeceIndexes[1] = CurrentFleeceIndexP2.Value;
 
             SceneManager.sceneLoaded += OnSceneLoaded;
 
@@ -264,20 +303,23 @@ namespace CustomSpineLoader
         }
         private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
         {
-            if (!FleeceCyclingEnabled.Value)
+            if (!TransmogOn(playerID))
             {
-                Log.LogWarning("Fleece Cycling is disabled, Press F9 to enable first!");
+                Log.LogWarning($"Fleece transmog is off for player {playerID + 1}; turn it on in the " +
+                               "F7 panel first.");
                 return;
             }
 
             var fleeceIndex = cycle
                 ? PlayerSpineLoader.CycleNextFleece(playerID)
-                : playerID switch
-                {
-                    0 => CurrentFleeceIndexP1.Value,
-                    1 => CurrentFleeceIndexP2.Value,
-                    _ => -1
-                };
+                : PlayerSpineLoader.GetFleeceIndex(playerID);
+
+            // No rotation to cycle through yet, or a seat that does not exist.
+            if (fleeceIndex < 0)
+            {
+                Log.LogInfo("No fleece to apply yet; enter a level once so the rotation is built.");
+                return;
+            }
 
             if (playerID >= 1 && !CoopManager.CoopActive)
             {

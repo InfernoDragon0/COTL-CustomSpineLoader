@@ -148,8 +148,10 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void PlayerFarming_SetSkin(ref Skin __result, PlayerFarming __instance, bool BlackAndWhite)
         {
-            //check if p1 or p2
-            var playerId = CoopManager.CoopActive && __instance.playerID == 1 ? 1 : 0;
+            // Coop seats four. Solo is pinned to player one because playerID is only meaningful once
+            // the coop manager is running - reading it otherwise dressed the lone player from
+            // whichever seat's settings the field happened to hold.
+            var playerId = CoopManager.CoopActive ? Mathf.Clamp(__instance.playerID, 0, 3) : 0;
             var config = PlayerSpineLoader.ConfigFor(playerId);
 
             DressFleece(__instance, playerId, config);
@@ -161,14 +163,12 @@ namespace CustomSpineLoader.Patches
 
         private static void DressFleece(PlayerFarming player, int playerId, PlayerSpineConfig config)
         {
-            if (!Plugin.FleeceCyclingEnabled.Value) return;
+            if (!Plugin.TransmogOn(playerId)) return;
 
             // This spine dresses its own body; the fleece would write lamb artwork over it.
             if (config != null && config.DisableFleeceCycling) return;
 
-            var fleeceIndex = playerId == 1
-                ? PlayerSpineLoader.currentFleeceIndexP2
-                : PlayerSpineLoader.currentFleeceIndexP1;
+            var fleeceIndex = PlayerSpineLoader.GetFleeceIndex(playerId);
 
             if (fleeceIndex == -1)
             {
