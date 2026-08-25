@@ -82,6 +82,7 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
     private void Select(string eventPath)
     {
         _editor.Map.MusicEvent = eventPath;
+        _editor.MarkEdited();
 
         try
         {

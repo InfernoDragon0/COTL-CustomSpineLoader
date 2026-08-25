@@ -270,6 +270,11 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
 
             if (_editor.Screen.NodeRects.TryGetValue(dragged.Id, out var rect) && rect != null)
                 rect.anchoredPosition = target;
+
+            // The links come with it. Cheap enough to run per frame - it aims existing rects and
+            // builds nothing - and without it the node leaves its lines behind until the button
+            // comes up, which is after the moment you needed to see the shape you were drawing.
+            _editor.Screen.RefreshLinks();
         }
 
         if (_dragging && Input.GetMouseButtonUp(0))
@@ -291,7 +296,8 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
                     });
                 }
 
-                // The lines only follow their nodes on a redraw.
+                // The drag kept the node and its lines in step by hand; the full redraw at the end
+                // puts everything else that depends on a node's position back in agreement.
                 _editor.RebuildAll();
             }
         }

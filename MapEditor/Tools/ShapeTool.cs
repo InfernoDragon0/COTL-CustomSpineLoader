@@ -25,7 +25,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private int _colliderDetail = 16;
     private float _colliderOffset;
     private bool _openEnded;
-    private bool _clickAddsPoints;
     private bool _showCollision;
     private bool _toolActive;
     private bool _useVanillaFloor = true;
@@ -33,8 +32,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private GameObject _centerHandle;
 
     private GameObject _collisionToggleRow;
-
-    private const float ZStep = 0.1f;
 
     // Spline.InsertPointAt throws if a new point lands on an existing one.
     private const float MinPointSpacing = 0.25f;
@@ -46,18 +43,13 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateButton(panel, "New Shape (screen centre)", SpawnShape);
-
-        _shapeDropdown = ui.CreateDropdown(panel, "Select a shape", [], (index, _) => SelectShapeAt(index));
-        ui.CreateButton(panel, "Delete Shape (Del)", DeleteActiveShape);
+        _ui = ui;
 
         _profileDropdown = ui.CreateDropdown(panel, "Select a profile", [], (index, _) => SelectProfileAt(index));
 
-        ui.CreateToggle(panel, "Click adds points", _clickAddsPoints, v =>
-        {
-            _clickAddsPoints = v;
-            _editor.SetStatus(v ? "Click-to-add enabled." : "Click-to-add disabled.");
-        });
+        // No click-to-add switch: Ctrl-click adds a point. A mode that had to be turned on, used,
+        // and remembered to turn off again was a way of asking "did you mean that click?" one step
+        // too early - and left on, every stray click in the room grew the shape.
 
         ui.CreateToggle(panel, "Show Collision", _showCollision, v =>
         {
@@ -91,11 +83,24 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             ApplyColliderSettings();
         });
 
-        // Higher Z sits further back, so "Send Back" increases it.
-        ui.CreateButton(panel, "Send Back (Z+)", () => NudgeZ(ZStep));
-        ui.CreateButton(panel, "Bring Front (Z-)", () => NudgeZ(-ZStep));
+        // The list goes last, with the button that adds to it. Everything above acts on the shape
+        // the list picked, so the list reading top-down as "settings, then the things they apply
+        // to" was backwards - and a list that grows is the one thing on the panel that should not
+        // be pushing the fixed controls around.
+        //
+        // It is a list rather than a dropdown because it does the work of three controls: click a
+        // row to edit that shape, -/+ to move it behind or in front of its neighbours, X to delete
+        // it. A dropdown could only answer the first, and the buttons beside it acted on "whatever
+        // is selected" - so you had to read the dropdown to learn what they were about to do.
+        ui.CreateHeader(panel, "- Shapes -", 19);
+        ui.CreateButton(panel, "New Shape (screen centre)", SpawnShape);
 
-        ui.CreateButton(panel, "Center View On Shape", CenterOnShape);
+        _shapeBox = ui.CreateScrollBox(panel, "ShapeList", ShapeListHeight, RowHeight);
+        _shapeList = _shapeBox.Content;
+        RefreshShapeList();
+
+        // No depth buttons and no Center View: the purple node on the shape drags Z the way the
+        // Select tool's does, and the camera controls already go where the author wants to look.
     }
 
     // Must run BEFORE the loader clears the room: template and profiles come from scene objects.
@@ -152,7 +157,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     [
         ("LMB", "Drag node"),
         ("RMB", "Delete node"),
-        ("LMB", "Add node (if enabled)"),
+        ("Ctrl + LMB", "Add node"),
+        ("Drag", "Yellow = move, Purple = depth"),
         ("Del", "Delete selected shape")
     ];
 
@@ -174,8 +180,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             return;
         }
 
-        if (!_clickAddsPoints) return;
         if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
+        if (!Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl)) return;
 
         AddPointAt(_editor.MouseWorld());
     }
@@ -491,10 +497,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.SetStatus("Shape created.");
     }
 
-    private MapEditorDropdown _shapeDropdown;
     private MapEditorDropdown _profileDropdown;
+    private RectTransform _shapeList;
+    private MapEditorScrollBox _shapeBox;
+    private MapEditorUI _ui;
 
-    // Every shape in the room, in the stable order the dropdown indexes into.
+    // Every shape in the room, ordered the way they are drawn.
     private readonly List<SpriteShapeController> _allShapes = [];
 
     private void CollectShapes()
@@ -504,27 +512,140 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (s != null) _allShapes.Add(s);
         foreach (var s in Object.FindObjectsOfType<SpriteShapeController>())
             if (s != null && s != _template && !_allShapes.Contains(s)) _allShapes.Add(s);
+
+        // Back to front, so the row at the bottom of the list is the shape drawn over the rest.
+        // Sorted by the value that actually decides it - see SortOrderOf.
+        _allShapes.Sort((a, b) => SortOrderOf(a).CompareTo(SortOrderOf(b)));
     }
 
-    private void RefreshShapeDropdown()
+    // **Z does not layer sprite shapes.** The game stacks them with the renderer's sorting layer
+    // and order in layer, and leaves Z at a rounding nudge: GenerateRoom.CreateSpriteShape builds
+    // every room shape at z = 0.0001 and then sets `sortingLayerName = "Ground"` and
+    // `sortingOrder = -1`, and where the game needs to know which shape is on top at a point it
+    // compares `spriteShapeRenderer.sortingLayerID`. Unity draws in that order too - sorting layer,
+    // then order in layer, and only then camera distance - so a Z nudge reaches the weakest
+    // mechanism available, and every shape the tool makes is a clone of one template sharing one
+    // layer and one order. That is why moving a shape in Z barely did anything.
+    private static int SortOrderOf(SpriteShapeController ctrl)
     {
-        if (_shapeDropdown == null) return;
+        var renderer = ctrl != null ? ctrl.spriteShapeRenderer : null;
+        return renderer != null ? renderer.sortingOrder : 0;
+    }
+
+    private static void SetSortOrder(SpriteShapeController ctrl, int order)
+    {
+        var renderer = ctrl != null ? ctrl.spriteShapeRenderer : null;
+        if (renderer != null) renderer.sortingOrder = order;
+    }
+
+    private const float RowHeight = 30f;
+
+    // Tall enough to browse a room's terrain in, short enough that the controls above it stay put.
+    private const float ShapeListHeight = 300f;
+
+    private void RefreshShapeList()
+    {
+        if (_shapeList == null || _ui == null) return;
+
+        foreach (Transform child in _shapeList)
+            Object.Destroy(child.gameObject);
 
         CollectShapes();
 
-        var labels = new List<string>(_allShapes.Count);
-        for (var i = 0; i < _allShapes.Count; i++)
-            labels.Add($"{i + 1}. {_allShapes[i].name} ({_allShapes[i].spline.GetPointCount()} pts)");
+        if (_allShapes.Count == 0)
+        {
+            var note = _ui.CreateLabel(_shapeList, "No shapes in this room.", 15,
+                TMPro.TextAlignmentOptions.Center);
+            note.GetComponent<TMPro.TMP_Text>().color = new Color(1f, 1f, 1f, 0.55f);
+        }
+        else
+        {
+            for (var i = 0; i < _allShapes.Count; i++) CreateShapeRow(i, _allShapes[i]);
+        }
 
-        _shapeDropdown.SetOptions(labels);
-        if (_active != null) _shapeDropdown.SetSelected(_allShapes.IndexOf(_active));
+        _shapeBox?.SetRows(_allShapes.Count);
     }
 
-    private void SelectShapeAt(int index)
+    private void CreateShapeRow(int index, SpriteShapeController shape)
     {
-        if (index < 0 || index >= _allShapes.Count) return;
+        var row = new GameObject("Shape_" + index);
+        row.transform.SetParent(_shapeList, false);
 
-        _active = _allShapes[index];
+        var rowRt = row.AddComponent<RectTransform>();
+        rowRt.sizeDelta = new Vector2(0f, RowHeight);
+
+        var element = row.AddComponent<LayoutElement>();
+        element.minHeight = RowHeight;
+        element.preferredHeight = RowHeight;
+
+        var layout = row.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 4f;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+
+        var plate = row.AddComponent<Image>();
+        plate.sprite = MapEditorUI.RoundedPlate;
+        plate.type = Image.Type.Sliced;
+        plate.pixelsPerUnitMultiplier = 1.5f;
+        plate.color = shape == _active
+            ? new Color(MapEditorUI.Accent.r, MapEditorUI.Accent.g, MapEditorUI.Accent.b, 0.45f)
+            : new Color(0f, 0f, 0f, 0.55f);
+
+        plate.raycastTarget = true;
+        var select = row.AddComponent<UnityEngine.UI.Button>();
+        select.targetGraphic = plate;
+        select.transition = UnityEngine.UI.Selectable.Transition.None;
+        select.onClick.AddListener(() =>
+        {
+            RuntimeMapEditor.Active?.BlockWorldClicks();
+            SelectShape(shape);
+        });
+
+        var label = _ui.CreateLabel(row.transform,
+            $"{shape.name}  [{SortOrderOf(shape)}]  {shape.spline.GetPointCount()} pts", 15);
+        var labelText = label.GetComponent<TMPro.TMP_Text>();
+        labelText.enableWordWrapping = false;
+        labelText.overflowMode = TMPro.TextOverflowModes.Ellipsis;
+        labelText.margin = new Vector4(8f, 0f, 0f, 0f);
+        labelText.raycastTarget = false;
+
+        RowButton(row, "-", () => NudgeOrder(shape, -1));
+        RowButton(row, "+", () => NudgeOrder(shape, 1));
+        RowButton(row, "X", () => DeleteShape(shape));
+    }
+
+    private void RowButton(GameObject row, string text, System.Action onClick)
+    {
+        var button = _ui.CreateButton(row.transform, text, onClick, RowHeight - 4f);
+
+        // CreateButton's layout flexes to fill a column; here that would push the label out.
+        var element = button.GetComponent<LayoutElement>();
+        element.preferredWidth = 30f;
+        element.minWidth = 30f;
+        element.flexibleWidth = 0f;
+    }
+
+    // One step at a time on the pressed shape alone. Deliberately *not* a renumbering of the whole
+    // list: the room's own generated shapes are in here too, on orders the biome chose, and
+    // rewriting those to tidy up the numbering would restack terrain the author never touched.
+    private void NudgeOrder(SpriteShapeController shape, int direction)
+    {
+        if (shape == null) return;
+
+        SetSortOrder(shape, SortOrderOf(shape) + direction);
+        _editor.MarkEdited();
+        RefreshShapeList();
+        _editor.SetStatus($"{shape.name} draw order {SortOrderOf(shape)} " +
+                          (direction < 0 ? "(further back)." : "(further front)."));
+    }
+
+    private void SelectShape(SpriteShapeController shape)
+    {
+        if (shape == null) return;
+
+        _active = shape;
         _openEnded = _active.spline.isOpenEnded;
 
         RebuildHandles();
@@ -532,6 +653,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         RefreshCollisionOverlay();
         CenterOnShape();
         _editor.SetStatus($"Editing {_active.name}.");
+    }
+
+    private void SelectShapeAt(int index)
+    {
+        if (index < 0 || index >= _allShapes.Count) return;
+        SelectShape(_allShapes[index]);
     }
 
     private void DeleteActiveShape()
@@ -542,9 +669,16 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             return;
         }
 
-        var doomed = _active;
+        DeleteShape(_active);
+    }
+
+    private void DeleteShape(SpriteShapeController shape)
+    {
+        if (shape == null) return;
+
+        var doomed = shape;
         _shapes.Remove(doomed);
-        _active = null;
+        if (_active == doomed) _active = null;
 
         ClearHandles();
 
@@ -554,6 +688,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         RefreshCollisionOverlay();
 
         UpdateLabels();
+        _editor.MarkEdited();
         _editor.SetStatus("Deleted shape.");
     }
 
@@ -600,7 +735,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         SyncCollisionToggle();
         SyncProfileIndex();
-        RefreshShapeDropdown();
+        RefreshShapeList();
         RefreshProfileDropdown();
     }
 
@@ -827,9 +962,14 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.SetStatus("Shape collision off - visual only.");
     }
 
+    // Every edit to a shape lands here - points added, moved and removed, the shape dragged, its
+    // depth nudged, its collision switched - so it is the one place the editor needs to hear about
+    // to know a close would lose terrain work.
     private void CommitShape(SpriteShapeController ctrl)
     {
         if (ctrl == null) return;
+
+        _editor.MarkEdited();
 
         // Visual-only shapes never get a collider: editing decorative geometry must not turn it solid.
         if (!ShapeHasCollision(ctrl))
@@ -981,22 +1121,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _active.transform.position = new Vector3(world.x, world.y, z);
     }
 
-    private void NudgeZ(float delta)
-    {
-        if (_active == null)
-        {
-            _editor.SetStatus("No shape selected.");
-            return;
-        }
-
-        var p = _active.transform.position;
-        _active.transform.position = new Vector3(p.x, p.y, p.z + delta);
-
-        CommitShape(_active);
-        UpdateLabels();
-        _editor.SetStatus($"Shape Z: {_active.transform.position.z:0.###}");
-    }
-
     private GameObject CreateHandle(int index)
     {
         var go = new GameObject("ShapeHandle_" + index);
@@ -1061,7 +1185,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
                 IsOpenEnded = spline.isOpenEnded,
                 HasCollision = ShapeHasCollision(ctrl),
                 ColliderDetail = ctrl.colliderDetail,
-                ColliderOffset = ctrl.colliderOffset
+                ColliderOffset = ctrl.colliderOffset,
+                SortingOrder = SortOrderOf(ctrl)
             };
 
             for (var i = 0; i < spline.GetPointCount(); i++)
@@ -1152,6 +1277,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var profile = FindProfile(data.Profile);
         if (profile != null) ctrl.spriteShape = profile;
         else Plugin.Log.LogWarning($"MapEditor: profile '{data.Profile}' not found, keeping template profile.");
+
+        // Absent in maps saved before draw order was editable; those keep the template's order.
+        if (data.SortingOrder.HasValue) SetSortOrder(ctrl, data.SortingOrder.Value);
 
         var spline = ctrl.spline;
         spline.Clear();

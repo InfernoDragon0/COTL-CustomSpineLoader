@@ -32,10 +32,17 @@ public static class DungeonMapPlayback
         _map = map;
         _mapName = map.MapName;
 
-        foreach (var node in map.Nodes)
+        // The authored map has free positions; the game addresses nodes by the grid those resolve
+        // to, so the bindings are keyed on the same derived point the builder hands it.
+        var points = DungeonMapBuilder.Layout(map);
+        _topLayer = 0;
+
+        foreach (var pair in points)
         {
-            if (node == null || string.IsNullOrEmpty(node.Level)) continue;
-            LevelByPoint[Key(node.X, node.Y)] = node.Level;
+            if (pair.Value.y > _topLayer) _topLayer = pair.Value.y;
+            if (string.IsNullOrEmpty(pair.Key.Level)) continue;
+
+            LevelByPoint[Key(pair.Value.x, pair.Value.y)] = pair.Key.Level;
         }
 
         Plugin.Log.LogInfo($"MapEditor: dungeon map '{_mapName}' installed with " +
@@ -101,14 +108,10 @@ public static class DungeonMapPlayback
         return true;
     }
 
-    private static int TopLayer()
-    {
-        var top = 0;
-        foreach (var node in _map.Nodes)
-            if (node != null && node.Y > top) top = node.Y;
+    // The highest row the layout resolved to; reaching it ends the run.
+    private static int _topLayer;
 
-        return top;
-    }
+    private static int TopLayer() => _topLayer;
 
     public static void Clear()
     {
@@ -116,6 +119,7 @@ public static class DungeonMapPlayback
         _mapName = null;
         _map = null;
         _built = null;
+        _topLayer = 0;
 
         // Forgotten, not restored: the BiomeGenerator it belonged to is being left behind.
         _savedRoomCount = -1;

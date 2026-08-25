@@ -115,6 +115,10 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     public T GetTool<T>() where T : class, IMapEditorTool => _tools.OfType<T>().FirstOrDefault();
 
+    // Back to the tool the editor opens on. For a tool that is a screen rather than a panel,
+    // closing the screen means leaving the tool: there is nothing behind it to come back to.
+    public void SelectFirstTool() => SelectTool(_tools.FirstOrDefault());
+
     // A hub is a safe town in the game's own base: nothing spawns there, no weapon podium belongs
     // there, it has no doors to a next room, and it is not part of a level or a dungeon graph. The
     // tools are still built - the loader and the clear sweeps ask for them by type - they just have
@@ -126,6 +130,26 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         HubSession.Active ? _tools.Where(t => !HiddenInHub(t)).ToList() : _tools;
 
     public MapEditorHistory History { get; } = new();
+
+    // ---- unsaved work --------------------------------------------------------------------------
+
+    private int _edits;
+    private int _savedEdits;
+
+    // Any change to the room that a save would capture. Counted rather than compared against the
+    // last written file, which is what the dungeon and world editors do: their maps are small data
+    // objects, but a room's save is a multi-frame collection that rewrites the blueprint from the
+    // live scene, and running that to answer a question would be a save in all but name.
+    //
+    // The undo stack raises this for everything that pushes an entry, which is every placement and
+    // removal in the editor. The tools that change the room without one - transforms, doors,
+    // lighting, shapes, clears - call it themselves.
+    public void MarkEdited() => _edits++;
+
+    // The room now matches what is on disk: at open, after a save, and after a load.
+    public void MarkSaved() => _savedEdits = _edits;
+
+    public bool HasUnsavedEdits => _edits != _savedEdits;
 
     private void UndoLast()
     {
@@ -204,6 +228,10 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         Tools.CTMapTrigger.ResetSequenceState();
         if (!LevelPlayback.Active) Tools.LightingTool.ForgetRoomLighting();
 
+        // A lock left behind by a prompt the scene change interrupted would take every menu in the
+        // game down with it until a restart.
+        LockNavigator(false);
+
         if (Active == this) Active = null;
     }
 
@@ -211,17 +239,136 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     {
         if (_canvas == null || ModalOpen) return;
 
-        if (_editing) ExitEditorMode();
-        else EnterEditorMode();
+        if (!_editing)
+        {
+            EnterEditorMode();
+            return;
+        }
+
+        // Pressing F4 again while the strip is up dismisses the question rather than answering it
+        // for the author - the same step-back Esc gives on the dungeon screen.
+        if (_confirm != null && _confirm.Open)
+        {
+            _confirm.Hide();
+            SetStatus("Still open.");
+            return;
+        }
+
+        // A tool with a screen of its own steps back out of that first: F4 closing the editor
+        // outright would take an unsaved map with it without ever asking.
+        if (ScreenTool != null && ScreenTool.ScreenStepBack()) return;
+
+        if (!HasUnsavedEdits || _confirm == null)
+        {
+            ExitEditorMode();
+            return;
+        }
+
+        var named = !string.IsNullOrWhiteSpace(Map.MapName);
+        _confirm.Show(
+            named ? $"Save changes to '{Map.MapName}' before closing?" : "Save this room before closing?",
+            SaveAndClose, confirmLabel: "Save & close", altLabel: "Close anyway", onAlt: CloseAnyway);
+    }
+
+    // Escape is the other way out of the editor, and closing it is the *last* thing the key means
+    // rather than the first. It steps back through what is actually on screen: an open dropdown,
+    // then whatever mode the active tool put the editor into, then a tool's own full-screen view
+    // (through ToggleEditor, which asks a screen tool to step back before it closes anything), and
+    // only with none of those left does it reach the editor itself - where the unsaved-work guard
+    // is waiting, exactly as it is for F4.
+    //
+    // Handled here rather than in each tool because it runs *before* the tool update: a tool that
+    // polled Escape for itself would never see the key now, so the ones that need it say so through
+    // IMapEditorEscapeHandler rather than racing for it.
+    private bool HandleEscape()
+    {
+        if (_ui.TransientUiOpen)
+        {
+            _ui.CloseTransientUi();
+            return true;
+        }
+
+        if (_activeTool is IMapEditorEscapeHandler handler && handler.HandleEscape()) return true;
+
+        ToggleEditor();
+        return true;
+    }
+
+    // "Close anyway", not "Discard": nothing is reverted and nothing can be. The room is the live
+    // scene, and closing the editor only puts the panels away - every edit is still standing, F4
+    // brings it all back, and playing the room plays the edited one. What goes unsaved is the file,
+    // and that is what the status line says. A button labelled "Discard" would promise an undo the
+    // editor cannot perform: there is no earlier room to go back to, only the one on screen.
+    private void CloseAnyway()
+    {
+        ExitEditorMode();
+        SetStatus("Closed without saving - the room keeps the changes, no file has them.",
+            StatusSeverity.Warning);
+    }
+
+    // Set while a save is running on behalf of the close guard, so the editor shuts once the write
+    // has actually landed rather than on the way to it - a save that is blocked or cancelled must
+    // leave the editor open with the work still in it.
+    private bool _closeAfterSave;
+
+    private void SaveAndClose()
+    {
+        if (string.IsNullOrWhiteSpace(Map.MapName))
+        {
+            // Never named. The dialog is the only way to name it, and it closes the editor to show
+            // itself; the close then happens when the write lands.
+            _closeAfterSave = true;
+            SaveMap();
+            return;
+        }
+
+        var blocked = SaveBlock();
+        if (blocked != null)
+        {
+            SetStatus(blocked, StatusSeverity.Error);
+            return;
+        }
+
+        // Straight to the write, past the quicksave's overwrite arming: "Save & close" under a name
+        // already on the title bar *is* the confirmation that arming asks for.
+        _closeAfterSave = true;
+        _quickSavedName = Map.MapName;
+        WriteMap();
     }
 
     private bool _chromeHidden;
+
+    // The active tool while it has a screen of its own up; null the rest of the time.
+    private IMapEditorScreenTool ScreenTool =>
+        _activeTool is IMapEditorScreenTool { OwnsScreen: true } tool ? tool : null;
+
+    // The editor's own furniture: title, dock, options, status, shortcuts. Collected rather than
+    // named one by one - every one of them is a direct child of the canvas, built before anything
+    // else is parented to it.
+    private readonly List<GameObject> _ownChrome = [];
+    private bool _ownChromeVisible = true;
+
+    // Stood down for a tool that draws a screen of its own. The canvas itself stays on: the tool's
+    // view hangs from it, so switching the canvas off (which is what F6 does) would take the map
+    // with it.
+    public void SetOwnChromeVisible(bool visible)
+    {
+        if (_ownChromeVisible == visible) return;
+        _ownChromeVisible = visible;
+
+        foreach (var go in _ownChrome)
+            if (go != null) go.SetActive(visible);
+    }
 
     // F6: the panels go away while the room stays frozen, so the scene can be framed and shot
     // without the editor in the picture. Closing the editor restores them.
     public void ToggleChromeHidden()
     {
         if (_canvas == null || !_editing || ModalOpen) return;
+
+        // Nothing to hide behind a full-screen tool, and hiding it would switch off the canvas
+        // that tool's own view is drawn on.
+        if (ScreenTool != null) return;
 
         _chromeHidden = !_chromeHidden;
         _canvas.enabled = !_chromeHidden;
@@ -233,6 +380,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void ShowChrome()
     {
+        SetOwnChromeVisible(true);
         _chromeHidden = false;
         MapEditorGizmos.SetHidden(false);
         ShowPreviewBadge(false);
@@ -298,14 +446,25 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         GetTool<ShapeTool>()?.PrepareForLoad();
 
+        // No baseline is taken here, and that is deliberate. The count starts clean, so opening the
+        // editor to look at a room and closing it again asks nothing on its own. Re-baselining on
+        // every open would instead mean the editor *forgot*: close an edited room with "Close
+        // anyway", open it again, close it again, and it would go quietly - even though the room
+        // still holds work no file has. Only a save and a load make the room match a file, so only
+        // they move the baseline.
         SelectTool(_tools.FirstOrDefault());
         SetStatus("Editor open.");
     }
 
     private void ExitEditorMode()
     {
+        // Same rule as switching tools: closing the editor ends the typing rather than abandoning
+        // it half-entered, so the field is not still wearing a caret when the editor comes back.
+        ConfirmPrompt();
+
         _renaming = false;
-        RestoreEventSystem();
+        ReleaseTypingLocks();
+        _confirm?.Hide();
 
         _activeTool?.OnExit();
         _activeTool = null;
@@ -357,11 +516,21 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             return;
         }
 
-        // Safety net: nothing should leave the EventSystem suppressed once text entry is over.
-        RestoreEventSystem();
+        // Safety net: a navigator lock stranded by a prompt that ended some other way would take
+        // every menu in the game down with it.
+        ReleaseTypingLocks();
+
+        if (Input.GetKeyDown(KeyCode.Escape) && HandleEscape()) return;
 
         if (CtrlHeld && Input.GetKeyDown(KeyCode.Z)) UndoLast();
-        if (CtrlHeld && Input.GetKeyDown(KeyCode.S)) QuickSave();
+
+        if (CtrlHeld && Input.GetKeyDown(KeyCode.S))
+        {
+            // A tool holding the screen is showing something of its own; Ctrl+S belongs to that,
+            // not to the room hidden behind it.
+            if (ScreenTool != null) ScreenTool.ScreenQuickSave();
+            else QuickSave();
+        }
 
         // Chrome hidden: the room is being looked at, not edited. The camera still pans so the
         // shot can be framed, but no tool acts on a click.
@@ -371,16 +540,21 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             return;
         }
 
-        try
+        // The camera keys would pan the room behind a full-screen tool, and the wheel would switch
+        // out of it - neither means anything while its own map has the screen.
+        if (ScreenTool == null)
         {
-            HandleCameraControls();
-        }
-        catch (System.Exception e)
-        {
-            if (Time.unscaledTime >= _nextUpdateErrorAt)
+            try
             {
-                _nextUpdateErrorAt = Time.unscaledTime + 5f;
-                Plugin.Log.LogError("MapEditor: camera controls failed: " + e);
+                HandleCameraControls();
+            }
+            catch (System.Exception e)
+            {
+                if (Time.unscaledTime >= _nextUpdateErrorAt)
+                {
+                    _nextUpdateErrorAt = Time.unscaledTime + 5f;
+                    Plugin.Log.LogError("MapEditor: camera controls failed: " + e);
+                }
             }
         }
 
@@ -599,6 +773,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     public void BlockWorldClicks() => _worldClickBlockedUntil = Time.unscaledTime + 0.2f;
 
+    // For a tool that runs its own full-screen surface: PointerOverUi is true everywhere inside one
+    // (the backdrop is a blocker), so it cannot tell a widget press from a click on the surface.
+    // This is the half of it that still can - every widget calls BlockWorldClicks when pressed.
+    public bool WorldClicksBlocked => ModalOpen || Time.unscaledTime < _worldClickBlockedUntil;
+
     public bool PointerOverUi()
     {
         if (ModalOpen) return true;
@@ -641,9 +820,19 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private string _statusMessage = "";
     private StatusSeverity _statusSeverity = StatusSeverity.Info;
 
-    public void ShowHoverStatus(string message) => ApplyStatus(message, StatusSeverity.Info, pulse: false);
+    // A tool holding the screen has a status bar of its own; this one is switched off behind it, so
+    // a widget's hover line would be written where nobody can read it.
+    public void ShowHoverStatus(string message)
+    {
+        if (ScreenTool != null) ScreenTool.ScreenHoverStatus(message);
+        else ApplyStatus(message, StatusSeverity.Info, pulse: false);
+    }
 
-    public void ClearHoverStatus() => ApplyStatus(_statusMessage, _statusSeverity, pulse: false);
+    public void ClearHoverStatus()
+    {
+        if (ScreenTool != null) ScreenTool.ScreenHoverStatus(null);
+        else ApplyStatus(_statusMessage, _statusSeverity, pulse: false);
+    }
 
     private void ApplyStatus(string message, StatusSeverity severity, bool pulse)
     {
@@ -728,6 +917,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     {
         if (tool == null || tool == _activeTool) return;
 
+        // Leaving a tool ends whatever it was having typed into it, exactly as Enter would. The
+        // panels stay live while a prompt is open - that is what lets a search result be hovered
+        // and clicked - so the dock is reachable mid-word, and walking away used to leave the
+        // editor still in text entry with a field nobody could see any more: keystrokes went on
+        // being eaten by a search box belonging to the tool just left.
+        ConfirmPrompt();
+
         _activeTool?.OnExit();
         _activeTool = tool;
 
@@ -772,6 +968,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         CreateStatusBar();
         CreateShortcutPanel();
 
+        // Everything on the canvas at this point is the editor's own furniture; anything parented
+        // later belongs to a tool and must survive the chrome standing down.
+        _ownChrome.Clear();
+        foreach (Transform child in _canvas.transform) _ownChrome.Add(child.gameObject);
+
+        // Built after the sweep, and deliberately: the chrome is put back with SetActive(true) on
+        // everything it collected, which would raise a hidden strip along with it. It is only ever
+        // shown by F4 in the room editor, which a screen tool intercepts first, so it has no reason
+        // to stand down with the rest.
+        _confirm = new MapEditorConfirm(_ui, _canvas.transform, ConfirmBottom);
+        History.Changed = MarkEdited;
+
         foreach (var tool in _tools)
         {
             var content = _ui.CreateScrollColumn(_optionsContent, "Options_" + tool.Name, out var root);
@@ -780,6 +988,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             root.SetActive(false);
         }
     }
+
+    private MapEditorConfirm _confirm;
+
+    // Clear of the dock and the status bar, which stand on this same screen: a question behind them
+    // reads as nothing happening at all.
+    private const float ConfirmBottom = DockHeight + 20f + 46f + 12f;
 
     private const float ToolIconSize = 72f;
     private const int DockPadding = 8;
@@ -845,7 +1059,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private const float OptionsWidth = 420f;
     private const float OptionsHeaderHeight = 34f;
-    private const float OptionsMaxHeight = 820f;
+    // Raised to clear a boxed icon grid at its full height plus the search field, group picker and
+    // caption around it: at 820 the column those sit in started scrolling, which is the very thing
+    // boxing the cells was meant to stop. 12 from the top edge plus this still leaves the bottom of
+    // the screen clear, and it matches the world and dungeon editors' own panels.
+    private const float OptionsMaxHeight = 940f;
 
     private void CreateOptionsPanel()
     {
@@ -1061,58 +1279,135 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         return rt;
     }
 
-    private bool _eventSystemSuspended;
-
-    private void SuspendEventSystem()
+    // Typing used to disable the EventSystem outright, and that was wrong twice over.
+    //
+    // It never came back on. `EventSystem.current` is the first *enabled* EventSystem in the
+    // scene, so switching off the only one makes `current` null - and the restore path asked for
+    // `current` again, found nothing, and switched nothing back on. The panel stayed dead until
+    // the scene changed. That is the "search never gives control back" bug.
+    //
+    // And a search field wants its grid live underneath it: results are there to be hovered for a
+    // preview and clicked to pick one, and with the EventSystem off neither reached the panel.
+    //
+    // What actually had to be shut out was never the EventSystem. It was UINavigatorNew, which
+    // polls Rewired's accept binding from its own Update and confirms whatever selectable it is
+    // holding (LockNavigator, below), and the input module's submit, which fires at whatever the
+    // EventSystem has selected - so the selection is cleared for as long as a prompt is open, and
+    // a key press has nothing to land on. Mouse clicks never needed a selection and keep working.
+    private static void ClearUiSelection()
     {
-        if (_eventSystemSuspended || EventSystem.current == null) return;
-
-        EventSystem.current.SetSelectedGameObject(null);
-        EventSystem.current.enabled = false;
-        _eventSystemSuspended = true;
+        var events = EventSystem.current;
+        if (events != null && events.currentSelectedGameObject != null)
+            events.SetSelectedGameObject(null);
     }
 
-    private void RestoreEventSystem()
-    {
-        if (!_eventSystemSuspended) return;
-        _eventSystemSuspended = false;
+    private void ReleaseTypingLocks() => LockNavigator(false);
 
-        if (EventSystem.current != null) EventSystem.current.enabled = true;
+    private bool _navigatorLocked;
+
+    // The other half of keeping the game's UI out of a typed field. Suspending the EventSystem is
+    // not enough on its own: UINavigatorNew polls Rewired's accept and cancel bindings from its own
+    // Update and confirms whatever it holds as the current selectable, which never touches the
+    // EventSystem. LockInput is the switch the game itself uses to gate that block.
+    //
+    // Only ever set back to false if we were the ones who set it: a stranded lock kills every menu
+    // in the game until a restart, and blindly clearing it each frame would undo a lock the game
+    // had taken for its own reasons.
+    private void LockNavigator(bool locked)
+    {
+        if (_navigatorLocked == locked) return;
+
+        try
+        {
+            var navigator = MonoSingleton<src.UINavigator.UINavigatorNew>.Instance;
+            if (navigator == null) return;
+
+            navigator.LockInput = locked;
+            _navigatorLocked = locked;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not " + (locked ? "lock" : "unlock") +
+                                  " the UI navigator: " + e.Message);
+        }
     }
 
-    public void PromptText(string label, string initial, System.Action<string> onDone)
+    // Reads a line of text with the game's own UI shut out of it. onChanged fires on every
+    // keystroke, so a caller can filter a list as it is typed; onDone on Enter and onCancelled on
+    // Escape. inTitle draws the buffer into the editor's title bar, which suits a rename; a caller
+    // drawing its own field passes false and paints from onChanged.
+    public void PromptText(string label, string initial, System.Action<string> onDone,
+        System.Action<string> onChanged = null, System.Action onCancelled = null, bool inTitle = true)
     {
         _renaming = true;
-        SuspendEventSystem();
+        ClearUiSelection();
+        LockNavigator(true);
+
         _promptLabel = label;
         _nameBuffer = initial ?? "";
         _promptDone = onDone;
+        _promptChanged = onChanged;
+        _promptCancelled = onCancelled;
+        _promptInTitle = inTitle;
+
         UpdateNameLabel();
+        onChanged?.Invoke(_nameBuffer);
         SetStatus($"Type a {label} - Enter confirms, Escape cancels.");
+    }
+
+    public bool IsTyping => _renaming;
+
+    private System.Action<string> _promptChanged;
+    private System.Action _promptCancelled;
+    private bool _promptInTitle = true;
+
+    private void EndPrompt()
+    {
+        _renaming = false;
+        ReleaseTypingLocks();
+        _promptChanged = null;
+        _promptCancelled = null;
+        _promptInTitle = true;
+    }
+
+    // Ends an open prompt exactly as Enter does. Picking something out of a list the prompt was
+    // filtering says "this one" as plainly as the key does, so a caller can finish the typing on
+    // the user's behalf instead of making them press Enter and then click.
+    public void ConfirmPrompt()
+    {
+        if (!_renaming) return;
+
+        var done = _promptDone;
+        _promptDone = null;
+        EndPrompt();
+        done?.Invoke(_nameBuffer);
+        UpdateNameLabel();
     }
 
     private void HandleRenameInput()
     {
+        // Every frame, not just on open: a click on a live panel selects what it hit, and the next
+        // keystroke would be delivered to it as a submit.
+        ClearUiSelection();
+
         if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
         {
-            _renaming = false;
-            RestoreEventSystem();
-            var done = _promptDone;
-            _promptDone = null;
-            done?.Invoke(_nameBuffer);
-            UpdateNameLabel();
+            ConfirmPrompt();
             return;
         }
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {
-            _renaming = false;
-            RestoreEventSystem();
+            var cancelled = _promptCancelled;
             _promptDone = null;
+            EndPrompt();
             UpdateNameLabel();
+            cancelled?.Invoke();
             SetStatus("Cancelled.");
             return;
         }
+
+        var before = _nameBuffer;
 
         foreach (var c in Input.inputString)
         {
@@ -1126,13 +1421,16 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             }
         }
 
+        if (_nameBuffer == before) return;
+
         UpdateNameLabel();
+        _promptChanged?.Invoke(_nameBuffer);
     }
 
     private void UpdateNameLabel()
     {
         if (_titleText == null) return;
-        _titleText.text = _renaming
+        _titleText.text = _renaming && _promptInTitle
             ? _promptLabel + ": " + _nameBuffer + "_"
             : TitleText;
     }
@@ -1157,19 +1455,10 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             return;
         }
 
-        var doorTool = HubSession.Active ? null : GetTool<DoorTool>();
-        var missing = doorTool?.MissingDirections();
-        if (missing != null && missing.Count > 0)
+        var blocked = SaveBlock();
+        if (blocked != null)
         {
-            SetStatus($"Cannot save: missing {string.Join(", ", missing)} door(s). " +
-                      "Use the Door tool's 'Enable All Doors'.", StatusSeverity.Error);
-            return;
-        }
-
-        var hubBlock = HubSaveBlock();
-        if (hubBlock != null)
-        {
-            SetStatus(hubBlock, StatusSeverity.Error);
+            SetStatus(blocked, StatusSeverity.Error);
             return;
         }
 
@@ -1192,6 +1481,21 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         WriteMap();
     }
 
+    // Everything that makes a save impossible, as one message or null. Shared so the dialog save,
+    // the quicksave and the close guard cannot drift apart on what they refuse.
+    private string SaveBlock()
+    {
+        // A hub is a town room, not a dungeon room: it has no doors to a next room, and the four
+        // the check wants do not exist in Woolhaven at all.
+        var doorTool = HubSession.Active ? null : GetTool<DoorTool>();
+        var missing = doorTool?.MissingDirections();
+        if (missing != null && missing.Count > 0)
+            return $"Cannot save: missing {string.Join(", ", missing)} door(s). " +
+                   "Use the Door tool's 'Enable All Doors'.";
+
+        return HubSaveBlock();
+    }
+
     // What a dungeon room's four doors are to a hub: a town room has no doors, but it does have to
     // say where the player lands. Without a spawn point the arrival falls back to the town's own
     // door - a transform the sweep took away - so a hub is not allowed to be saved without one.
@@ -1205,25 +1509,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void SaveMap()
     {
-        // A hub is a town room, not a dungeon room: it has no doors to a next room, and the four
-        // the check wants do not exist in Woolhaven at all.
-        var doorTool = HubSession.Active ? null : GetTool<DoorTool>();
-        var missing = doorTool?.MissingDirections();
-        if (missing != null && missing.Count > 0)
+        var blocked = SaveBlock();
+        if (blocked != null)
         {
-            SetStatus($"Cannot save: missing {string.Join(", ", missing)} door(s). " +
-                      "Use the Door tool's 'Enable All Doors'.", StatusSeverity.Error);
-            Plugin.Log.LogWarning($"MapEditor: save blocked - '{Map.MapName}' is missing " +
-                                  $"{string.Join(", ", missing)} door(s). All four are required.");
-            return;
-        }
-
-        var hubBlock = HubSaveBlock();
-        if (hubBlock != null)
-        {
-            SetStatus(hubBlock, StatusSeverity.Error);
-            Plugin.Log.LogWarning($"MapEditor: save blocked - hub '{Map.MapName}' has no trigger " +
-                                  "carrying the Hub spawn point action.");
+            SetStatus(blocked, StatusSeverity.Error);
+            Plugin.Log.LogWarning($"MapEditor: save blocked - '{Map.MapName}': {blocked}");
+            _closeAfterSave = false;
             return;
         }
 
@@ -1239,12 +1530,14 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             () =>
             {
                 EnterEditorMode();
+
                 if (previousCamera.HasValue) MoveCameraTo(previousCamera.Value);
                 _zoom = previousZoom;
                 if (previousTool != null) SelectTool(previousTool);
 
                 if (string.IsNullOrWhiteSpace(chosen))
                 {
+                    _closeAfterSave = false;
                     SetStatus("Save cancelled.");
                     return;
                 }
@@ -1280,12 +1573,15 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         var path = write.Result;
         if (path == null)
         {
+            // A failed write must leave the editor open with the work still in it.
+            _closeAfterSave = false;
             SetStatus("Save failed, see log.", StatusSeverity.Error);
             yield break;
         }
 
         // This session wrote it, so Ctrl+S under this name is no longer clobbering anyone.
         _quickSavedName = Map.MapName;
+        MarkSaved();
 
         // Saving in a hub session saves a hub: the record beside the blueprint is what the world
         // map's Hub picker lists and what playback rebuilds. It follows the name the save used, so
@@ -1298,6 +1594,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         }
 
         yield return CaptureSnapshot();
+
+        // The close the guard was holding: the write has landed, so there is nothing left to lose.
+        if (_closeAfterSave)
+        {
+            _closeAfterSave = false;
+            ExitEditorMode();
+        }
     }
 
     private IEnumerator CaptureSnapshot()
@@ -1356,8 +1659,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         SetStatus($"Saved '{Map.MapName}'.", StatusSeverity.Success);
     }
 
-    // Preview width; height follows the screen's aspect.
-    private const int SnapshotWidth = 512;
+    // Preview width; height follows the screen's aspect. Wide enough to hold up when a snapshot is
+    // blown up rather than only glanced at in a grid cell: at 512 the hover preview was already
+    // upscaling on a high-resolution screen. A screen narrower than this is written as it is, since
+    // Downscale never enlarges. Snapshots already on disk keep the width they were taken at - saving
+    // a map again is what re-takes it.
+    private const int SnapshotWidth = 1280;
 
     private static Texture2D Downscale(Texture2D source, int width)
     {

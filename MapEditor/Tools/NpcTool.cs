@@ -41,6 +41,10 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     private static List<NpcGroup> _groups;
 
     private MapEditorDropdown _groupDropdown;
+    // Tall enough to browse in, short enough that the search field and the group picker
+    // above it never leave the screen.
+    private const float GridHeight = 620f;
+
     private MapEditorGrid _grid;
 
     private string _pendingKey;
@@ -81,8 +85,11 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             .Select(g => g.Entries != null ? $"{g.Label} ({g.Entries.Count})" : g.Label)
             .ToList();
 
+        _search = new MapEditorSearchRow(_editor, ui, panel, ShowSearchResults, ShowCurrentGroup,
+            "Search scanned NPCs...");
+
         _groupDropdown = ui.CreateDropdown(panel, "Choose a group", options, (index, _) => ShowGroupAt(index));
-        _grid = ui.CreateIconGrid(panel, "NpcGrid");
+        _grid = ui.CreateIconGrid(panel, "NpcGrid", scrollHeight: GridHeight);
 
         ui.CreateButton(panel, "Clear Selection", () =>
         {
@@ -91,6 +98,71 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _grid?.SetSelected(null);
             _editor.SetStatus("Selection cleared.");
         });
+    }
+
+    private MapEditorSearchRow _search;
+
+    // ---- search -------------------------------------------------------------------------------
+
+    private void ShowCurrentGroup()
+    {
+        var index = _groupDropdown != null ? _groupDropdown.SelectedIndex : -1;
+        ShowGroupAt(index < 0 ? 0 : index);
+    }
+
+    // NPCs are found by opening room prefabs, which is slow enough to be indexed on disk - so a
+    // search covers what has been scanned so far plus the custom list, and says as much rather
+    // than pretending to have looked everywhere. Open a group once and its characters are
+    // searchable from then on, in this session and the next.
+    private void ShowSearchResults(string needle)
+    {
+        if (_grid == null) return;
+
+        // Whatever a running scan was still filling in belongs to a grid that is about to go.
+        _scanToken++;
+        EnemyThumbnails.CancelPending();
+        _grid.Clear();
+
+        var seen = new HashSet<string>();
+        var shown = 0;
+        var total = 0;
+
+        foreach (var pair in APIHelper.CustomNpcManager.CustomNpcList)
+        {
+            if (pair.Value == null) continue;
+
+            var label = pair.Value.DisplayName ?? pair.Key;
+            if (label.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (!seen.Add(pair.Key)) continue;
+
+            total++;
+            if (shown >= MapEditorSearchRow.MaxResults) continue;
+
+            AddCell(pair.Key, label, isCustom: true);
+            shown++;
+        }
+
+        foreach (var room in Index())
+        foreach (var entry in room.Value)
+        {
+            if (entry.label == null || entry.key == null) continue;
+            if (entry.label.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (!seen.Add(entry.key)) continue;
+
+            total++;
+            if (shown >= MapEditorSearchRow.MaxResults) continue;
+
+            AddCell(entry.key, entry.label);
+            shown++;
+        }
+
+        _editor.RequestOptionsResize();
+
+        if (total == 0)
+            _editor.SetStatus($"Nothing scanned so far matches '{needle}' - open a group to scan it.",
+                StatusSeverity.Warning);
+        else
+            _search.ReportCount(shown, total, needle);
     }
 
     private void ShowGroupAt(int index)
@@ -200,6 +272,10 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     {
         _grid.AddCell(key, label, null, () =>
         {
+            // Picking one is the end of the search; the status set below is what should be left on
+            // screen, so this goes first.
+            _search?.Confirm();
+
             _pendingKey = key;
             _pendingIsCustom = isCustom;
             DestroyPreview();

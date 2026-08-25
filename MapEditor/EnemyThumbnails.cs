@@ -10,11 +10,17 @@ namespace CustomSpineLoader.MapEditor;
 public static class EnemyThumbnails
 {
     // Source resolution per icon. The grid draws them at 88px.
-    private const int Cell = 96;
+    // Big enough that hovering a cell can blow the thumbnail up beside the panel without it turning
+    // to mush: the preview box is ~300 units across, and a 96px bake was being stretched three
+    // times over. The cost is atlas memory - a page is Cell x Cell x Columns^2 of RGBA32 - which is
+    // why the columns came down with the cell size going up, and why these are still dropped with
+    // the scene.
+    private const int Cell = 256;
 
     // 5x5 icons to a page. Small pages keep each Texture2D.Apply cheap, which matters because
     // ours are applied progressively rather than all at once like the nameplate atlas.
-    private const int Columns = 5;
+    // Four rather than five, so a page lands on 1024 square rather than 1280.
+    private const int Columns = 4;
     private const int PageSize = Cell * Columns;
     private const int SlotsPerPage = Columns * Columns;
 
@@ -234,7 +240,15 @@ public static class EnemyThumbnails
             Plugin.Log.LogInfo("MapEditor: no unlit shader available; thumbnails follow the room's lighting.");
     }
 
-    private static void MakeUnlit(GameObject subject, List<Material> borrowed)
+    // Swaps every renderer under the subject onto an unlit copy of its own material, so the room's
+    // lighting has no say in the picture. `borrowed` collects the copies for the caller to destroy.
+    //
+    // `restore` is for a caller working on a *live* object rather than a staged throwaway: it
+    // records each renderer's original material array so the swap can be put back in the same call.
+    // The selection preview needs that; the thumbnail rig, which photographs a prefab it is about
+    // to delete, does not.
+    internal static void MakeUnlit(GameObject subject, List<Material> borrowed,
+        List<(Renderer Renderer, Material[] Originals)> restore = null)
     {
         ResolveShaders();
         if (_spineUnlit == null && _spriteUnlit == null) return;
@@ -247,7 +261,10 @@ public static class EnemyThumbnails
             var isSkeleton = renderer.GetComponent<SkeletonRenderer>() != null;
             var shader = (isSkeleton ? _spineUnlit : _spriteUnlit) ?? _spineUnlit ?? _spriteUnlit;
 
+            // sharedMaterials hands back a fresh array each time, so this is a safe record of what
+            // was there rather than a view onto what is about to change.
             var sources = renderer.sharedMaterials;
+            restore?.Add((renderer, sources));
             var copies = new Material[sources.Length];
 
             for (var i = 0; i < sources.Length; i++)

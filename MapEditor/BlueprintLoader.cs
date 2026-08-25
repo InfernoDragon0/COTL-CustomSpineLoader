@@ -248,6 +248,10 @@ public class BlueprintLoader
         Plugin.Log.LogInfo($"MapEditor: blueprint '{bp.MapName}' loaded - " +
                            $"{_propsSpawned}/{bp.Props.Count} prop(s) rebuilt" +
                            (_propsFailed > 0 ? $", {_propsFailed} FAILED (see warnings above)" : "") + ".");
+
+        // The room is now exactly what the file says, so closing the editor has nothing to lose -
+        // even though clearing and rebuilding it changed a great deal along the way.
+        _editor.MarkSaved();
         IsLoading = false;
     }
 

@@ -123,14 +123,18 @@ public class CTMapTrigger : MonoBehaviour
         ApplyTint();
     }
 
+    // Re-tints without touching visibility, for a change that alters what the volume *is* rather
+    // than whether it is on screen - switching Fire once on or off.
+    public void RefreshTint() => ApplyTint();
+
     private void ApplyTint()
     {
         if (_outline == null) return;
 
-        var colour = Idle;
+        var colour = Once ? Idle : Repeating;
         if (_flashUntil > Time.unscaledTime) colour = Firing;
         else if (_highlighted) colour = Selected;
-        else if (Tripped) colour = Spent;
+        else if (Tripped) colour = Once ? Spent : Fired;
 
         _outline.startColor = _outline.endColor = colour;
         if (_fillRenderer != null)
@@ -138,10 +142,18 @@ public class CTMapTrigger : MonoBehaviour
                 _flashUntil > Time.unscaledTime ? 0.35f : 0.12f);
     }
 
+    // A room full of identical cyan boxes says nothing about which of them will go off again. Cyan
+    // is the fire-once volume, because that is the default and the common one; a volume that re-arms
+    // every entry is violet. Each keeps its own hue after firing, dimmed - and the two mean very
+    // different things, which is why they cannot share one "used" colour. A spent once-trigger is
+    // *finished*: it will not fire again until it is re-armed. A fired repeating trigger is simply
+    // resting, and the next entry sets it off. Painting both grey said the first thing about both.
     private static readonly Color Idle = new(0.25f, 0.85f, 1f, 0.9f);
+    private static readonly Color Repeating = new(0.78f, 0.42f, 1f, 0.9f);
     private static readonly Color Selected = new(1f, 0.82f, 0.15f, 1f);
     private static readonly Color Firing = new(0.35f, 1f, 0.4f, 1f);
     private static readonly Color Spent = new(0.45f, 0.6f, 0.5f, 0.75f);
+    private static readonly Color Fired = new(0.5f, 0.4f, 0.62f, 0.75f);
 
     private void BuildGizmo()
     {
@@ -318,7 +330,7 @@ public class CTMapTrigger : MonoBehaviour
     }
 }
 
-public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
+public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts, IMapEditorEscapeHandler
 {
     public string Name => "Triggers";
 
@@ -332,10 +344,11 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private GameObject _moveHandle;
     private GameObject _resizeHandle;
 
-    private Slider _widthSlider;
-    private Slider _heightSlider;
     private TMPro.TMP_Text _info;
-    private bool _syncingSliders;
+
+    // Raised while the panel is being written *from* the selection, so a widget's own change
+    // callback does not write straight back into the trigger it is displaying.
+    private bool _syncingWidgets;
 
     private const float DefaultWidth = 4f;
     private const float DefaultHeight = 3f;
@@ -353,21 +366,24 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _info = ui.CreateLabel(panel, "No trigger selected", 17, TMPro.TextAlignmentOptions.Center)
             .GetComponent<TMPro.TMP_Text>();
 
-        _widthSlider = ui.CreateSlider(panel, "Width", 0.5f, 40f, DefaultWidth, v => Resize(v, null))
-            .GetComponentInChildren<Slider>();
-        _heightSlider = ui.CreateSlider(panel, "Height", 0.5f, 40f, DefaultHeight, v => Resize(null, v))
-            .GetComponentInChildren<Slider>();
+        // No width/height sliders, and no readout to replace them: the blue corner node resizes the
+        // volume on the volume itself, which is the thing being sized. Two sliders that had to be
+        // found in the panel, dragged, and checked against a shape somewhere else on screen were a
+        // slower way of doing the same edit, and the size is already on the line above.
 
         _onceToggle = ui.CreateToggle(panel, "Fire once", true, value =>
         {
-            if (_syncingSliders || _selected == null) return;
+            if (_syncingWidgets || _selected == null) return;
             _selected.Once = value;
+
+            // The volume is drawn by what it does, so the colour has to follow the toggle.
+            _selected.RefreshTint();
             _editor.SetStatus(value ? $"{_selected.Id} fires once." : $"{_selected.Id} fires every entry.");
         }).GetComponent<MapEditorToggle>();
 
         _lockToggle = ui.CreateToggle(panel, "Lock control while playing", true, value =>
         {
-            if (_syncingSliders || _selected == null) return;
+            if (_syncingWidgets || _selected == null) return;
             _selected.LockPlayerControl = value;
             _editor.SetStatus(value
                 ? $"{_selected.Id} freezes the players until an action needs them."
@@ -394,11 +410,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             _editor.SetStatus($"Re-armed {count} trigger(s).");
         });
 
-        ui.CreateButton(panel, "Delete Selected", DeleteSelected);
-
-        // The label doubles as the armed indicator.
-        _clearAllLabel = ui.CreateButton(panel, ClearAllLabel, ClearAllPressed)
-            .GetComponentInChildren<TMPro.TMP_Text>();
+        // No Delete Selected and no Clear All. Del already deletes, and it was the shortcut the
+        // panel's own list advertised; wiping every trigger in the room is a clearing job, and it
+        // lives with the other clearing jobs in the Clear tool - armed the same way it was here.
 
         ui.CreateHeader(panel, "- Actions -", 19);
 
@@ -406,7 +420,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         _targetDropdown = ui.CreateDropdown(panel, "Target", System.Array.Empty<string>(), OnTargetChosen);
 
-        _actionList = CreateActionListContainer(panel);
+        _actionBox = ui.CreateScrollBox(panel, "ActionList", ActionListHeight, RowHeight);
+        _actionList = _actionBox.Content;
 
         RebuildActionList();
         UpdateActionControls();
@@ -415,55 +430,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private MapEditorToggle _onceToggle;
     private MapEditorToggle _lockToggle;
 
-    // ---- clear-all confirmation ---------------------------------------------------------------
-
-    private TMPro.TMP_Text _clearAllLabel;
-    private float _armedUntil;
-
-    private const string ClearAllLabel = "Clear All Triggers";
-    private const float ArmWindow = 4f;
-
-    private void ClearAllPressed()
-    {
-        var live = LiveCount();
-        if (live == 0)
-        {
-            Disarm();
-            _editor.SetStatus("No triggers to remove.");
-            return;
-        }
-
-        if (!Armed)
-        {
-            _armedUntil = Time.unscaledTime + ArmWindow;
-            if (_clearAllLabel != null) _clearAllLabel.text = $"Delete all {live}? Click again";
-            _editor.SetStatus($"Click again within {ArmWindow:0}s to delete all {live} trigger(s).",
-                StatusSeverity.Warning);
-            return;
-        }
-
-        Disarm();
-        var removed = ClearPlaced();
-        _editor.SetStatus($"Removed {removed} trigger(s).");
-    }
-
-    private bool Armed => _armedUntil > 0f && Time.unscaledTime <= _armedUntil;
-
-    private void Disarm()
-    {
-        _armedUntil = 0f;
-        if (_clearAllLabel != null) _clearAllLabel.text = ClearAllLabel;
-    }
-
-    private void TickArmWindow()
-    {
-        if (_armedUntil <= 0f || Time.unscaledTime <= _armedUntil) return;
-
-        Disarm();
-        _editor.SetStatus("Clear all cancelled.");
-    }
-
-    private int LiveCount()
+    // How many triggers are actually in the room. Public for the Clear tool, which owns the
+    // wipe and has to say what it is about to remove.
+    public int LiveCount()
     {
         var live = 0;
         foreach (var trigger in _triggers)
@@ -477,6 +446,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private MapEditorUI _ui;
     private RectTransform _panel;
     private RectTransform _actionList;
+    private MapEditorScrollBox _actionBox;
     private MapEditorDropdown _addDropdown;
     private MapEditorDropdown _targetDropdown;
 
@@ -609,27 +579,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private bool _pickingObject;
 
-    private RectTransform CreateActionListContainer(RectTransform panel)
-    {
-        var go = new GameObject("ActionList");
-        go.transform.SetParent(panel, false);
-
-        var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(0f, 0f);
-
-        var layout = go.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 3f;
-        layout.childControlWidth = true;
-        layout.childForceExpandWidth = true;
-        layout.childControlHeight = false;
-        layout.childForceExpandHeight = false;
-
-        // Without the fitter every row stacks inside a zero-height rect.
-        var fitter = go.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        return rt;
-    }
+    // Tall enough to read a sequence in, short enough that the controls above it stay on screen.
+    private const float ActionListHeight = 300f;
 
     private void RebuildActionList()
     {
@@ -639,6 +590,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             Object.Destroy(child.gameObject);
 
         var actions = _selected?.Actions;
+        var rows = 0;
 
         if (_selected == null)
         {
@@ -652,10 +604,12 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         {
             for (var i = 0; i < actions.Count; i++)
                 CreateActionRow(i, actions[i]);
+
+            rows = actions.Count;
         }
 
-        // Destroyed children leave the layout at end of frame; nested fitters never settle alone.
-        _editor.RequestOptionsResize();
+        _actionBox?.ScrollToTop();
+        _actionBox?.SetRows(rows);
     }
 
     private void AddActionNote(string text)
@@ -1370,16 +1324,33 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                           "offset (Esc cancels).");
     }
 
-    private void TickOffsetCapture()
+    // Escape backs out of this tool's two modes before it reaches the editor: framing a camera
+    // offset, and picking a target object out of the room. Both put the editor into a state the
+    // author has to be able to leave without also leaving the editor.
+    public bool HandleEscape()
     {
-        if (!_capturingOffset) return;
-
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (_capturingOffset)
         {
             _capturingOffset = false;
             _editor.SetStatus("Camera offset cancelled.");
-            return;
+            return true;
         }
+
+        if (_pickingObject)
+        {
+            _pickingObject = false;
+            _stage = TargetStage.None;
+            UpdateActionControls();
+            _editor.SetStatus("Target pick cancelled.");
+            return true;
+        }
+
+        return false;
+    }
+
+    private void TickOffsetCapture()
+    {
+        if (!_capturingOffset) return;
 
         if (!Input.GetKeyDown(KeyCode.V)) return;
 
@@ -1485,6 +1456,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     [
         ("LMB", "Place or select trigger"),
         ("Drag", "Centre moves, corner resizes"),
+        ("Ctrl + Drag", "Copy trigger and its actions"),
         ("Del", "Delete selected"),
         ("V", "Set camera offset while framing"),
         ("Esc", "Cancel target pick")
@@ -1494,7 +1466,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         ShowGizmos(false);
         Select(null);
-        Disarm();
+        _cloneDragging = false;
         _pickingObject = false;
         _capturingOffset = false;
         _stage = TargetStage.None;
@@ -1505,19 +1477,13 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     public void OnUpdate()
     {
         Prune();
-        TickArmWindow();
+
+        if (HandleCloneDrag()) return;
 
         if (Input.GetKeyDown(KeyCode.Delete)) DeleteSelected();
 
         TickOffsetCapture();
 
-        if (_pickingObject && Input.GetKeyDown(KeyCode.Escape))
-        {
-            _pickingObject = false;
-            _stage = TargetStage.None;
-            UpdateActionControls();
-            _editor.SetStatus("Target pick cancelled.");
-        }
 
         // No placement while framing an offset: the world is the viewfinder.
         if (Input.GetMouseButtonDown(0) && !_capturingOffset && !_editor.PointerOverUi())
@@ -1530,6 +1496,12 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 return;
             }
 
+            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+            {
+                BeginClone(world);
+                return;
+            }
+
             var hit = PickAt(world);
             if (hit != null) Select(hit);
             else Select(CreateTrigger(world, DefaultWidth, DefaultHeight), placed: true);
@@ -1537,6 +1509,85 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         SyncHandles();
         SyncTargetHighlight();
+    }
+
+    // ---- cloning ------------------------------------------------------------------------------
+
+    private bool _cloneDragging;
+    private Vector3 _cloneGrabOffset;
+
+    // Ctrl-drag copies a trigger whole - size, Fire once, Lock control, and the whole action
+    // sequence. Rebuilding a ten-step sequence by hand to put the same thing in two doorways was
+    // the slowest job in the tool.
+    //
+    // From a handle the source needs no working out: the gizmo belongs to the selection. Otherwise
+    // the selection still wins whenever the pointer is inside it, so a Ctrl-drag that starts on the
+    // trigger you are working on cannot copy the one stacked underneath it.
+    internal bool BeginCloneDrag(Vector3 world) => CloneFrom(_selected, world);
+
+    private void BeginClone(Vector3 world)
+    {
+        var source = _selected != null && _selected.WorldRect.Contains(world) ? _selected : PickAt(world);
+
+        if (source == null)
+        {
+            _editor.SetStatus("Ctrl-click: no trigger here to copy.");
+            return;
+        }
+
+        CloneFrom(source, world);
+    }
+
+    private bool CloneFrom(CTMapTrigger source, Vector3 world)
+    {
+        if (source == null) return false;
+
+        // Round-tripped through the saved form rather than copied field by field: that is the shape
+        // the actions are written and read in already, so a clone cannot quietly share a reference
+        // with its source, and an action added later cannot be forgotten here.
+        var clone = CreateTrigger(source.transform.position, source.Size.x, source.Size.y,
+            id: null, action: source.Action, once: source.Once,
+            actions: TriggerActions.ToData(source.Actions),
+            lockPlayerControl: source.LockPlayerControl);
+
+        if (clone == null) return false;
+
+        // An action that pointed at its own trigger should point at the copy's own trigger. Targets
+        // naming *other* triggers are left alone - those are references to elsewhere in the room,
+        // and the copy means them just as much as the original did.
+        foreach (var action in clone.Actions)
+            if (string.Equals(action.Target, source.Id, System.StringComparison.Ordinal))
+                action.Target = clone.Id;
+
+        Select(clone);
+        _cloneDragging = true;
+        _cloneGrabOffset = clone.transform.position - world;
+        _editor.MarkEdited();
+
+        _editor.SetStatus($"Copied {source.Id} to {clone.Id} " +
+                          $"({clone.Actions.Count} action(s)). Release to drop.");
+        return true;
+    }
+
+    // True while a clone drag is running; the caller skips its normal click handling then.
+    private bool HandleCloneDrag()
+    {
+        if (!_cloneDragging) return false;
+
+        if (_selected == null || !Input.GetMouseButton(0))
+        {
+            _cloneDragging = false;
+            if (_selected != null) _editor.SetStatus($"Placed {_selected.Id}.");
+            SyncHandles();
+            return false;
+        }
+
+        var target = _editor.MouseWorld() + _cloneGrabOffset;
+        _selected.transform.position = new Vector3(target.x, target.y, 0f);
+        _selected.Refresh();
+
+        SyncHandles();
+        return true;
     }
 
     // ---- placement --------------------------------------------------------------------------
@@ -1664,28 +1715,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         if (_selected == null) return;
 
-        // SetValueWithoutNotify is still re-entered through the slider's own drag; guard both ways.
-        _syncingSliders = true;
-        _widthSlider?.SetValueWithoutNotify(_selected.Size.x);
-        _heightSlider?.SetValueWithoutNotify(_selected.Size.y);
+        _syncingWidgets = true;
         _onceToggle?.SetValue(_selected.Once, notify: false);
         _lockToggle?.SetValue(_selected.LockPlayerControl, notify: false);
-        _syncingSliders = false;
-    }
-
-    private void Resize(float? width, float? height)
-    {
-        if (_syncingSliders) return;
-
-        if (_selected == null)
-        {
-            _editor.SetStatus("Select a trigger first.", StatusSeverity.Warning);
-            return;
-        }
-
-        _selected.Size = new Vector2(width ?? _selected.Size.x, height ?? _selected.Size.y);
-        _selected.Refresh();
-        UpdateInfo();
+        _syncingWidgets = false;
     }
 
     private void UpdateInfo()
@@ -1800,6 +1833,45 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     internal Vector3 SelectedPosition => _selected != null ? _selected.transform.position : Vector3.zero;
 
+    // One undo entry per gesture, the same rule the Select tool uses: a drag rewrites the volume
+    // every frame, but what the author did was move or resize it once.
+    private CTMapTrigger _gestureTarget;
+    private Vector3 _gesturePosition;
+    private Vector2 _gestureSize;
+
+    internal void BeginGesture()
+    {
+        _gestureTarget = _selected;
+        if (_selected == null) return;
+
+        _gesturePosition = _selected.transform.position;
+        _gestureSize = _selected.Size;
+    }
+
+    internal void EndGesture(string label)
+    {
+        var target = _gestureTarget;
+        _gestureTarget = null;
+        if (target == null) return;
+
+        var position = _gesturePosition;
+        var size = _gestureSize;
+
+        if (target.transform.position == position && target.Size == size) return;
+
+        _editor.MarkEdited();
+        _editor.History.Push($"{label} {target.Id}", () =>
+        {
+            if (target == null) return false;
+
+            target.transform.position = position;
+            target.Size = size;
+            target.Refresh();
+            if (_selected == target) PushSelectionToPanel();
+            return true;
+        });
+    }
+
     // ---- bookkeeping ---------------------------------------------------------------------------
 
     private void Prune()
@@ -1868,7 +1940,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 }
 
 // Grab offset captured on mouse-down so a move does not snap the centre onto the cursor.
-public class TriggerHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
+public class TriggerHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     public enum Mode
     {
@@ -1888,17 +1960,37 @@ public class TriggerHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
         _mode = mode;
     }
 
+    private bool _cloning;
+
     public void OnBeginDrag(PointerEventData eventData)
     {
+        _cloning = false;
         if (_tool == null || _editor == null) return;
-        _grabOffset = _mode == Mode.Move
-            ? _tool.SelectedPosition - _editor.ScreenToWorld(eventData.position)
-            : Vector3.zero;
+
+        var world = _editor.ScreenToWorld(eventData.position);
+
+        // The handles cover the volume they belong to, so Ctrl on one is a clone gesture like any
+        // other. The tool takes it from here - the copy follows the mouse from its own polled
+        // update - so this handle does nothing more for the rest of the drag.
+        if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+        {
+            _cloning = _tool.BeginCloneDrag(world);
+            if (_cloning) return;
+        }
+
+        _tool.BeginGesture();
+        _grabOffset = _mode == Mode.Move ? _tool.SelectedPosition - world : Vector3.zero;
     }
 
     public void OnDrag(PointerEventData eventData)
     {
-        if (_tool == null || _editor == null) return;
+        if (_tool == null || _editor == null || _cloning) return;
         _tool.DragTo(_mode, _editor.ScreenToWorld(eventData.position), _grabOffset);
+    }
+
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        if (_tool == null || _cloning) return;
+        _tool.EndGesture(_mode == Mode.Move ? "move" : "resize");
     }
 }

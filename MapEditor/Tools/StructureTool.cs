@@ -41,6 +41,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
+        BuildSearchRow(panel, ui);
+
         _groupKeys.Clear();
         var options = new List<string>();
 
@@ -60,18 +62,99 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             else ShowPropGroup(_groupKeys[index]);
         });
 
-        _grid = ui.CreateIconGrid(panel, "PlacementGrid");
+        _grid = ui.CreateIconGrid(panel, "PlacementGrid", scrollHeight: GridHeight);
+
+        ui.CreateToggle(panel, "Multi-select randomised placement", false, SetScatterMode);
 
         ui.CreateButton(panel, "Clear Selection", () =>
         {
             _pending = StructureBrain.TYPES.NONE;
             _propPath = null;
+            _picks.Clear();
             DestroyPreview();
             DestroyPropPreview();
-                _grid?.SetSelected(null);
+            _grid?.SetSelectedMany(null);
+            _grid?.SetSelected(null);
             _editor.SetStatus("Selection cleared.");
         });
     }
+
+    // ---- randomised placement -------------------------------------------------------------------
+
+    // Gather several things, then let each click choose between them. Filling a treeline or a field
+    // of rubble one structure at a time produces rows that read as rows; the point of the mode is
+    // that the variety costs nothing to place.
+    private class Pick
+    {
+        public string Id;
+        public string Label;
+        public bool IsProp;
+        public string Path;
+        public StructureBrain.TYPES Type;
+    }
+
+    private readonly List<Pick> _picks = [];
+    private bool _scatter;
+
+    private void SetScatterMode(bool on)
+    {
+        _scatter = on;
+
+        // The single pending selection and the gathered set are two answers to the same question,
+        // so only one of them is ever live. Switching modes drops the other rather than leaving it
+        // to fire on the next click.
+        _picks.Clear();
+        _grid?.SetSelectedMany(null);
+
+        _pending = StructureBrain.TYPES.NONE;
+        _propPath = null;
+        DestroyPreview();
+        DestroyPropPreview();
+
+        _editor.SetStatus(on
+            ? "Pick several, then click to place one of them at random."
+            : "Back to placing one at a time.");
+    }
+
+    // Returns true when the click was consumed by the gathering, so the caller does not also make
+    // it the single selection.
+    private bool TogglePick(string id, string label, bool isProp, string path, StructureBrain.TYPES type)
+    {
+        if (!_scatter) return false;
+
+        var existing = _picks.FindIndex(p => p.Id == id);
+        if (existing >= 0)
+        {
+            _picks.RemoveAt(existing);
+            _editor.SetStatus($"Dropped {label} - {_picks.Count} in the mix.");
+        }
+        else
+        {
+            _picks.Add(new Pick { Id = id, Label = label, IsProp = isProp, Path = path, Type = type });
+            _editor.SetStatus($"Added {label} - {_picks.Count} in the mix.");
+        }
+
+        _grid?.SetSelectedMany(_picks.ConvertAll(p => p.Id));
+        return true;
+    }
+
+    // No cursor ghost here, and that is deliberate: a ghost would have to show one of the picks,
+    // and whichever it showed would be wrong most of the time. The status line carries the count
+    // instead, so what the click will do is stated rather than mimed.
+    private void UpdateScatterPlacement()
+    {
+        if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
+
+        var pick = _picks[Random.Range(0, _picks.Count)];
+        var world = _editor.MouseWorld();
+
+        if (pick.IsProp) SpawnProp(pick.Path, world, isPreview: false);
+        else Place(pick.Type, world);
+    }
+
+    // Tall enough to browse in, short enough that the search field and the group picker
+    // above it never leave the screen.
+    private const float GridHeight = 620f;
 
     private MapEditorGrid _grid;
     private MapEditorDropdown _groupDropdown;
@@ -81,6 +164,18 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         if (_grid == null) return;
 
+        MapEditorIcons.CancelPendingPropIcons();
+        _grid.Populate(_editor, StructureEntries(), id =>
+        {
+            if (_typesById.TryGetValue(id, out var type))
+                _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
+        });
+    }
+
+    // The build-menu structures as grid entries. Shared with the search, which has to match on the
+    // same names the group view shows.
+    private List<MapEditorGrid.Entry> StructureEntries()
+    {
         var entries = new List<MapEditorGrid.Entry>();
         var seen = new HashSet<StructureBrain.TYPES>();
 
@@ -105,12 +200,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             entries.Add(StructureEntry(pair.Key, pair.Value.InternalName));
         }
 
-        MapEditorIcons.CancelPendingPropIcons();
-        _grid.Populate(_editor, entries, id =>
-        {
-            if (_typesById.TryGetValue(id, out var type))
-                _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
-        });
+        return entries;
     }
 
     private readonly Dictionary<string, StructureBrain.TYPES> _typesById = [];
@@ -126,12 +216,87 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             Display = label,
             OnClick = () =>
             {
+                // Picking one is the end of the search; the status set below is what should be
+                // left on screen, so this goes first.
+                _search?.Confirm();
+
+                if (TogglePick(id, label, isProp: false, path: null, type: type)) return;
+
                 _pending = type;
                 _propPath = null;
                 DestroyPropPreview();
-                        _editor.SetStatus($"Selected {label}.");
+                _editor.SetStatus($"Selected {label}.");
             }
         };
+    }
+
+    // ---- search -------------------------------------------------------------------------------
+
+    private MapEditorSearchRow _search;
+
+    private void BuildSearchRow(RectTransform panel, MapEditorUI ui)
+    {
+        _search = new MapEditorSearchRow(_editor, ui, panel, ShowSearchResults, ShowCurrentGroup);
+    }
+
+    // Back to whichever group the dropdown is on, for a cleared or cancelled search.
+    private void ShowCurrentGroup()
+    {
+        var index = _groupDropdown != null ? _groupDropdown.SelectedIndex : -1;
+        if (index < 0 || index >= _groupKeys.Count)
+        {
+            ShowStructureGroup();
+            return;
+        }
+
+        if (_groupKeys[index] == StructureGroup) ShowStructureGroup();
+        else ShowPropGroup(_groupKeys[index]);
+    }
+
+    // Every group at once: the catalog is filed by Addressables folder, so the same word turns up
+    // in several and searching one at a time would be searching the wrong one.
+    private void ShowSearchResults(string needle)
+    {
+        if (_grid == null) return;
+
+        MapEditorIcons.CancelPendingPropIcons();
+
+        var entries = new List<MapEditorGrid.Entry>();
+        var total = 0;
+
+        foreach (var structure in StructureEntries())
+        {
+            if (structure.Display.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+            total++;
+            if (entries.Count < MapEditorSearchRow.MaxResults) entries.Add(structure);
+        }
+
+        foreach (var pair in PropGroups())
+        foreach (var path in pair.Value)
+        {
+            var label = System.IO.Path.GetFileNameWithoutExtension(path);
+            if (label.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+            total++;
+            if (entries.Count >= MapEditorSearchRow.MaxResults) continue;
+
+            var captured = path;
+            entries.Add(new MapEditorGrid.Entry
+            {
+                Id = captured,
+                Display = label,
+                OnClick = () => SelectProp(captured, label)
+            });
+        }
+
+        _grid.Populate(_editor, entries, id =>
+        {
+            if (_typesById.TryGetValue(id, out var type)) _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
+            else MapEditorIcons.GetPropIcon(_editor, id, sprite => _grid?.SetCellIcon(id, sprite));
+        });
+
+        _search.ReportCount(entries.Count, total, needle);
     }
 
     private readonly List<GameObject> _placedProps = [];
@@ -248,19 +413,27 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             {
                 Id = captured,
                 Display = label,
-                OnClick = () =>
-                {
-                    _propPath = captured;
-                    _pending = StructureBrain.TYPES.NONE;
-                    DestroyPreview();
-                    DestroyPropPreview();
-                                _editor.SetStatus($"Selected {label}.");
-                }
+                OnClick = () => SelectProp(captured, label)
             });
         }
 
         _grid.Populate(_editor, entries, id =>
             MapEditorIcons.GetPropIcon(_editor, id, sprite => _grid?.SetCellIcon(id, sprite)));
+    }
+
+    private void SelectProp(string path, string label)
+    {
+        // Picking one is the end of the search; the status set below is what should be left on
+        // screen, so this goes first.
+        _search?.Confirm();
+
+        if (TogglePick(path, label, isProp: true, path: path, type: StructureBrain.TYPES.NONE)) return;
+
+        _propPath = path;
+        _pending = StructureBrain.TYPES.NONE;
+        DestroyPreview();
+        DestroyPropPreview();
+        _editor.SetStatus($"Selected {label}.");
     }
 
     private void UpdatePropPlacement()
@@ -432,6 +605,12 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void OnUpdate()
     {
+        if (_scatter)
+        {
+            if (_picks.Count > 0) UpdateScatterPlacement();
+            return;
+        }
+
         if (!string.IsNullOrEmpty(_propPath))
         {
             UpdatePropPlacement();

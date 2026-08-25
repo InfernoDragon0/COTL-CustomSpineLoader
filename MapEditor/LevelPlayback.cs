@@ -340,6 +340,9 @@ public static class LevelPlayback
             Plugin.Log.LogInfo($"MapEditor: room shell ready in {Time.unscaledTime - startedAt:0.00}s; " +
                                "rebuilding behind the fade.");
 
+        // A new room starts uncompleted, whatever the last one left behind. See ResetRoomLocks.
+        ResetRoomLocks();
+
         // Vanilla slot: nothing to rebuild, just lift the fade on what is already there.
         if (_resolvedRooms[state.Slot] == CTLevelRoom.VanillaNode)
         {
@@ -347,6 +350,7 @@ public static class LevelPlayback
             // The lighting override is global; fall back to what this room itself asks for.
             Tools.LightingTool.OnRoomEntered();
             ReleaseHold();
+            _editor?.StartCoroutine(LockIfContested(token));
             yield break;
         }
 
@@ -417,6 +421,95 @@ public static class LevelPlayback
         }
 
         ReleaseHold();
+        _editor?.StartCoroutine(LockIfContested(token));
+    }
+
+    // ---- room locking ---------------------------------------------------------------------------
+
+    // `RoomLockController.Completed` is set true in RoomCompleted and **never set false anywhere in
+    // the game**. Vanilla gets away with that because a room's controllers die with the room, so
+    // the next room's are new objects with the flag at its default. Ours do not always: the editor
+    // deactivates and reactivates doors rather than destroying them, and the game pools room
+    // objects, so a controller can carry a completed flag into a room that has not been played yet.
+    //
+    // That flag is not decorative. BiomeGenerator's arrival code reads `RoomLockControllers[0]` and
+    // clears `doorsWillClose` when it says completed, and the whole arrival block - the enemy count
+    // and the CloseAll with it - sits inside `if (!CurrentRoom.Completed)`. A room that starts life
+    // believing it is finished never gets asked whether it has anything in it.
+    //
+    // We are the ones who latch it early (an authored room with no enemies is unlocked on arrival),
+    // so we are the ones who have to unlatch it.
+    private static void ResetRoomLocks()
+    {
+        try
+        {
+            foreach (var controller in RoomLockController.RoomLockControllers)
+            {
+                if (controller == null || controller.Standalone) continue;
+                controller.Completed = false;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not reset the room locks: " + e.Message);
+        }
+    }
+
+    // The net under all of that: if the room the player has arrived in still has something alive in
+    // it and its doors are open, shut them.
+    //
+    // Deliberately a check on the result rather than a fix to one cause. The arrival path has
+    // several ways to decide a room is peaceful - it counts UnitObjects under the generated room,
+    // it reads a completed flag, and it runs on a schedule this mod interrupts by holding the fade
+    // and resuming the simulation by hand - and a custom dungeon can miss the lock through any of
+    // them. What is not ambiguous is the outcome: enemies in the room and the doors standing open
+    // is always wrong. Closing them is safe to do twice; the game's own CloseAll is idempotent.
+    private static IEnumerator LockIfContested(int token)
+    {
+        // Long enough for the arrival walk-in and the game's own lock to have happened. Locking
+        // during the walk would be its job to do, not ours, and it does it better - CloseAll moves
+        // anyone standing in a doorway back inside first.
+        var until = Time.unscaledTime + 1.5f;
+        while (Time.unscaledTime < until)
+        {
+            if (Abort(token)) yield break;
+            yield return null;
+        }
+
+        if (Abort(token)) yield break;
+        LockIfEnemiesRemain();
+    }
+
+    private static void LockIfEnemiesRemain()
+    {
+        try
+        {
+            if (Health.team2.Count == 0) return;
+
+            var room = BiomeGenerator.Instance != null ? BiomeGenerator.Instance.CurrentRoom : null;
+            if (room != null && room.Completed) return;
+
+            // Read the controllers rather than the static DoorsOpen flag: that one is only written
+            // by DoorUp and DoorDown, so a room whose doors were never touched leaves it saying
+            // whatever the last room said.
+            var open = false;
+            foreach (var controller in RoomLockController.RoomLockControllers)
+            {
+                if (controller == null || controller.Standalone || !controller.Open) continue;
+                open = true;
+                break;
+            }
+
+            if (!open) return;
+
+            Plugin.Log.LogInfo($"MapEditor: room has {Health.team2.Count} enemy(s) with its doors " +
+                               "open; locking it.");
+            RoomLockController.CloseAll();
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: could not lock the room: " + e.Message);
+        }
     }
 
     // A newer room apply or Stop() invalidates this routine; those paths release the hold.

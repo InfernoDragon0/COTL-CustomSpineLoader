@@ -152,6 +152,30 @@ public class CustomDungeon
     // applying node blueprints - hook here. Default: vanilla-generated rooms stay as they are.
     public virtual void OnRoomGenerated(GenerateRoom room, ConnectionTypes connectionType) { }
 
+    // Puts a spawned enemy inside the room it belongs to, which is not cosmetic: it is the
+    // difference between a room that locks and one that does not.
+    //
+    // BiomeGenerator decides whether to close the doors on arrival by asking the room itself what
+    // is in it - `CurrentRoom.generateRoom.GetComponentsInChildren<UnitObject>()`, looking for one
+    // on Team2 - and only calls RoomLockController.CloseAll when that finds something. An enemy
+    // spawned at the right world position but parented somewhere outside the room's hierarchy is
+    // invisible to that question, so the room fills with monsters and the game goes on believing it
+    // is empty. CustomEnemyManager.Spawn has no idea which room the position it was handed belongs
+    // to, so it is on the caller to say.
+    //
+    // CustomTransform is the child GenerateRoom parents its own room content to, and it hangs off
+    // the room, so anything under it is found by that check. worldPositionStays, because the
+    // position is already the one that was wanted.
+    private static void AdoptIntoRoom(GenerateRoom room, UnityEngine.Component spawned)
+    {
+        if (room == null || spawned == null) return;
+
+        var parent = room.CustomTransform != null ? room.CustomTransform.transform : room.transform;
+        if (parent == null || spawned.transform.parent == parent) return;
+
+        spawned.transform.SetParent(parent, worldPositionStays: true);
+    }
+
     public virtual void SpawnEnemies(GenerateRoom room, ConnectionTypes connectionType)
     {
         Plugin.Log.LogInfo($"Spawning enemies for connection type {connectionType} in custom dungeon {this.Location}");
@@ -181,6 +205,9 @@ public class CustomDungeon
                         Plugin.Log.LogWarning($"Enemy '{enemy}' could not be spawned yet (prefab still building?); skipped.");
                         continue;
                     }
+
+                    // This is what makes the room lock, and leaving it out is why it did not.
+                    AdoptIntoRoom(room, spawned);
 
                     //TODO: destroy the script controller, and spine components
                     // then, apply a new spine component and the script controller from the enemy

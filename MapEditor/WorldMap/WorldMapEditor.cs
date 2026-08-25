@@ -172,10 +172,12 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         IsEditing = true;
         ModalOpen = false;
 
+        // Nodes first, and so selected first: opening the editor lands on the tool the map is
+        // actually made of. Layers dress it and the file tool is housekeeping, so both come after.
         _tools.Clear();
-        _tools.Add(new Tools.WorldFileTool(this));
-        _tools.Add(new Tools.WorldLayerTool(this));
         _tools.Add(new Tools.WorldNodeTool(this));
+        _tools.Add(new Tools.WorldLayerTool(this));
+        _tools.Add(new Tools.WorldFileTool(this));
 
         BuildUi();
         SelectTool(_tools[0]);

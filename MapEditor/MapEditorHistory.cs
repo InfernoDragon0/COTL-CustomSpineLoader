@@ -19,12 +19,30 @@ public class MapEditorHistory
 
     public int Count => _entries.Count;
 
+    // Raised whenever the room changes through the stack - a push, or an undo that actually undid
+    // something. The editor uses it to know whether closing would lose work, which makes this the
+    // one hook that covers every tool that places, removes or restores anything.
+    public Action Changed;
+
+    private void RaiseChanged()
+    {
+        try
+        {
+            Changed?.Invoke();
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("MapEditor: history change handler failed: " + e.Message);
+        }
+    }
+
     public void Push(string description, Func<bool> undo)
     {
         if (undo == null) return;
 
         _entries.Add(new Entry { Description = description, Undo = undo });
         if (_entries.Count > MaxEntries) _entries.RemoveAt(0);
+        RaiseChanged();
     }
 
     public bool Undo(out string description)
@@ -50,6 +68,7 @@ public class MapEditorHistory
             if (!undone) continue;
 
             description = entry.Description;
+            RaiseChanged();
             return true;
         }
 

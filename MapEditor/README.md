@@ -77,6 +77,35 @@ name has been written this session, `Ctrl+S` under it is a plain quicksave.
 single history regardless of which tool is active. Entries return false when the thing they would
 undo has already gone (cleared, loaded over, destroyed by another tool) and the stack moves on.
 
+**Closing asks about unsaved work.** `F4` on an edited room raises a red strip along the bottom —
+*Save & close* / *Discard* / *Cancel* — the same question the world and dungeon editors ask, and the
+same shape of answer. A strip rather than a dialog because the question is asked *about* the room: a
+full-screen modal would hide the thing being decided. `F4` again dismisses the strip rather than
+answering it. *Save & close* goes straight to the write, past the quicksave's overwrite arming —
+saying "save under this name" *is* the confirmation arming asks for — and the editor only closes once
+the write has landed, so a blocked or cancelled save leaves the work where it is.
+
+The third button is **"Close anyway", not "Discard"**, and the distinction is the whole point. The
+room *is* the live scene. Closing the editor only puts the panels away: every edit is still standing,
+`F4` brings it all back, and playing the room plays the edited one. What goes unsaved is the file.
+A button labelled "Discard" would promise an undo the editor cannot perform — there is no earlier
+room to go back to, only the one on screen — so the status line says what actually happened instead.
+
+Whether there *is* unsaved work is counted, not compared against the file. The world and dungeon
+editors diff their JSON against what was last written, but a room's save is a multi-frame collection
+that rewrites the blueprint from the live scene — running it to answer a question would be a save in
+all but name. So `MapEditorHistory` raises `Changed` on every push and every undo that undid
+something, which covers every placement and removal in the editor, and the tools that change the room
+*without* an undo entry — transforms, doors, lighting, music, shapes, clears — call
+`RuntimeMapEditor.MarkEdited()` themselves.
+
+The baseline moves **only on a save and on a load** — the two moments the room genuinely matches a
+file (a load leaves it matching exactly, however much it changed on the way there). Notably *not* on
+open: the count starts clean, so opening the editor to look at a room and closing it again asks
+nothing on its own, while re-baselining per open would mean the editor forgot — close an edited room
+with "Close anyway", open it again, close it again, and it would go quietly even though the room
+still holds work no file has.
+
 **Widgets.** Built from scratch rather than cloned from the settings menu — those rows are authored
 56px tall for a full-width panel and only exist once the player has opened the settings menu. The
 dropdown is likewise hand-built: the game's `MMDropdown` opens through `UIMenuBase.ActiveMenus`, a
@@ -87,10 +116,11 @@ menu stack the editor is deliberately outside of.
 that call reported true almost everywhere and silently rejected every world click. The wheel is
 routed to the editor's own scroll views by hand for the same reason.
 
-**Text entry.** The inline prompt reads `Input.inputString` directly and suspends the EventSystem
-for its duration: `MMButton` derives from Unity's `Button`, so it handles `ISubmitHandler`, and this
-game's input module raises submit from the interact key — typing an "e" into a name re-pressed
-whatever button was focused.
+**Text entry.** The inline prompt reads `Input.inputString` directly. `MMButton` derives from Unity's
+`Button`, so it handles `ISubmitHandler`, and this game's input module raises submit from the
+interact key — typing an "e" into a name re-pressed whatever button was focused. What stops that is
+locking `UINavigatorNew` and clearing the EventSystem's *selection* each frame, **not** disabling the
+EventSystem: see the Structure tool's chapter for why that was the wrong lever twice over.
 
 ---
 
@@ -98,10 +128,152 @@ whatever button was focused.
 
 ### Select
 
-Click an object to select it, then delete it individually. Ctrl-click-drag clones it. A selection
-carries two drag nodes, the same pair the trigger tool uses: a yellow one at the centre that moves
-it and a blue one on the top-right corner that resizes it (hold Shift to stretch a single axis).
-Also offers send-back / bring-front (Z nudge) and horizontal flip.
+Click an object to select it. Ctrl-drag clones it. A selection carries three drag nodes: a **yellow**
+one at the centre that moves it, a **blue** one on the top-right corner that resizes it (hold Shift
+to stretch a single axis), and a **purple** one on the top-left corner that shifts its depth.
+
+**Depth is a drag, not a pair of buttons.** The purple node reads the pointer in *screen* space —
+depth is the one axis a pointer cannot be projected onto, so the gesture is "how far up the screen
+have you dragged" and nothing else. Up is away, the direction the old `Send Back (Z+)` button named,
+at a tenth of a unit every ten pixels — the same step that button took, so a short drag is still a
+nudge. It works from the Z captured on mouse-down rather than from the previous frame, so a drag that
+wanders back over its own start lands exactly where it began.
+
+**Picking happens in screen space**, and it has to, because "what is under this world point" stops
+being the same question as "what is the pointer over" the moment anything leaves the ground. The
+room's ground *is* the world XY plane and the camera is pitched 45° over it, so Z here is height and
+not only sort order: raise an object and it rises up the screen. Two things stayed behind when it
+did. A 2D collider has no Z at all, so it sits on the floor while its art climbs — the game's own
+convention for a raised platform — and the renderer sweep compared a `z=0` world point against world
+XY bounds. A lifted object could only be selected by clicking the empty floor where it used to be,
+while its outline drew correctly around the art.
+
+The outline was the honest one, so the hit test moved rather than the gizmo. Putting the box on the
+ground instead would have dragged the grip and both corner nodes down to the object's feet, trading
+one mismatch for four. The collider is still consulted first, for its precision, but only when the
+object it found is *also* drawn under the cursor — for anything at ground level that is every time,
+so ordinary picking is unchanged; for a lifted object it rejects the collider left behind on the
+floor and the screen-space sweep answers instead. Bounds are projected corner by corner: a pitched
+camera turns a world-aligned box into a skewed shape, and only the eight corners bound it.
+
+**Ctrl works on the handles too**, and not doing so is what made Ctrl-drag look broken. The handles
+sit *on* the object they belong to — the grip right in its middle — and they are UI blockers, so the
+polled Ctrl path never saw a click that landed on one. On anything small there was no bare pixel left
+to grab, and whatever sat under the grip could not be cloned at all. Now any of the three handles
+starts a clone when Ctrl is down, and hands the gesture straight to the tool's own polled drag.
+
+**The panel says what is selected**, because the gizmos move things by numbers that were nowhere on
+screen. A portrait box at the top, then the name, position (with z), scale, and how many scripts
+are on the object, how many more in its children, and how many renderers - enough to tell a prop
+from a structure from a whole nested rig, and to notice when the click walked further up the
+hierarchy than expected. Protected objects say so. There is no rotation row: the view is 2.5D and
+the art is flat, so nothing here is ever turned - the tool refuses to rotate for the same reason,
+and a row that always reads 0 is noise. The numbers follow a drag at 10Hz; they are one label, but a
+label is a text mesh rebuild and the gizmos move every frame. With nothing selected the box says so
+and the readout and *Deselect* go away rather than standing there empty.
+
+The tool also **refuses to pick a trigger**, on both picking paths: the trigger tool draws them,
+lists them and edits their actions, and selecting an invisible volume here meant it could be
+dragged, resized or deleted out from under that tool.
+
+**The portrait is one camera render per change of selection** (`SelectionPreview`), never per
+frame. It is deliberately *not* the thumbnail rig: `EnemyThumbnails` stages a **prefab** on a spare
+layer and reads the pixels back into an atlas, which is right for a catalogue of hundreds and wrong
+for one live object that must not be moved. This points a disabled orthographic camera at the
+object where it stands, frames it on its own renderer bounds, and hands the RenderTexture straight
+to a `RawImage` - no readback, no atlas. It re-renders when the mouse comes up after a drag, so a
+gesture costs one render rather than sixty.
+
+**The plate is a centred square, not a full-width strip.** The render texture is square and the
+`RawImage` inside it always was, but a plate stretched the whole width of the panel around a square
+picture reads as a stretched picture whatever the picture is doing. The row is still full width -
+that is the only width a layout group gives a child it controls - and the plate sits centred inside
+it at the portrait's own shape.
+
+**The selection tint comes off for the shot.** The highlight is a cyan tint on the object *itself*,
+not an overlay, so a portrait taken while it is on is a picture of a cyan object. Rather than reorder
+the calls - the tint is also on during a drag and a flip, both of which re-render - it is lifted for
+the length of one render and put straight back. Nothing observes the gap: no frame is drawn inside it.
+
+**Ctrl-drag copies the selection, not whatever the pointer re-picks.** Picking takes the smallest
+sprite under the cursor, and a room is full of grass, decals and splashes lying over the thing you
+want — so a clone gesture that began on the selected object could quietly copy something else. From a
+handle the answer needs no working out at all, since the gizmo belongs to the selection; from bare
+space the selection still wins whenever the pointer is over it, and only otherwise does the tool pick
+afresh. Ctrl-drag on a selection is not an invitation to re-choose.
+
+**Clones are numbered.** Unity names a copy `<name>(Clone)`, and a copy of a copy
+`<name>(Clone)(Clone)` — a suffix that grows without bound, gets written into the saved blueprint,
+and says nothing except how many times somebody pressed Ctrl. The tool strips it, strips any trailing
+number too (so a clone of `Torch 4` is `Torch 5`, not `Torch 4 2`, and an old `(Clone)(Clone)` name
+lands back on its real stem), and counts up from the copy's own siblings — names only have to tell
+things apart where they sit together, and a room-wide sweep per Ctrl-drag would cost more than the
+answer is worth.
+
+**The tint comes off for a clone, too, and for the same reason as the portrait.** `Instantiate` copies renderer colours
+like any other property, so a clone taken from a selected object was born wearing the highlight -
+and `Select` then recorded those tinted colours as the clone's *originals* and tinted on top. Cloning
+a clone compounded it: each generation came out darker than the last, and none of it washed out on
+deselect, because by then the tint *was* the object's colour. A tint that lives on the object rather
+than over it has to be lifted every time the object is read, and cloning is a read.
+
+**The portrait borrows the room camera's rotation**, and that is what was actually squashing it -
+the square plate and the square `RawImage` were both fixes to the wrong thing. The game's camera is
+**pitched**: `CameraFollowTarget` settles it on `Euler(-45, 0, 0)` and the room's art stands up to
+meet it (`BillboardFacingCamera` and friends), so a sprite that looks upright on screen is a quad
+tilted 45 degrees in the world. A camera looking straight down `-Z` at that quad sees it edge-on and
+draws it at `cos(45)` - about 71% - of its height. Nothing in the UI was ever stretched; the picture
+was taken from the wrong angle. The portrait is not a different projection of the room, it is the
+same view from closer, so it takes the room camera's rotation and measures the subject's extent in
+*that* camera's space - with a pitched camera, world height and screen height are not the same
+quantity.
+
+Two of the thumbnail rig's tricks are borrowed, and both are *undone in the same call* because this
+subject is alive rather than a staged throwaway. The object's layers are swapped to a spare one, so
+the neighbours stay out of the portrait and the background comes out transparent. And its renderers
+are swapped onto unlit copies of their own materials (`EnemyThumbnails.MakeUnlit`, which now takes
+an optional restore list for exactly this) - a dungeon is dark, and a portrait lit by the room it
+stands in is a black square. Nothing else ever observes either change: no physics step, no cull, no
+frame.
+
+**Lights are left out of the portrait**, and this is the price of the unlit swap: a light draws a
+mask of *brightness* rather than a picture - a soft white blob that lightens what it covers - and
+`Sprites/Default` is alpha-blended, so swapping it turned every glow into a solid disc over the
+subject. They come out *before* the framing is measured, too: a halo is usually far bigger than the
+thing it lights, and leaving it in shrank the subject to fit its own glow.
+
+Finding them by **blend factor does not work**, which cost a round trip worth recording. The game
+blends through the third-party **BlendModes** package, and its extensions (`DappleLighting`,
+`Godrays`, `DecalSprite`) declare `_SrcBlend = One, _DstBlend = Zero` - which reads as *opaque* -
+then do the real blending themselves. So the factors say "solid" for precisely the things that are
+not, which is also why they came out as solid discs. The reliable signal is the package's own
+components (any type in the `BlendModes` namespace, or a `*_BlendModeExtension`), with the shader
+families those classes name as a second net, and particle renderers excluded outright - a particle
+system frozen on whatever frame the room left it on is not a portrait of anything. The game's own
+stencil lighting is a third: an `IStencilLighting` component owns a *child* mesh renderer holding
+the light's decal quad, which is another brightness mask - and one drawn against a stencil buffer
+that nothing fills in a single-camera render.
+
+**And the smear that survived all of that was not a light at all - it was the subject twice.** Every
+lit sprite in the game grows a hidden twin: `StencilLighting_ExcludeSprite.Start` builds a child
+called `ExclusionRenderer` carrying a copy of the same sprite on the `Lighting_NoRender` layer, and
+the only thing keeping it out of the frame is the main camera's culling mask. `Restage` swept *every*
+child onto the portrait layer, which promoted that twin into view wearing the exclusion material,
+drawn over the real one. So the portrait now takes the room camera's `cullingMask` as its rule:
+a renderer on a layer the player's camera does not draw is not photographed either.
+
+**Right-click deselects**, from anywhere in the room rather than from one spot in the panel — so the
+*Deselect* button is gone. It also had to appear and disappear with the selection, which moved
+everything under it every time something was picked. Polled rather than taken from the EventSystem,
+like every other right-click in the editor: this game installs Rewired's pointer module, which drops
+the right button. It is skipped over the editor's own panels, since a right-click there is aimed at
+the panel and dropping the selection out from under the controls being used on it would be a
+surprise.
+
+**Flip is a checkbox, not a button.** Flipped is a state of the thing, and a button gave no way to
+see whether what you were looking at was flipped already. It *sets* the sign rather than negating
+it, so the box and the object cannot drift apart. There is no delete button - `Del` does it, and
+the button sat one slip away from the controls above it.
 
 **Notes**
 
@@ -142,8 +314,32 @@ Also offers send-back / bring-front (Z nudge) and horizontal flip.
 
 ### Shape
 
-Spawns and edits `SpriteShapeController` terrain, and keeps its collision in sync. Add/move/delete
-spline points, pick a profile, toggle per-shape collision, show the baked collision outline.
+Spawns and edits `SpriteShapeController` terrain, and keeps its collision in sync. Ctrl-click adds a
+spline point, drag to move one, right-click to delete it; pick a profile, toggle per-shape collision,
+show the baked collision outline.
+
+**Z does not layer sprite shapes**, which is why the depth buttons went and no purple node replaced
+them. The game stacks shapes with the renderer's **sorting layer and order in layer**, and leaves Z
+at a rounding nudge: `GenerateRoom.CreateSpriteShape` builds every room shape at `z = 0.0001` and
+then sets `sortingLayerName = "Ground"` and `sortingOrder = -1`, and where the game needs to know
+which shape is on top at a point it compares `spriteShapeRenderer.sortingLayerID`. Unity draws in
+that order too — sorting layer, then order in layer, and only then camera distance — so a Z nudge
+reaches the weakest mechanism available, and every shape the tool makes is a clone of one template
+sharing one layer and one order. Hence "moving it in Z barely did anything".
+
+**The shape list is a list, not a dropdown**, and it does the work of three controls: click a row to
+edit that shape, `-`/`+` to move it behind or in front of its neighbours, `X` to delete it. A
+dropdown could only answer the first, and the buttons beside it acted on "whatever is selected" — so
+you had to read the dropdown to learn what they were about to do. `-`/`+` move **one shape one step**
+rather than renumbering the list: the room's own generated shapes are in there on orders the biome
+chose, and tidying the numbering would restack terrain the author never touched. Order is saved as a
+**nullable** `SortingOrder`, so a map written before this says nothing rather than saying zero and
+keeps the order it inherits from the template — which is what those maps have always looked like.
+
+The list and its *New Shape* button sit at the **bottom** of the panel, boxed in a scroll view.
+Everything above them acts on the shape the list picked, so reading top-down as "settings, then the
+things they apply to" was backwards — and a list that grows is the one thing on the panel that should
+not be shoving the fixed controls around.
 
 **Notes**
 
@@ -204,9 +400,106 @@ prefab in the Addressables catalog, grouped by folder two levels deep.
 - Props are pooled spawns, so the room snapshot resolves them back to their path without this tool
   tracking them. Cursor ghosts are live pooled objects and are explicitly excluded from snapshots.
 
+**The cells scroll in a box of their own** (`CreateIconGrid(scrollHeight:)`), so the search field
+and the group picker above them never leave the screen. A catalogue of hundreds used to grow the
+tool's own column past the panel, and reaching the search meant scrolling back up through
+everything you had just scrolled down through. The hovered-name caption stays pinned under the box.
+Short lists (Load Map) keep the old grow-to-fit behaviour. Wheel handling needed nothing: the
+editor's `ScrollUiUnderPointer` walks scroll rects back to front, so the inner box wins over the
+column it sits in.
+
+The `scrollHeight` is a **ceiling, not a size**: the box is as tall as its rows need and no taller,
+so a group of three icons does not sit in a pane of empty black. The height is worked out from the
+cell count rather than measured, because cells fill in over several frames and a rect that has not
+had a layout pass yet measures zero. `OptionsMaxHeight` went up to 940 to clear a full box plus the
+controls around it - at 820 the column those sit in started scrolling, which is the one thing boxing
+the cells was meant to prevent.
+
+**Setting the `LayoutElement` is not enough to make the box shrink**, and this one took three goes.
+The editor answers `RequestOptionsResize` with `ForceRebuildLayoutImmediate` on the tool's option
+column - and that walk never reaches inside the box. `LayoutRebuilder` descends into a child only if
+the rect it is standing on carries a layout controller of its own, and a `ScrollRect`'s **Viewport
+carries nothing but a `RectMask2D`**. The walk stops dead there, so the grid of cells underneath,
+with its own `ContentSizeFitter`, is never re-measured from above; it gets there on its own dirty
+flags eventually, but by then the box had already been sized against the stale measurement and
+nothing came back to correct it. A box that had been tall for a big group stayed tall for the small
+group after it. So `MapEditorGrid` rebuilds the inner column **by name**, two frames after the target
+height changes - late enough that the previous group's cells are actually gone (`Destroy` defers to
+end of frame) and the staggered fill has stopped adding to this one. It also puts the box back to
+the top on `Clear`, or the handful of icons a short list does have sit above the viewport and have to
+be scrolled back up to.
+
+**The scrollbars are a hairline red rail** rather than the old fourteen-pixel grey slab, which was
+eating into the last column of icons: two pixels wide, the editor's accent for the handle, and a
+plain rectangle - rounding a rail that thin only makes it look chewed. The viewport reserves exactly
+the rail's width plus two, so the cells get the rest, and `ScrollbarVisibility.AutoHide` takes the
+rail away entirely when the content fits. `AutoHide` rather than `AutoHideAndExpandViewport`,
+because the viewport's inset is set by hand and that mode would fight it for the two pixels.
+
+Shrinking the box needed more than setting its `LayoutElement`: a box that had been tall for a big
+group stayed tall for the small one after it, because the fitters above it had already settled at
+the larger size and nothing on the way down told them to look again. The rect is now resized
+directly and its parent layout marked dirty by hand, alongside the panel resize request.
+
+**Search by name** (`MapEditorSearchRow`, shared with the Enemy and NPC tools). The catalog runs to
+thousands of prefabs across dozens of folders, and what you are after is nearly always known by
+name, so the top of the panel is a search field. It matches **every** group at once - the catalog is
+filed by Addressables folder and the same word turns up in several of them - and shows the first 60
+hits with the total in the status bar. `Enter` leaves
+typing with the filter applied, `Escape` clears it and puts the group view back, and **clicking a
+result ends the search too** (`RuntimeMapEditor.ConfirmPrompt`, the same path the key takes) - so
+what you searched for can be placed straight away instead of being confirmed and then clicked.
+
+**Hovering a cell blows its icon up beside the panel.** A cell is sixty-odd pixels of a prop that
+may be a hundred times that on the ground, so half the catalog reads as the same brown smudge. The
+big preview is drawn from the sprite the cell already holds - so it costs a texture draw and nothing
+else - and it needs no click, unlike the ghost that appears in the room once something is selected.
+It lives on `MapEditorUI`, so every icon grid gets it: structures, props, enemies, NPCs and the
+saved-map screenshots.
+
+Text entry in this game is the hard part, and three things had to be true before it worked:
+
+- **The E key was firing buttons.** `MMButton.OnPointerEnter` hands the hovered button to
+  `UINavigatorNew` as its current selectable, and that navigator polls Rewired's accept binding
+  from its own `Update` and confirms the selectable directly - it never touches the EventSystem, so
+  suspending the EventSystem did nothing about it. Worse, `OnPointerExit` never clears the
+  selectable, so the last button the cursor passed over stayed armed indefinitely and `E` pressed
+  anywhere fired it. Every editor button is now built with `PreventMouseSelection = true`, so the
+  navigator is never handed one: clicks are unaffected (`OnPointerClick` does not consult it) and
+  the hover state it skips is Unity's, which the editor does not use.
+- **The navigator is locked while typing.** `PreventMouseSelection` only covers *our* buttons; a
+  game button that was already the navigator's selectable would still answer `E`, and the cancel
+  binding would still fire. `UINavigatorNew.LockInput` is the switch the game itself uses to gate
+  that whole block. It is only ever cleared by the editor if the editor set it - a stranded lock
+  takes every menu in the game down until a restart - and it is cleared defensively on teardown
+  alongside the modal-state reset.
+- **The EventSystem stays on.** Suspending it was the original guess at the E key, it never fixed
+  that, and it cost twice over. It never came back: `EventSystem.current` is the first *enabled*
+  EventSystem in the scene, so switching off the only one makes `current` null - and the restore
+  path asked for `current` again, found nothing, and switched nothing back on. The panel stayed
+  dead until the scene changed, which is what "the search never gives control back" was. And a
+  search field wants its grid **live** underneath it: results are there to be hovered for a big
+  preview and clicked to pick one, and neither reached the panel while the EventSystem was off.
+  What the submit key actually needs is a *target*, so the prompt clears
+  `EventSystem.currentSelectedGameObject` every frame instead - a key press has nothing to land
+  on, and mouse clicks, which never needed a selection, keep working.
+
+With those three, `RuntimeMapEditor.PromptText` is a usable field: it reads `Input.inputString`
+(characters and backspace, so no caret, selection, paste or IME), and `Update` returns immediately
+after reading the keystroke, so no editor shortcut, camera key or wheel tool-switch sees it. It
+takes an `onChanged` callback for filtering as you type and can draw somewhere other than the title
+bar.
+
+Repopulating is **debounced through a coroutine** rather than the tool's `OnUpdate`, which does not
+run while a prompt is open. Without the delay every letter would start and cancel a screenful of
+async icon loads.
+
 ### Enemy
 
-Spawns enemies, vanilla and custom, from a thumbnailed grid grouped by catalog folder.
+Spawns enemies, vanilla and custom, from a thumbnailed grid grouped by catalog folder, with the
+shared **search field** (`MapEditorSearchRow`) above it. Search covers every group at once plus
+whatever mods have registered - the catalog is filed by biome, and the enemy you want is rarely in
+the biome you happen to be standing in. Hovering a cell blows its thumbnail up beside the panel.
 
 **Notes**
 
@@ -253,7 +546,11 @@ values that every material samples — otherwise the icons wore the room's curre
 ### NPC
 
 Spawns non-combat characters from three sources: standalone NPC prefabs, characters extracted from
-room prefabs, and mod-registered custom NPCs.
+room prefabs, and mod-registered custom NPCs. The shared **search field** sits above the grid, with
+one honest limit: NPCs are found by opening room prefabs, which is slow enough to be indexed on
+disk, so a search covers **what has been scanned so far** plus the custom list rather than
+pretending to have looked everywhere. Open a group once and its characters are searchable from then
+on, in this session and the next - the index is saved. An empty result says which it was.
 
 **Notes**
 
@@ -313,15 +610,52 @@ per-room "clear all on equip" rule.
 Boxes the player can step into, each running an ordered list of actions.
 
 **Placing and editing.** Click empty space to drop a volume, click one to select it, drag its
-centre to move or its corner to resize. Width/height sliders, *Fire once*, *Lock control while
-playing*, *Show volumes in play*, Re-arm All, Delete Selected, Clear All. Volumes are drawn while
-the tool is open, and optionally during play.
+centre to move or its blue corner node to resize. *Fire once*, *Lock control while playing*, *Show
+volumes in play*, Re-arm All. Volumes are drawn while the tool is open, and optionally during play.
 
-**Clear All asks twice.** The first press arms the button — it renames itself to `Delete all N?
-Click again` and warns in the status bar — and a second press within 4 seconds does the wipe. The
-window lapsing, or leaving the tool, puts the label back. Two presses rather than a dialog because
-the panel has no modal of its own, and the wipe is not undoable: it clears the undo stack along
-with the triggers.
+**Ctrl-drag copies a trigger whole** — size, *Fire once*, *Lock control* and the entire action
+sequence. Rebuilding a ten-step sequence by hand to put the same thing in two doorways was the
+slowest job in the tool. The actions are round-tripped through their *saved* form rather than copied
+field by field: that is the shape they are already written and read in, so a copy cannot quietly
+share a reference with its source, and an action type added later cannot be forgotten here. An action
+that pointed at its own trigger is retargeted to the copy's; one naming a *different* trigger is left
+alone, because that is a reference to elsewhere in the room and the copy means it just as much. Ctrl
+on a handle clones too — the handles cover the volume they belong to — and the selection wins as the
+source whenever the pointer is inside it, so a copy started on the trigger you are working on cannot
+grab the one stacked underneath.
+
+**No Delete Selected, and no Clear All.** `Del` already deletes, and it is the shortcut the panel's
+own list advertises. Wiping every trigger in the room is a *clearing* job, so it moved to the Clear
+tool to sit with the others rather than at the bottom of the panel used to author one trigger at a
+time — arming and all.
+
+There are **no width/height sliders, and no readout put in their place**. The corner node sizes the
+volume on the volume itself, which is the thing being sized; two sliders that had to be found in the
+panel, dragged, and checked against a shape somewhere else on screen were a slower way of making the
+same edit. The selected trigger's line already carries its size.
+
+**A volume is coloured by what it does.** Cyan is fire-once — the default and the common case — and
+**violet** is a trigger that re-arms on every entry, so a room full of boxes says which of them will
+go off again without clicking through them one at a time. The distinction shows only while a volume
+is idle: selected (yellow), firing (green) and spent (grey) are worth seeing whatever kind of trigger
+they belong to, and a repeating trigger is never spent anyway. Toggling *Fire once* re-tints the
+volume immediately — the colour is a reading of the toggle, so it cannot lag behind it.
+
+*Clear All Triggers* — now in the **Clear** tool — **asks twice.** The first press arms the button:
+it renames itself to `Delete all N? Click again` and warns in the status bar, and a second press
+within 4 seconds does the wipe. The window lapsing, or leaving the tool, puts the label back. Two
+presses rather than a dialog because the panel has no modal of its own, and the wipe cannot be taken
+back. It is the only armed button on that panel, and that is worth being honest about: the sweeps
+beside it are just as destructive and have never asked. Arming them too is a bigger decision than
+moving a button, so it was left alone.
+
+**The action list scrolls in a box of its own** (`MapEditorUI.CreateScrollBox`), so a long sequence
+cannot push the controls above it off the panel. The box is as tall as its rows need up to a ceiling,
+and its height is worked out from the row *count* rather than measured — a rebuild destroys its old
+rows with `Object.Destroy`, which defers to end of frame, so anything measured in the same breath
+measures the rows on their way out as well as the ones replacing them. It also returns to the top on
+every rebuild, or a shorter list leaves its rows above the viewport. The Shape tool's list uses the
+same widget.
 
 **Action list.** *Add action* offers the action types; a second dropdown asks that type's follow-up
 question and hides again once answered. Rows are numbered, reorder with `^` / `v` and delete with
@@ -401,14 +735,28 @@ be saved as a named **lighting profile** (Save As Profile → name dialog), stor
 `LightingProfiles.json`, and applied to any other map from the Profiles dropdown — or at play time
 by a trigger's *Apply lighting* action.
 
+**There is no Capture Biome Lighting button, because opening the tool already does it.** `OnEnter`
+captures the live biome into an untouched blueprint, so the sliders open showing what the room is
+actually doing, and the first slider moved flips the map from following the biome to overriding it.
+The button's only unique effect was that flip *without* a value change — "pin this exact biome look" —
+which a nudge of any slider gives. The state note went with it: it said "Following the biome" or
+"Overriding the biome" for a fact the sliders and the room in front of you already show.
+
+**Reset To Biome puts the sliders back too**, which it used to skip. Left where the override had
+them, the next slider touched would snap the room straight back to the look just discarded, and the
+panel would meanwhile be describing a room that no longer looked like that. The values come from the
+snapshot taken *before* anything overrode the lighting, not from the manager: `ClearOverride` fades
+back over several seconds, so reading the manager at that moment would catch a frame from the middle
+of the fade and pin the knobs to a colour the room is only passing through.
+
 **Notes**
 
 - Applying a profile copies its values onto the map (and the blueprint saves them as its own), so a
   profile deleted later does not hollow out maps that used it. Only a trigger's *Apply lighting*
   action references a profile by name at run time — a blueprint shared to a machine without that
   profile logs a warning and skips the action.
-- Saving a profile while "following the biome" captures what is currently on screen first, so the
-  profile holds a real look rather than defaults.
+- Saving a profile while still following the biome captures what is currently on screen first, so
+  the profile holds a real look rather than defaults.
 
 - Lighting is not an object that can be placed: the game drives it from a `BiomeLightingSettings`
   asset applied by `LightingManager`, so the tool edits a settings instance of its own and pushes
@@ -467,10 +815,40 @@ Lists the saved blueprints under `CustomNodeBlueprints/` with their save-time sc
 the chosen one. Loading clears the room, rebuilds it, closes the editor and walks the player in
 through the entrance door; press `F4` afterwards to keep editing.
 
+**It is a screen, not a panel**, and that follows from what a snapshot is. A room snapshot is a
+picture of a whole room, and the reason to show one at all is that a room is *recognised* faster
+than its name is read — but two of them at 168px in a side panel gave that up: at that size every
+dungeon room is the same brown smudge, so the name did the work and the picture was decoration. Full
+screen the pictures are large enough to pick from, each card carrying the room's name and when it
+was last written underneath. Picking the tool opens the browser directly (a panel holding one button
+is a door, and a door needs no handle); `Esc`, the corner button and `F4` all close it, `F4` via the
+same `IMapEditorScreenTool.ScreenStepBack` the dungeon map uses, so it closes the browser before it
+closes the editor.
+
+**Sorted newest first**, from the blueprint file's own write time — the blueprint records no date and
+the file system already knows. Working on a room usually means working on the one last saved, so the
+list needs no reading most of the time. Dates within a day read as a clock time, so the ones you are
+actually iterating on are legible at a glance rather than being four identical timestamps.
+
 **Notes**
 
-- Screenshots are megabytes of texture each, so they are read as cells appear and dropped when the
-  panel closes.
+- Screenshots are written at **1280 wide** (height follows the screen's aspect; a narrower screen
+  is written as it is, since the downscale never enlarges). 512 was enough for a grid cell and not
+  enough for the hover preview, which was already upscaling it on a high-resolution screen. The
+  cost is roughly six times the pixels: about 3.7MB of texture per preview once decoded, against
+  600KB before. They are megabytes of texture each, so they are read as cells appear and dropped
+  when the panel closes.
+- **A snapshot on disk keeps the width it was taken at.** Saving a map again is what re-takes it, so
+  blueprints written before this keep their old screenshot until they are next saved.
+- **They are decoded off the main thread.** A room snapshot is a full-screen png and
+  `Texture2D.LoadImage` is a blocking decode of several milliseconds; a few in a row was the stutter
+  when the panel opened. `UnityWebRequestTexture` against a `file://` url decodes on a worker thread
+  and hands back a finished texture, so the frame only pays for the upload - the same shape as the
+  async icon loads the structure and enemy browsers use. They are requested `nonReadable`, since
+  nothing reads the pixels back and a readable copy doubles the memory of the heaviest thing in the
+  editor. A token is bumped whenever the list is rebuilt or the tool exits, so a snapshot still
+  decoding for a grid that no longer exists throws its texture away instead of filling a dead
+  cell.
 - A manual load cancels any running level: a stale run advancing on the next door would teleport
   the player into an unrelated room chain.
 
@@ -679,29 +1057,176 @@ is one level blueprint, and the graph of them is the whole run. Saved to
 `CustomDungeonMaps/<name>.json`, and every saved file registers a custom dungeon at startup — so the
 map *is* the dungeon, and there is no second file to keep in step with it. **Enter Dungeon** runs it.
 
-Four buttons, because the others turned out to be the same job twice. **Save Dungeon** opens the
-game's name dialog — the same one the map save and the lighting profiles use — prefilled with the
-current name, so it is also the rename (confirming a different name writes a second dungeon and
-leaves the first alone) and it carries its own overwrite warning, which is what the old
-press-twice-to-confirm was for. A separate *Preview Map* button went too: the grid overlay already
-draws the graph with the game's own node icons, and the only thing the real selector added was the
-jitter it applies on top.
+**Save Dungeon** opens the game's name dialog — the same one the map save and the lighting profiles
+use — prefilled with the current name, so it is also the rename (confirming a different name writes a
+second dungeon and leaves the first alone) and it carries its own overwrite warning, which is what
+the old press-twice-to-confirm was for.
 
-The side panel keeps the usual shape (new / open / rename / save / enter / grid size); the graph is
-edited on its own **grid overlay** behind *Edit Nodes*. **Left click places or selects; right click
-links.** Left-clicking an empty cell places a node, left-clicking a node selects it (and again
-deselects), and right-clicking a second node links or unlinks it to the selected one. Placing a node
-one layer from the selected one links them straight away, which is how a path gets laid out in one
-click per step. The node type picker retypes the selected node, or sets what the next placed node
-will be.
+**Preview Map** opens the real thing: `UIAdventureMapOverlayController`, the screen the player is
+shown at an exit door, instantiated from its own prefab and handed the `Map.Map` that
+`DungeonMapBuilder.Build` makes of the authored one. `disableInput` is set, because it is a look and
+not a run, and `MapManager.CanShuffle` is switched off first — the shuffle prompt is one keypress
+away on that screen and it would regenerate the run's map over ours. `Esc` returns.
 
-Left click deliberately never links: clicking a second node used to mean "join these" while a
-selection was live and "select that one" otherwise, which is the same gesture doing two things.
-Right click is polled from `Input.GetMouseButtonDown(1)` and hit-tested against the cell rects
-rather than taken from the EventSystem — this game installs Rewired's pointer module, which the
-editor already works around for left clicks, and a link gesture that silently never fired would be
-worse than a hit test of our own. The overlay canvas is `ScreenSpaceOverlay`, so the null camera
-passed to `RectangleContainsScreenPoint` is correct.
+It is offered **only when the map would play**, and that is a vanilla constraint rather than a
+choice: `OnShowStarted` indexes `_adventureMapNodes[0]`, takes `GetFirstNode()` as a `.First()`,
+dereferences `GetNextNode(point).point`, and skips every node with no links — so a map still being
+built is a map that screen cannot draw, and a node just placed would be invisible on it. That is why
+the editing view below exists at all, and why it is the one that holds every state before the map is
+finished. `Hide` only switches a menu off, so the instance is destroyed on the way out; without that
+every preview would leave another dead map screen in the scene.
+
+#### The map screen
+
+The dock panel is one question — which dungeon — and picking one goes straight to the map screen
+(`DungeonMapCanvas`); closing the screen closes the dungeon and returns to that list, so there is no
+half-open state and no *Edit Map* / *Close Dungeon* pair to keep in step. Closing with edits that
+were never written says so in the status bar. The screen is the world map's screen with dungeon
+nodes on it:
+
+- **The room editor stands down while it is up.** This is the change that made it stop reading as a
+  panel. `DungeonBuilderTool` implements `IMapEditorScreenTool`, and while `OwnsScreen` is true the
+  host hides its own title, dock, options panel, status bar and shortcut list
+  (`RuntimeMapEditor.SetOwnChromeVisible`), stops the camera keys panning the room behind it, stops
+  the wheel switching tools, and sends `Ctrl+S` to the dungeon instead of to the room. `F6` is a
+  no-op there: it works by switching the whole canvas off, and this screen hangs from that canvas.
+  Before this, the room editor's furniture sat behind a translucent backdrop and every screenshot of
+  the dungeon builder had another editor showing through it.
+  The chrome is collected rather than named one at a time — everything parented to the canvas by the
+  time `CreateUi` finishes is the host's own; anything added later belongs to a tool.
+- **The map is the screen and the chrome floats over it.** Content stretches the whole canvas; the
+  map name sits top-left and an `X` top-right, the options panel is a floating plate in the top-right
+  corner at the world editor's own metrics (360 × 940, `(-14, -70)`) with a collapse control in its
+  title bar, the shortcut list is bottom-left in the same key-cap style, the dock is a row of icons
+  along the bottom (*Preview*, *Save*, *Enter* — there is no *Done*, because `Esc` and the `X`
+  already close), and the status bar floats above it between the two. Every number here is
+  `WorldMapEditor.BuildUi`'s, so the two map screens are one screen with different content on it.
+- **One way out.** `Esc`, the corner `X` and `F4` all go through `RequestClose`: it dismisses the
+  confirm strip if one is up, otherwise asks about unsaved work, otherwise closes. The prompt is the
+  world map's own strip - *Save & close* / *Discard* / *Cancel*, red-bordered, sitting clear of the
+  dock and status bar - and while it is up the map ignores every click and key but `Esc`. `F4` is
+  routed through it too (`IMapEditorScreenTool.ScreenStepBack`), so closing the editor cannot take
+  an unsaved dungeon with it; a second `F4` then closes the editor as usual. *Save & close* only
+  closes if the save actually happened, since Save refuses an unplayable map and closing anyway
+  would be a discard nobody asked for. A map with no nodes counts as nothing to save.
+- **The status bar is two left-aligned lines**, the verdict above and the running commentary below.
+  Side by side they fought for the same middle of the bar, and a long message under a long problem
+  simply drew over it.
+- Column labels are given the height their wrapped text actually needs (`FitHeight`, measured with
+  `GetPreferredValues` since the column has had no layout pass yet). `MapEditorUI.CreateLabel` pins
+  every row to one line, so the three-line summary and the longer validation messages used to draw
+  straight over the widget below them.
+- **The screen is the game's own too.** `DungeonMapSkin.CloneChrome` clones the whole overlay prefab
+  and takes out everything belonging to a run in progress — the node and connection containers (the
+  editor draws its own into its own layers), the crown and eye that mark where the player is
+  standing, the shuffle prompt, the goop fade — then strips the scripts and forces the canvas groups
+  to full alpha, since `UIMenuBase` fades them in on a show that is no longer there to happen. What
+  is left is the map screen with nothing on it, hung behind the grid. Any nested `Canvas` goes as
+  well: it would sort against ours rather than inside it, and its raycaster would eat the clicks the
+  editor polls for itself. The DLC map got away with cloning nodes alone because its identity is in
+  its nodes; this screen's identity is its chrome.
+- **The art is the game's own**, cloned from the prefabs the in-run map screen is built from — the
+  same trade the world editor makes with the DLC map. `DungeonMapSkin` mirrors `CustomMapSkin`:
+  `UIManager.AdventureMapNodeTemplate` is harvested (loading `LoadDungeonAssets()` first if some
+  other route got here before the game did), cloned under an inactive holder, and stripped of every
+  vanilla script — they expect a live run, a `MapManager` and a node the player is standing in.
+  `DungeonNodeVisual` drives what is left, the twin of `CustomNodeVisual`: it reads `_icon`,
+  `_imageOutline`, the outline materials and the selection sprites off `AdventureMapNode` by
+  reflection before that component is destroyed, then draws **every node as reachable** — the run
+  has not been played, so a grey node would only be saying "you are not here yet". The furniture the
+  stripped `Start` would have hidden (the start pin, the quest alert, the modifier icon, the flair)
+  is switched off by hand; the start pin goes back on the bottom node, which is the one thing about
+  a node the map itself says.
+  Node art is drawn at half the size the prefab is authored for (it is built for a map at 300 units
+  a step), and a boss is 1.5× as `AdventureMapNode.Configure` makes it. **Nodes are not captioned
+  with names** — the game's own map does not name a node, so a name here would label something the
+  player never sees. Every node is captioned with what it *is*, which layer it came out on, and
+  what it *plays* instead: "Wood (L1) - vanilla floor" in grey, or the bound level in the game's
+  completed-green. The layer marker earns its place because the layer is **derived** from where the
+  node was dropped — it is the one thing about a node that the node itself cannot show, and it is
+  what decides whether two nodes are on the same step of the run. Ids still exist, but only so a
+  link has something to name; nothing on screen shows one, and the status bar, node picker and
+  validator all name a node by its type and layer.
+- Links are the game's `MMUILineRenderer` wearing the dotted material the map draws an unwalked
+  connection with (`_connectionTexture` and `_idleDottedMaterial`, read off the overlay prefab), at
+  the same width-to-spacing ratio — 7.5 at a pitch of 300. A link touching the selection takes the
+  editor's accent. Each line is **kept and re-aimed rather than rebuilt**, so it stays attached to a
+  node through the whole drag instead of snapping to it on release. The renderer keeps its points on
+  a branch object that a component added at runtime may never have been handed, and the `Points`
+  setter goes straight at it — so a line is aimed once inside the build guard, where a throw can
+  still fall back to a plain one, rather than mid-redraw where it would abort the whole pass.
+- **Both have a fallback**, because a view that draws nothing is worse than one that draws plainly:
+  no vanilla node prefab means the blueprint's sprite on a plate (and failing that, the type's name),
+  and no dotted material means a tiled dash. Neither should happen where this tool opens — F4 implies
+  a dungeon scene, and the dungeon scenes are exactly where the game loads these Addressables.
+
+#### Free placement, derived grid
+
+**Nodes go where they are put.** `Ctrl+click` places one, left-click selects and drags, right-click
+links the selection to a node or cuts a line under the cursor, `Del` deletes, `Esc` closes. Those are
+the world node tool's gestures, key for key, because it is the same job. Placing with something
+selected links the two immediately — a path in one gesture per step, and one undo entry, not two.
+
+That is possible because **the grid is no longer what is authored**. A node stores `PosX`/`PosY` and
+a list of child ids; `DungeonMapBuilder.Layout` resolves those onto the integer `Map.Point` grid the
+game addresses nodes by, at the moment the map is built or played:
+
+- Nodes are gathered into **rows by height** — within `LayerBand` (70 units) of each other vertically
+  is the same row — and each row is numbered from the bottom.
+- Inside a row, nodes keep their **left-to-right order** and are numbered from the left.
+- So every node gets a point of its own. That matters more than the arrangement does: a point is a
+  node's identity in `GetNode`, `NodeFromPoint`, `outgoing`/`incoming` and the level bindings, and
+  two nodes sharing one would silently become the same node.
+
+The preview therefore shows the *rows* that were drawn, not the exact pixels: vanilla lays a node at
+`new Vector2(point.x, point.y) * 300f` and `Point` is a pair of ints, so nothing finer survives into
+the game whatever is authored. Free placement is for the person drawing the run; the resolution is
+what the renderer will accept.
+
+**Nothing constrains a link any more.** The old rule that links may only join neighbouring layers
+came from the grid, and checking the decompiled source it was ours rather than the game's — the only
+place `point.y + 1` appears is the *Adventure Map Freedom* tarot card. `GetNextAdventureMapNodes`
+just walks `outgoing`, so any node may lead to any other.
+
+**Ids, not cells.** Links name a node id, so a node can be dragged anywhere without a single link
+being rewritten — the move is one field and one undo entry. A map saved by the old build is migrated
+on load (`CTDungeonMap.Migrate`): ids are minted, cells become positions at the pitch the old grid
+drew at, and `(x,y)` links become id links. The legacy fields are read and never written again.
+
+Right click is polled from `Input.GetMouseButtonDown(1)` rather than taken from the EventSystem —
+this game installs Rewired's pointer module, which the editor already works around for left clicks,
+and a link gesture that silently never fired would be worse than a hit test of our own. The canvas is
+`ScreenSpaceOverlay`, so the null camera passed to `ScreenPointToLocalPointInRectangle` is correct.
+Picking is geometric, past the buttons, as it is on the world map.
+
+**A polled surface must not close an open dropdown itself.** While `MapEditorUI.TransientUiOpen` is
+true the map ignores every click and key (bar `Esc`, which closes the list) and lets the list's own
+full-screen catcher do the closing. Closing it from the polled handler instead *broke the widget*:
+a list item's button fires on mouse **up**, the polled handler fires on mouse **down**, so the list
+was already destroyed by the time the click had anywhere to land and picking an option did nothing
+at all.
+
+**Everything is undoable** through the room editor's own `Ctrl+Z` — place, move, link, cut, clear,
+delete, rename, retype and rebind each push a closure onto the shared `MapEditorHistory`. Each one
+begins by checking the map it captured is still the one open, and `MapEditorHistory.Undo` treats a
+`false` as "skip this entry", so entries belonging to a dungeon that has since been closed dissolve
+instead of corrupting the one that replaced it.
+
+**The verdict is live.** `DungeonMapBuilder.Issues` returns every rule the map breaks and, where the
+rule is about a node, which node — so the offending ones wear a red halo (orange for advisories) and
+the bar's right-hand badge reads either the first blocking message or a green **Playable**. `Validate`
+and `Advisory` are the first blocking and first advisory entry of that list.
+
+**The status bar says one thing at a time.** Hovering a node reads it out; everything the editor says
+of its own accord (placed, linked, saved) sits underneath and comes back when the cursor leaves. A
+message also re-reads what is under the cursor as it is written, because placing or deleting changes
+that without the cursor moving — otherwise the hover would talk over the sentence just printed.
+
+Two accessors exist for this view and are worth knowing about if another full-screen surface is ever
+built: `RuntimeMapEditor.WorldClicksBlocked` (because `PointerOverUi` returns true *everywhere*
+inside a surface whose backdrop is a registered blocker, and so cannot tell a widget press from a
+click on the surface) and `MapEditorUI.TransientUiOpen` (an open dropdown list stands outside every
+blocker rect, so a polled click has to close it rather than act on what is underneath it).
 
 **Where the game's map lives.** `MapManager` (namespace `Map`, an embedded copy of the open-source
 Slay-the-Spire map package: `MapConfig`, `MapGenerator`, `Map`, `Node`, `NodeBlueprint`, `NodeType`,
@@ -710,13 +1235,16 @@ turns a node into rooms: it reads `node.blueprint.RoomPrefabs` and feeds `BiomeG
 seam level playback rides.
 
 **Nodes play levels.** Each node is bound to a `CTLevelBlueprint` from the Level tool through the
-overlay's *Plays level* dropdown; bound nodes carry a green corner badge. Entering one generates
-that level's room chain instead of what the node's type would have produced. A node left on
-*Vanilla floor* behaves exactly as the game intended, so a run can mix both.
+map screen's *Plays level* dropdown; a bound node writes the level's name under itself in green.
+Entering one generates that level's room chain instead of what the node's type would have produced.
+A node left on *Vanilla floor* behaves exactly as the game intended, so a run can mix both.
 
-**The bottom node is the first floor**, and there can only be one of it — the game does not let the
+**The lowest node is the first floor**, and there can only be one of it — the game does not let the
 player choose where to start: its renderer marks `GetFirstNode()` visited and offers that node's
-links, so a second bottom node would be drawn and never reachable. The exit door then decides:
+links, so a second node on the bottom row would be drawn and never reachable. `GetFirstNode()` is a
+`.First()` over the node list, so the builder emits nodes in layout order and the start is the
+leftmost node of the lowest row; it wears the vanilla start pin in the editor, and the validator says
+so when something else is down there with it. The exit door then decides:
 
 | Where the run is | What the exit door does |
 | --- | --- |
@@ -814,27 +1342,43 @@ links, so a second bottom node would be drawn and never reachable. The exit door
 - `CTLevelDungeon` (the Level tool's *Play Level*) clears the installed map on entry, so a map left
   behind by a *Preview Map* press cannot turn a single level's exit into a node picker.
 
-**Notes on the grid overlay**
+**Notes on the layout**
 
-- **It is a grid because the renderer is.** `MakeMapNode` positions every node at
-  `new Vector2(point.x, point.y) * 300f + Random.insideUnitCircle * 50f` — the integer cell is the
+- **The renderer is a grid, so something has to be.** `MakeMapNode` positions every node at
+  `new Vector2(point.x, point.y) * 300f + Random.insideUnitCircle * 50f` — the integer point is the
   position, `Node.position` is not read at all, and the jitter is re-rolled every time the map
-  opens. Authoring finer than a cell would be discarded on the first open.
+  opens. What changed is *where* that grid comes from: the editor authors positions and derives the
+  grid, instead of making you author the grid.
 - Editing happens on the editor's own canvas rather than inside the vanilla overlay, which is a
   `UIMenuBase` built in one pass in `OnShowStarted`, wired into the game's menu stack and Rewired
   navigation, and which pauses the simulation and pulls the camera's far plane to 0.02 to hide the
-  world. The editor is deliberately outside that stack.
-- Layer 0 is the bottom row on screen and the start of the run, matching `point.y`. `outgoing`
-  points up the map (toward the end), `incoming` back down; the builder fills both from the single
-  authored `Outgoing` list, because two stored directions of one fact drift apart.
-- Links only join neighbouring layers. Traversal itself does not check — `GetNextAdventureMapNodes`
-  just walks `outgoing` — but the player moves one layer per step, so a longer link draws a line
-  nothing can use.
-- Save always writes, even when the map is not playable yet; the status bar says what is missing.
-  **Test** refuses, because each rule it checks is a crash or a blank screen in the game's own code:
-  a dangling link is an unchecked `NodeFromPoint` in `MakeLineConnection`; no node on layer 0 makes
-  `GetFirstNode()` (a `.First()`) throw; a node with no links at all is silently skipped by the
-  renderer; and every node has to be reachable from layer 0 or it is drawn but unenterable.
+  world. The editor is deliberately outside that stack — *Preview* instantiates one for a look.
+- Row 0 is the bottom row on screen and the start of the run, matching `point.y`. `outgoing` points
+  up the map (toward the end), `incoming` back down; the builder fills both from the single authored
+  `Children` list, because two stored directions of one fact drift apart.
+- `DungeonMapPlayback` keys its level bindings on the **derived** point, re-deriving the layout with
+  the same function the builder uses rather than storing it. That is safe because `Layout` is
+  deterministic — the sort falls back to the node id, so equal positions still order the same way
+  every time.
+- **Neither Save nor Enter will write or run an unplayable map.** Save used to write anyway and
+  say what was missing, but every saved file registers a dungeon at startup - so a broken one became
+  a dungeon that crashes the map screen the moment somebody picks it. The badge has been saying what
+  is wrong the whole time it was being drawn. Each rule is a crash or a blank screen in the game's
+  own code:
+  a dangling link is an unchecked `NodeFromPoint` in `MakeLineConnection`; a node with no links at
+  all is silently skipped by the renderer; every node has to be reachable from the bottom row or it
+  is drawn but unenterable; and a map that is all one row ends the run at its first exit, since the
+  exit door reads "top row reached" as "the run is over".
+- **The node type list is this scene's config, and so is Preview.** A type without a blueprint has
+  no icon and no `RoomPrefabs`, so the picker offers only what `MapConfig` has — but the default a
+  new node starts on (`MinorEnemy`) is a hardcoded string, and a config without that blueprint would
+  let a whole map be built out of a type it cannot draw. That showed up as *Preview* refusing with
+  "no blueprint for MinorEnemy" while **entering the dungeon worked**, because the dungeon that is
+  entered loads its own config. The pending type is now resolved against what this scene actually
+  has when the screen opens, and any node whose type is missing here raises an **advisory** rather
+  than a blocking issue — the map may well be fine where it is played. `MinorEnemy` is gone from
+  the no-config fallback list for the same reason: the dungeon configs this editor runs in have no
+  blueprint for it, so it drew nothing.
 - The node type list is only the types the loaded `MapConfig` has a blueprint for — a type without
   one has no icon and no `RoomPrefabs`, so it would place a node that cannot be entered. Cell icons
   are the blueprint's own sprite via `GetSprite`.
@@ -1189,6 +1733,8 @@ half-open, visible and permanently unable to take a keystroke.
 | `CustomShapeProfiles.cs` | Disk-loaded SpriteShape profiles (`CultTweaker_*`) |
 | `CTLevelBlueprint.cs`, `CTLevelDungeon.cs`, `LevelPlayback.cs` | Level tier: data, dungeon, run driver |
 | `CustomRoomPatches.cs` | Marks rooms whose contents a blueprint replaced |
+| `Tools/DungeonMapCanvas.cs` | The dungeon map screen: chrome, free-placed node graph, geometric picking |
+| `Tools/DungeonMapSkin.cs`, `Tools/DungeonNodeVisual.cs` | The game's own adventure-map art, cloned and stripped (twins of `CustomMapSkin` / `CustomNodeVisual`) |
 | `../APIHelper/ModContentPaths.cs` | Finds the same content folders inside other mods' `CultTweaker` folders |
 | `Tools/*.cs` | One file per tool, plus shared gizmos, ghosts and protection rules |
 | `Tools/TriggerActions.cs` | Trigger action model and the sequence runner |
@@ -1288,15 +1834,21 @@ The editor has its own dock across the bottom, in the room editor's shape and me
 from the F4 room editor's; the two can never be open at once), with the same accent border around
 the selected tool. Its options panel carries the room editor's title bar and `-`/`+` collapse, so
 the quarter of the map it covers can be worked on without leaving the tool. There is no Play
-button: **F6** leaves edit mode. **World File** (save/load/new, background colour, parallax strength, wipe
-progress), **World Layers** (click a layer on the map or its row to select it — the selection wears
-a frame — then drag to move, ctrl+drag to clone, scale, rotate, parallax, flip, labelled spine
+button: **F6** leaves edit mode.
+
+The dock runs **World Nodes**, **World Layers**, **World File**, and opens on the first of them: a
+map is made of its nodes, layers dress it and the file tool is housekeeping, so the editor should
+land on the thing you came to do rather than on a save button.
+
+**World Nodes** is a node picker, drag, name, icon type, visibility, destination, keys, count gates
+and links. **World Layers** selects a layer by clicking it on the map or its row — the selection
+wears a frame — then drag to move, ctrl+drag to clone, scale, rotate, parallax, flip, labelled spine
 animation and skin pickers, a two-step **Add layer** (kind, then which file — the trigger tool's
 action-then-target shape; the second list survives panel rebuilds, so the next sprite is two
-clicks), *Refresh art list* for files dropped in mid-session, `Del` for the selected layer,
-and a layer list with `+`/`-` order and `X` delete for any other), **World Nodes** (a node picker, drag,
-name, icon type, visibility, destination, keys, count gates and links). Ctrl+Z
-undoes placements, moves, clones, deletions, rotations, resizes and links.
+clicks), *Refresh art list* for files dropped in mid-session, `Del` for the selected layer, and a
+layer list with `+`/`-` order and `X` delete for any other. **World File** is save/load/new,
+background colour, parallax strength and wipe progress. Ctrl+Z undoes placements, moves, clones,
+deletions, rotations, resizes and links.
 
 **Scale and rotation are gizmos, not sliders** — the room editor's grammar, in canvas terms. The
 selection wears two corner nodes: the blue one on the right resizes (the scale follows how far the

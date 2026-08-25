@@ -294,6 +294,50 @@ public class MapEditorUI
         return go;
     }
 
+    // Gives a label the height its wrapped text actually needs. Every row is pinned to one line by
+    // ApplyRowLayout, so a label that runs to three draws straight over whatever comes next.
+    // Measured rather than laid out: this is called while the column is still being built, before
+    // it has had a layout pass.
+    public static void FitLabelHeight(GameObject label, float width = 380f)
+    {
+        if (label == null) return;
+
+        var text = label.GetComponent<TMP_Text>();
+        var element = label.GetComponent<LayoutElement>();
+        if (text == null || element == null) return;
+
+        var content = text.text ?? "";
+
+        // Measured, with a floor taken from the line count. TMP's measurement wants a font that has
+        // finished loading and a mesh that has been generated at least once; asked too early it
+        // answers short, and a label that answers short draws straight over the button under it.
+        var lines = 1;
+        foreach (var character in content)
+            if (character == '\n') lines++;
+
+        var measured = text.GetPreferredValues(content, width, 0f).y;
+        var needed = Mathf.Max(measured, lines * text.fontSize * 1.35f) + 6f;
+
+        if (Mathf.Abs(element.preferredHeight - needed) < 0.5f) return;
+
+        element.minHeight = needed;
+        element.preferredHeight = needed;
+
+        // **And the rect itself**, which is the part that actually matters here and the reason a
+        // grown label kept drawing over the widget below it. A tool's options column is a
+        // VerticalLayoutGroup with `childControlHeight = false`, and in that mode the group asks
+        // each child for `sizeDelta.y` and never looks at its LayoutElement at all. So a label that
+        // had grown to five lines still counted as the one row `ApplyRowLayout` gave it, the next
+        // widget was placed 25px down, and the extra lines drew straight through it. Marking the
+        // parent dirty only re-ran a layout that was reading the wrong number.
+        //
+        // The LayoutElement is still set, for a parent that *does* control height.
+        if (label.transform is RectTransform rect)
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, needed);
+
+        if (label.transform.parent is RectTransform parent) LayoutRebuilder.MarkLayoutForRebuild(parent);
+    }
+
     // Section heading in the game's heading font.
     public GameObject CreateHeader(Transform parent, string text, int size = 24)
     {
@@ -326,7 +370,7 @@ public class MapEditorUI
         return go;
     }
 
-    private static void AttachButton(GameObject go, Image graphic, Action onClick)
+    internal static void AttachButton(GameObject go, Image graphic, Action onClick)
     {
         void Handle()
         {
@@ -345,6 +389,19 @@ public class MapEditorUI
             button._targetGraphics = new MaskableGraphic[] { graphic };
             button.targetGraphic = graphic;
             button.transition = Selectable.Transition.None;
+
+            // The editor's buttons are clicked, never navigated to. Without this, MMButton's
+            // OnPointerEnter hands the hovered button to UINavigatorNew as its current selectable,
+            // and that navigator polls Rewired's accept binding - E on a keyboard - straight from
+            // its own Update, outside the EventSystem entirely. So E pressed anywhere fired
+            // whichever editor button the cursor had last passed over, including while typing into
+            // a prompt, and suspending the EventSystem did nothing about it because that path never
+            // goes near the EventSystem. It is worse than "while hovered": OnPointerExit never
+            // clears the navigator's selectable, so the last button stayed armed indefinitely.
+            // Clicks are unaffected - OnPointerClick does not consult this - and the hover state it
+            // skips is Unity's, which we do not use (transition is None, MapEditorHover draws ours).
+            button.PreventMouseSelection = true;
+
             button.onClick.AddListener(Handle);
         }
         catch (Exception e)
@@ -457,7 +514,7 @@ public class MapEditorUI
         return row;
     }
 
-    private static RectTransform NewChild(Transform parent, string name, bool stretch)
+    internal static RectTransform NewChild(Transform parent, string name, bool stretch)
     {
         var go = new GameObject(name);
         go.transform.SetParent(parent, false);
@@ -469,6 +526,93 @@ public class MapEditorUI
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
         return rt;
+    }
+
+    // ---- hover preview ------------------------------------------------------------------------
+
+    // A cell is 60-ish pixels of a prop that may be a hundred times that on the ground, so half the
+    // catalog reads as the same brown smudge. Hovering one blows its icon up beside the options
+    // panel - drawn from the sprite the cell already holds, so it costs a texture draw and nothing
+    // else, and it needs no click the way the ghost preview does.
+    private const float PreviewSize = 300f;
+
+    // Clear of the room editor's options panel (420 wide at a 12px margin).
+    private const float PreviewRightOffset = 448f;
+
+    private GameObject _previewGO;
+    private Image _previewImage;
+    private TMP_Text _previewCaption;
+
+    public void ShowIconPreview(Sprite sprite, string caption)
+    {
+        if (sprite == null || _canvasRoot == null)
+        {
+            HideIconPreview();
+            return;
+        }
+
+        EnsurePreview();
+        if (_previewGO == null) return;
+
+        _previewImage.sprite = sprite;
+        _previewCaption.text = caption ?? "";
+        _previewGO.SetActive(true);
+    }
+
+    public void HideIconPreview()
+    {
+        if (_previewGO != null) _previewGO.SetActive(false);
+    }
+
+    private void EnsurePreview()
+    {
+        if (_previewGO != null) return;
+
+        _previewGO = new GameObject("IconPreview");
+        _previewGO.transform.SetParent(_canvasRoot, false);
+
+        var rect = _previewGO.AddComponent<RectTransform>();
+        rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(1f, 1f);
+        rect.sizeDelta = new Vector2(PreviewSize, PreviewSize + 34f);
+        rect.anchoredPosition = new Vector2(-PreviewRightOffset, -12f);
+
+        var plate = _previewGO.AddComponent<Image>();
+        plate.sprite = RoundedPlate;
+        plate.type = Image.Type.Sliced;
+        plate.pixelsPerUnitMultiplier = 1.6f;
+        plate.color = new Color(0f, 0f, 0f, 0.82f);
+
+        // Never a click target: it floats over the map and the cursor is on the grid behind it.
+        plate.raycastTarget = false;
+
+        var iconGO = new GameObject("Icon");
+        iconGO.transform.SetParent(_previewGO.transform, false);
+        var iconRect = iconGO.AddComponent<RectTransform>();
+        iconRect.anchorMin = new Vector2(0f, 0f);
+        iconRect.anchorMax = new Vector2(1f, 1f);
+        iconRect.offsetMin = new Vector2(10f, 34f);
+        iconRect.offsetMax = new Vector2(-10f, -10f);
+
+        _previewImage = iconGO.AddComponent<Image>();
+        _previewImage.preserveAspect = true;
+        _previewImage.raycastTarget = false;
+
+        var captionGO = CreateLabel(_previewGO.transform, "", 17, TextAlignmentOptions.Center);
+        var captionRect = captionGO.GetComponent<RectTransform>();
+        captionRect.anchorMin = new Vector2(0f, 0f);
+        captionRect.anchorMax = new Vector2(1f, 0f);
+        captionRect.pivot = new Vector2(0.5f, 0f);
+        captionRect.offsetMin = new Vector2(8f, 6f);
+        captionRect.offsetMax = new Vector2(-8f, 6f);
+        captionRect.sizeDelta = new Vector2(captionRect.sizeDelta.x, 26f);
+
+        _previewCaption = captionGO.GetComponent<TMP_Text>();
+        _previewCaption.raycastTarget = false;
+        _previewCaption.enableWordWrapping = false;
+        _previewCaption.overflowMode = TextOverflowModes.Ellipsis;
+
+        _previewGO.SetActive(false);
     }
 
     // ---- toggle -----------------------------------------------------------------------------
@@ -555,7 +699,7 @@ public class MapEditorUI
         viewportRt.anchorMax = Vector2.one;
         viewportRt.pivot = new Vector2(0f, 1f);
         viewportRt.offsetMin = new Vector2(0f, 0f);
-        viewportRt.offsetMax = new Vector2(-16f, 0f);
+        viewportRt.offsetMax = new Vector2(-(ScrollbarWidth + 2f), 0f);
         viewport.AddComponent<RectMask2D>();
 
         var content = new GameObject("Content");
@@ -582,8 +726,18 @@ public class MapEditorUI
         scroll.content = contentRt;
         scroll.verticalScrollbar = CreateScrollbar(scrollGO.transform);
 
+        // Gone entirely when the content fits: a rail against a list that cannot scroll is a
+        // control that does nothing. AutoHide rather than AutoHideAndExpandViewport, because the
+        // viewport's inset is set by hand above and that mode would fight it for the two pixels.
+        scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
+
         return contentRt;
     }
+
+    // A thin rail rather than a bar: the wide one ate into the last column of icons, and a list
+    // of pictures should not be framed by a slab of grey. The handle takes the editor's accent, so
+    // it reads as the game's own red.
+    public const float ScrollbarWidth = 2f;
 
     private static Scrollbar CreateScrollbar(Transform parent)
     {
@@ -594,11 +748,11 @@ public class MapEditorUI
         rt.anchorMin = new Vector2(1f, 0f);
         rt.anchorMax = new Vector2(1f, 1f);
         rt.pivot = new Vector2(1f, 1f);
-        rt.sizeDelta = new Vector2(14f, 0f);
+        rt.sizeDelta = new Vector2(ScrollbarWidth, 0f);
         rt.anchoredPosition = Vector2.zero;
 
         var bg = go.AddComponent<Image>();
-        bg.color = new Color(1f, 1f, 1f, 0.10f);
+        bg.color = new Color(1f, 1f, 1f, 0.07f);
 
         var scrollbar = go.AddComponent<Scrollbar>();
         scrollbar.direction = Scrollbar.Direction.BottomToTop;
@@ -617,11 +771,9 @@ public class MapEditorUI
         handleRt.offsetMin = Vector2.zero;
         handleRt.offsetMax = Vector2.zero;
 
+        // A plain rectangle: rounding a six-pixel rail only makes it look chewed.
         var handleImg = handle.AddComponent<Image>();
-        handleImg.sprite = RoundedPlate;
-        handleImg.type = Image.Type.Sliced;
-        handleImg.pixelsPerUnitMultiplier = 3f;
-        handleImg.color = new Color(1f, 1f, 1f, 0.45f);
+        handleImg.color = new Color(Accent.r, Accent.g, Accent.b, 0.9f);
 
         scrollbar.targetGraphic = handleImg;
         scrollbar.handleRect = handleRt;
@@ -725,11 +877,31 @@ public class MapEditorUI
         if (_openDropdown == dropdown) _openDropdown = null;
     }
 
+    // An open dropdown list stands outside every registered blocker rect, so a surface that polls
+    // its own clicks has to know to close it rather than act on the click underneath.
+    public bool TransientUiOpen => _openDropdown != null;
+
     public void CloseTransientUi() => _openDropdown?.Close();
+
+    // A boxed, scrolling list of rows. maxHeight is a ceiling, not a size: the box is as tall as
+    // its rows need and no taller, so a short list does not sit in a pane of empty black.
+    public MapEditorScrollBox CreateScrollBox(Transform parent, string name, float maxHeight,
+        float rowHeight = 30f, float spacing = 3f)
+    {
+        var content = CreateScrollColumn(parent, name, out var root, spacing);
+        return new MapEditorScrollBox(this, content, root, maxHeight, rowHeight, spacing);
+    }
 
     // ---- icon grid --------------------------------------------------------------------------
 
-    public MapEditorGrid CreateIconGrid(Transform parent, string name, int columns = 4, float cellSize = 88f)
+    // scrollHeight: box the cells in a scroll view of their own that tall, instead of letting the
+    // grid grow the whole panel. A catalogue of hundreds pushed the search field and the group
+    // picker off the top of the tool's own column, so reaching them meant scrolling back up past
+    // everything you had just scrolled down through. With the cells boxed, the column above them
+    // does not move and the hovered-name caption stays pinned under the box. Zero keeps the old
+    // grow-to-fit behaviour, which suits the short lists.
+    public MapEditorGrid CreateIconGrid(Transform parent, string name, int columns = 4,
+        float cellSize = 88f, float scrollHeight = 0f)
     {
         var root = new GameObject(name);
         root.transform.SetParent(parent, false);
@@ -746,9 +918,31 @@ public class MapEditorUI
         var rootFitter = root.AddComponent<ContentSizeFitter>();
         rootFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
+        // Where the cells go: straight into the root, or into a scroll box hung from it.
+        var cellParent = root.transform;
+        LayoutElement boxElement = null;
+
+        if (scrollHeight > 0f)
+        {
+            var boxed = CreateScrollColumn(root.transform, "Cells_Scroll", out var boxRoot, spacing: 0f);
+
+            boxElement = boxRoot.AddComponent<LayoutElement>();
+            boxElement.flexibleWidth = 1f;
+
+            cellParent = boxed;
+        }
+
         var cells = new GameObject("Cells");
-        cells.transform.SetParent(root.transform, false);
+        cells.transform.SetParent(cellParent, false);
         cells.AddComponent<RectTransform>();
+
+        // Inside a scroll box the grid has to report its own height, or the column that scrolls it
+        // has nothing to measure and the box never scrolls.
+        if (scrollHeight > 0f)
+        {
+            var cellFitter = cells.AddComponent<ContentSizeFitter>();
+            cellFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        }
 
         var grid = cells.AddComponent<GridLayoutGroup>();
         grid.cellSize = new Vector2(cellSize, cellSize);
@@ -763,7 +957,13 @@ public class MapEditorUI
         captionText.overflowMode = TextOverflowModes.Ellipsis;
         ApplyRowLayout(caption, 26f);
 
-        return new MapEditorGrid(this, root, cells.transform, captionText);
+        var built = new MapEditorGrid(this, root, cells.transform, captionText);
+
+        // The box grows with the list up to its ceiling, rather than reserving the full height for
+        // three icons: a short group should not sit in a pane of empty black.
+        if (boxElement != null) built.UseScrollBox(boxElement, scrollHeight, columns, cellSize, 6f);
+
+        return built;
     }
 
     // One square icon cell; the letter tile shows until an icon arrives.

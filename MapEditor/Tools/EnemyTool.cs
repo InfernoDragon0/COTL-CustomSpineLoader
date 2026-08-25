@@ -57,6 +57,8 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
+        _search = new MapEditorSearchRow(_editor, ui, panel, ShowSearchResults, ShowCurrentGroup);
+
         _groupKeys.Clear();
         var options = new List<string>();
         foreach (var group in Catalog().Keys)
@@ -71,7 +73,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         _groupDropdown = ui.CreateDropdown(panel, "Choose a group", options, (index, _) => ShowGroupAt(index));
 
-        _grid = ui.CreateIconGrid(panel, "EnemyGrid");
+        _grid = ui.CreateIconGrid(panel, "EnemyGrid", scrollHeight: GridHeight);
 
         ui.CreateButton(panel, "Clear Selection", () =>
         {
@@ -83,6 +85,53 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     }
 
     private MapEditorDropdown _groupDropdown;
+    private MapEditorSearchRow _search;
+
+    // ---- search -------------------------------------------------------------------------------
+
+    // Back to whichever group the dropdown is on, for a cleared or cancelled search.
+    private void ShowCurrentGroup()
+    {
+        var index = _groupDropdown != null ? _groupDropdown.SelectedIndex : -1;
+        ShowGroupAt(index < 0 ? 0 : index);
+    }
+
+    // Every group at once, plus whatever mods have registered: the catalog is filed by biome, and
+    // the enemy you want is rarely in the biome you happen to be standing in.
+    private void ShowSearchResults(string needle)
+    {
+        if (_grid == null) return;
+
+        var list = new List<MapEditorGrid.Entry>();
+        var seen = new HashSet<string>();
+        var total = 0;
+
+        foreach (var group in Catalog())
+        foreach (var entry in group.Value)
+        {
+            if (entry.label.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (!seen.Add(entry.key)) continue;
+
+            total++;
+            if (list.Count < MapEditorSearchRow.MaxResults)
+                list.Add(CellFor(entry.label, entry.key, isCustom: false));
+        }
+
+        foreach (var pair in CustomEnemies())
+        {
+            if (pair.Value == null) continue;
+
+            var name = pair.Value.InternalName;
+            if (name.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (!seen.Add(name)) continue;
+
+            total++;
+            if (list.Count < MapEditorSearchRow.MaxResults) list.Add(CellFor(name, name, isCustom: true));
+        }
+
+        Populate(list);
+        _search.ReportCount(list.Count, total, needle);
+    }
 
     private void ShowGroupAt(int index)
     {
@@ -94,6 +143,10 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     }
 
     private readonly List<string> _groupKeys = [];
+    // Tall enough to browse in, short enough that the search field and the group picker
+    // above it never leave the screen.
+    private const float GridHeight = 620f;
+
     private MapEditorGrid _grid;
 
     public void OnEnter()
@@ -283,6 +336,10 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             Display = label,
             OnClick = () =>
             {
+                // Picking one is the end of the search; the status set below is what should be
+                // left on screen, so this goes first.
+                _search?.Confirm();
+
                 _pendingKey = key;
                 _pendingIsCustom = isCustom;
                 _pendingLabel = label;

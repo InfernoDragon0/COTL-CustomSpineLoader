@@ -654,6 +654,32 @@ public class WorldMapScreen : MonoBehaviour
         return rect;
     }
 
+    // Re-aims the link lines at wherever their nodes now are, without rebuilding the map.
+    //
+    // A node drag moves the node's own rect directly each frame - rebuilding the whole map sixty
+    // times a second to drag one disc would be absurd - but the lines were left out of that and
+    // only caught up on the redraw at mouse-up. So a node came away from its links and they snapped
+    // back onto it when the button came up, which is exactly the moment it is too late to see
+    // whether the shape being drawn is the one wanted. This is the cheap half of a rebuild: no
+    // objects created or destroyed, just two positions read and a rect aimed.
+    public void RefreshLinks()
+    {
+        if (Map == null) return;
+
+        foreach (var (rect, fromId, toId) in _lines)
+        {
+            if (rect == null) continue;
+
+            var from = Map.FindNode(fromId);
+            var to = Map.FindNode(toId);
+            if (from == null || to == null) continue;
+
+            WorldMapLine.Place(rect,
+                new Vector2(from.Position.X, from.Position.Y),
+                new Vector2(to.Position.X, to.Position.Y));
+        }
+    }
+
     // ---- states -----------------------------------------------------------------------------
 
     public void RefreshStates()

@@ -30,3 +30,31 @@ public interface IMapEditorShortcuts
 {
     IEnumerable<(string Key, string Action)> Shortcuts { get; }
 }
+
+// A tool that sometimes wants Escape for itself - cancelling a pick, stepping out of a mode it put
+// the editor into. Escape closes the editor, so the host asks the active tool first: a key that
+// means "back out of this" has to back out of the innermost thing before it reaches the outermost.
+// Return true when the gesture was used, and the editor stays open.
+public interface IMapEditorEscapeHandler
+{
+    bool HandleEscape();
+}
+
+// A tool that takes the whole screen for itself - the dungeon map view, which is a map screen and
+// not a panel. While it owns the screen the host's own chrome stands down, the camera keys stop
+// panning the room behind it, the wheel stops switching tools, and Ctrl+S saves what is on screen
+// rather than the room.
+public interface IMapEditorScreenTool
+{
+    bool OwnsScreen { get; }
+    void ScreenQuickSave();
+
+    // A hovered widget's line, routed here because the host's status bar is switched off behind
+    // this tool's screen. Null means the cursor left and the bar goes back to what it was saying.
+    void ScreenHoverStatus(string message);
+
+    // One step back out of whatever this tool has on screen - a prompt, then the screen itself.
+    // True when it handled the gesture, so F4 closes the tool's screen before it closes the editor
+    // and cannot throw away unsaved work on the way past.
+    bool ScreenStepBack();
+}

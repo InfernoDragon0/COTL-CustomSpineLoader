@@ -18,6 +18,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     private Door _dragging;
     private Door _selected;
     private Vector3 _dragOffset;
+    private Vector3 _dragStart;
 
     // Persists across tool switches, independent of Door.Doors.
     private readonly List<Door> _knownDoors = [];
@@ -181,6 +182,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         BuildGizmos();
         SyncDoorToggles();
+        _editor.MarkEdited();
     }
 
     // Reactivates a removed door, or spawns a fresh door island. Also used by the loader.
@@ -681,6 +683,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _dragging = door;
         _selected = door;
         _dragOffset = door.transform.position - pointerWorld;
+        _dragStart = door.transform.position;
 
         _editor.SetStatus($"Dragging {door.direction} door ({door.ConnectionType}).");
     }
@@ -698,6 +701,27 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     public void EndDoorDrag()
     {
         if (_dragging == null) return;
+
+        _editor.MarkEdited();
+
+        // One entry for the drag. Putting the door back has to re-run the pad and the anchors the
+        // way the drag itself does, or the island stays where the door no longer is.
+        var door = _dragging;
+        var start = _dragStart;
+        if (door.transform.position != start)
+        {
+            _editor.History.Push($"move {door.direction} door", () =>
+            {
+                if (door == null) return false;
+
+                door.transform.position = start;
+                RefreshPad(door, deferCollision: false);
+                RefreshMovementAnchors(door);
+                SceneRefs.RegenerateRoomCollision();
+                _editor.KeepCullingSuspended = true;
+                return true;
+            });
+        }
 
         _editor.SetStatus($"Moved {_dragging.direction} door.");
 

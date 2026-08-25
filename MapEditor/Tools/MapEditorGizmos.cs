@@ -157,4 +157,14 @@ public static class MapEditorGizmos
             ? new Vector3(bounds.max.x, bounds.max.y, bounds.center.z)
             : target.transform.position;
     }
+
+    // Where a depth node should sit: the opposite top corner, so it is on the outline like the
+    // resize node and cannot be mistaken for it or for the grip in the middle.
+    public static Vector3 FarCornerPosition(GameObject target)
+    {
+        if (target == null) return Vector3.zero;
+        return TryGetBounds(target, out var bounds)
+            ? new Vector3(bounds.min.x, bounds.max.y, bounds.center.z)
+            : target.transform.position;
+    }
 }

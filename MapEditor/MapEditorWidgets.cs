@@ -166,6 +166,91 @@ public class MapEditorDropdown
     }
 }
 
+// A list of rows boxed in a scroll view: as tall as its rows need, up to a ceiling, and scrolling
+// beyond that rather than growing the panel forever.
+//
+// The height is worked out from the row *count* rather than measured, and that is not laziness. A
+// rebuild destroys its old rows with Object.Destroy, which defers to end of frame, so anything
+// measured in the same breath is measuring the rows that are on their way out as well as the ones
+// replacing them. Counting is exact and needs no second frame.
+public class MapEditorScrollBox
+{
+    private readonly MapEditorUI _ui;
+    private readonly LayoutElement _box;
+    private readonly RectTransform _boxRect;
+    private readonly ScrollRect _scroll;
+    private readonly float _max;
+    private readonly float _rowHeight;
+    private readonly float _spacing;
+
+    private float _applied = -1f;
+
+    // The scroll column's own vertical padding, which the rows sit inside.
+    private const float Padding = 16f;
+
+    // Tall enough that an empty list reads as deliberate rather than broken.
+    private const float EmptyHeight = 44f;
+
+    public RectTransform Content { get; }
+
+    internal MapEditorScrollBox(MapEditorUI ui, RectTransform content, GameObject root, float maxHeight,
+        float rowHeight, float spacing)
+    {
+        _ui = ui;
+        Content = content;
+        _max = maxHeight;
+        _rowHeight = rowHeight;
+        _spacing = spacing;
+
+        _box = root.AddComponent<LayoutElement>();
+        _box.flexibleWidth = 1f;
+        _boxRect = root.transform as RectTransform;
+        _scroll = root.GetComponent<ScrollRect>();
+
+        SetRows(0);
+    }
+
+    public void SetRows(int rows)
+    {
+        var needed = rows <= 0
+            ? EmptyHeight
+            : rows * _rowHeight + (rows - 1) * _spacing + Padding;
+
+        var height = Mathf.Min(needed, _max);
+
+        if (!Mathf.Approximately(height, _applied))
+        {
+            _applied = height;
+            _box.minHeight = height;
+            _box.preferredHeight = height;
+
+            if (_boxRect != null)
+            {
+                _boxRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
+                if (_boxRect.parent is RectTransform parent) LayoutRebuilder.MarkLayoutForRebuild(parent);
+            }
+        }
+
+        // The outer force-rebuild stops at the scroll viewport, which carries no layout controller
+        // of its own, so the column of rows underneath has to be rebuilt by name.
+        if (_scroll != null && _scroll.content != null)
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_scroll.content);
+
+        _ui.Editor?.RequestOptionsResize();
+    }
+
+    // A rebuilt list must not inherit the last one's scroll position, or a shorter list puts its
+    // rows above the top of the viewport.
+    public void ScrollToTop()
+    {
+        if (_scroll == null) return;
+
+        _scroll.StopMovement();
+        if (_scroll.content != null) _scroll.content.anchoredPosition = Vector2.zero;
+        _scroll.verticalNormalizedPosition = 1f;
+    }
+}
+
 public class MapEditorGrid
 {
     private class Cell
@@ -204,9 +289,133 @@ public class MapEditorGrid
         public Action OnClick;
     }
 
+    // ---- scroll box ---------------------------------------------------------------------------
+
+    private LayoutElement _box;
+    private RectTransform _boxRect;
+    private ScrollRect _boxScroll;
+    private float _boxMax;
+    private int _boxColumns = 4;
+    private float _boxCell = 88f;
+    private float _boxSpacing = 6f;
+    private float _boxApplied = -1f;
+    private Coroutine _boxSettle;
+
+    internal void UseScrollBox(LayoutElement element, float maxHeight, int columns, float cellSize,
+        float spacing)
+    {
+        _box = element;
+        _boxRect = element != null ? element.transform as RectTransform : null;
+        _boxScroll = element != null ? element.GetComponent<ScrollRect>() : null;
+        _boxMax = maxHeight;
+        _boxColumns = Mathf.Max(1, columns);
+        _boxCell = cellSize;
+        _boxSpacing = spacing;
+        UpdateBoxHeight();
+    }
+
+    // The box is as tall as its rows need, up to the ceiling it was given. Worked out from the
+    // count rather than measured: the cells fill in over several frames, and a rect that has not
+    // been through a layout pass yet measures zero.
+    private void UpdateBoxHeight()
+    {
+        if (_box == null) return;
+
+        var rows = Mathf.CeilToInt(_byId.Count / (float)_boxColumns);
+        var needed = rows <= 0
+            ? EmptyBoxHeight
+            : rows * _boxCell + (rows - 1) * _boxSpacing + BoxPadding;
+
+        var height = Mathf.Min(needed, _boxMax);
+        if (Mathf.Abs(height - _boxApplied) < 0.5f) return;
+        _boxApplied = height;
+
+        _box.minHeight = height;
+        _box.preferredHeight = height;
+
+        if (_boxRect != null)
+        {
+            _boxRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
+
+            var parent = _boxRect.parent as RectTransform;
+            if (parent != null) LayoutRebuilder.MarkLayoutForRebuild(parent);
+        }
+
+        SettleBox();
+    }
+
+    // Why the LayoutElement is not enough on its own, which is what the last two attempts at this
+    // assumed.
+    //
+    // The editor answers RequestOptionsResize with ForceRebuildLayoutImmediate on the tool's option
+    // column, and that walk does not reach in here. LayoutRebuilder descends into a child only if
+    // the rect it is standing on carries a layout controller of its own - and a ScrollRect's
+    // Viewport carries nothing but a RectMask2D. So the walk stops dead at the viewport, and the
+    // grid of cells underneath it, with its own ContentSizeFitter, is never re-measured from above.
+    // It gets there eventually through its own dirty flags, but the box was already sized against
+    // the stale measurement by then, and nothing came back to correct it: a box that had been tall
+    // for a big group stayed tall for the small group after it.
+    //
+    // So the inner column is rebuilt here by name, a couple of frames later - late enough that the
+    // destroyed cells of the previous group are actually gone (Destroy defers to end of frame) and
+    // the staggered fill has stopped adding to this one.
+    private void SettleBox()
+    {
+        if (_host == null) { ForceBox(); return; }
+
+        if (_boxSettle != null) _host.StopCoroutine(_boxSettle);
+        _boxSettle = _host.StartCoroutine(SettleRoutine());
+    }
+
+    private IEnumerator SettleRoutine()
+    {
+        yield return null;
+        yield return null;
+
+        _boxSettle = null;
+        ForceBox();
+    }
+
+    private void ForceBox()
+    {
+        if (_boxScroll != null && _boxScroll.content != null)
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_boxScroll.content);
+
+        if (Root != null && Root.transform is RectTransform root)
+            LayoutRebuilder.ForceRebuildLayoutImmediate(root);
+
+        _ui.Editor?.RequestOptionsResize();
+    }
+
+    // A shorter list must not inherit the last one's scroll position, or the handful of icons it
+    // does have sit above the top of the viewport and have to be scrolled back up to.
+    private void ScrollBoxToTop()
+    {
+        if (_boxScroll == null) return;
+
+        _boxScroll.StopMovement();
+        if (_boxScroll.content != null) _boxScroll.content.anchoredPosition = Vector2.zero;
+        _boxScroll.verticalNormalizedPosition = 1f;
+    }
+
+    // The scroll column's own vertical padding, which the rows sit inside.
+    private const float BoxPadding = 16f;
+
+    // Tall enough to read "nothing here" as deliberate rather than broken.
+    private const float EmptyBoxHeight = 48f;
+
+    // The sprite a cell is currently wearing, if its icon has arrived.
+    private Sprite IconOf(string id) =>
+        _byId.TryGetValue(id, out var cell) && cell.Icon != null && cell.Icon.enabled
+            ? cell.Icon.sprite
+            : null;
+
     public void Clear()
     {
         StopFill();
+
+        // The cells the preview could be showing are about to go.
+        _ui.HideIconPreview();
 
         foreach (var cell in _byId.Values)
             if (cell.Root != null) UnityEngine.Object.Destroy(cell.Root);
@@ -214,6 +423,9 @@ public class MapEditorGrid
         _byId.Clear();
         _selectedId = null;
         if (_caption != null) _caption.text = "";
+
+        ScrollBoxToTop();
+        UpdateBoxHeight();
 
         // Nested size fitters will not notice the shrink on their own; tell the panel.
         _ui.Editor?.RequestOptionsResize();
@@ -278,8 +490,20 @@ public class MapEditorGrid
         if (hover != null)
             hover.OnHover = hovered =>
             {
-                if (hovered) ShowCaption(displayName);
-                else ShowSelectedCaption();
+                if (hovered)
+                {
+                    ShowCaption(displayName);
+
+                    // The cell's own sprite, blown up beside the panel. Read at hover time rather
+                    // than captured: icons arrive asynchronously, so the cell may have been empty
+                    // when it was built.
+                    _ui.ShowIconPreview(IconOf(id), displayName);
+                }
+                else
+                {
+                    ShowSelectedCaption();
+                    _ui.HideIconPreview();
+                }
             };
 
         _byId[id] = new Cell
@@ -290,6 +514,11 @@ public class MapEditorGrid
             Letter = go.transform.Find("Label")?.gameObject,
             Display = displayName
         };
+
+        // Born lit if it is already in the gathered set - see SetSelectedMany.
+        if (border != null && _multi.Contains(id)) border.gameObject.SetActive(true);
+
+        UpdateBoxHeight();
     }
 
     private void ShowCaption(string text)
@@ -319,12 +548,40 @@ public class MapEditorGrid
 
     public void SetSelected(string id)
     {
+        if (_multi.Count > 0) return;
+
         _selectedId = id;
         foreach (var pair in _byId)
         {
             if (pair.Value.Ring == null) continue;
             pair.Value.Ring.gameObject.SetActive(pair.Key == id);
         }
+        ShowSelectedCaption();
+    }
+
+    // Several cells lit at once, for a tool that gathers a set rather than picking one.
+    //
+    // Held by the grid rather than re-applied by the caller because the cells arrive over several
+    // frames: a set applied once would only reach whichever cells happened to exist at the time,
+    // and switching group or searching rebuilds all of them. AddCell consults it instead, so a cell
+    // is born lit if it belongs to the set. Clear() deliberately leaves it alone - it is the tool's
+    // intent, not the view's state.
+    private readonly HashSet<string> _multi = [];
+
+    public void SetSelectedMany(IEnumerable<string> ids)
+    {
+        _multi.Clear();
+        if (ids != null)
+            foreach (var id in ids)
+                if (!string.IsNullOrEmpty(id)) _multi.Add(id);
+
+        _selectedId = null;
+        foreach (var pair in _byId)
+        {
+            if (pair.Value.Ring == null) continue;
+            pair.Value.Ring.gameObject.SetActive(_multi.Contains(pair.Key));
+        }
+
         ShowSelectedCaption();
     }
 }

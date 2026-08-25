@@ -7,49 +7,155 @@ namespace CustomSpineLoader.MapEditor;
 // Fully qualified throughout: the game's Map namespace also contains a class called Map.
 public static class DungeonMapBuilder
 {
-    // Null when the map is playable; otherwise the first thing wrong. Each rule is the renderer's.
-    public static string Validate(CTDungeonMap map)
+    // ---- the derived grid --------------------------------------------------------------------
+
+    // Two nodes whose centres are within this many units of each other vertically stand on the
+    // same layer. Roughly half a node: side by side reads as a row, stacked does not.
+    public const float LayerBand = 70f;
+
+    // The authored layout resolved onto the integer grid the game addresses nodes by.
+    //
+    // Map.Point is a pair of ints and the renderer draws at point * 300, so free positions cannot
+    // survive into the game as they are. What survives is their arrangement: nodes are gathered
+    // into rows by height, and within a row they keep their left-to-right order. Every node gets a
+    // point of its own (rows are numbered from the bottom, columns from the left), which is what
+    // the game needs - a point is a node's identity in every link and lookup it appears in.
+    public static Dictionary<CTDungeonMapNode, global::Map.Point> Layout(CTDungeonMap map)
     {
-        if (map == null || map.Nodes.Count == 0) return "The map has no nodes.";
+        var points = new Dictionary<CTDungeonMapNode, global::Map.Point>();
+        var rows = Rows(map);
+
+        for (var y = 0; y < rows.Count; y++)
+            for (var x = 0; x < rows[y].Count; x++)
+                points[rows[y][x]] = new global::Map.Point(x, y);
+
+        return points;
+    }
+
+    // Rows bottom to top, each ordered left to right. Deterministic: the same map always resolves
+    // to the same grid, which is what lets the playback side re-derive it instead of storing it.
+    public static List<List<CTDungeonMapNode>> Rows(CTDungeonMap map)
+    {
+        var rows = new List<List<CTDungeonMapNode>>();
+        if (map == null) return rows;
+
+        var ordered = new List<CTDungeonMapNode>();
+        foreach (var node in map.Nodes)
+            if (node != null) ordered.Add(node);
+
+        ordered.Sort(Compare);
+
+        foreach (var node in ordered)
+        {
+            // The band is measured from the lowest node in it, so a row cannot creep upwards one
+            // node at a time.
+            if (rows.Count == 0 || node.PosY - rows[rows.Count - 1][0].PosY > LayerBand)
+                rows.Add([]);
+
+            rows[rows.Count - 1].Add(node);
+        }
+
+        foreach (var row in rows) row.Sort(CompareAcross);
+        return rows;
+    }
+
+    private static int Compare(CTDungeonMapNode a, CTDungeonMapNode b)
+    {
+        var y = a.PosY.CompareTo(b.PosY);
+        return y != 0 ? y : CompareAcross(a, b);
+    }
+
+    private static int CompareAcross(CTDungeonMapNode a, CTDungeonMapNode b)
+    {
+        var x = a.PosX.CompareTo(b.PosX);
+        return x != 0 ? x : string.CompareOrdinal(a.Id ?? "", b.Id ?? "");
+    }
+
+    // ---- validation --------------------------------------------------------------------------
+
+    // One thing wrong with a map, and - where the rule is about a particular node - which node.
+    // Validate and Advisory are the first blocking and the first advisory entry of this list; the
+    // editor uses the nodes to ring the ones at fault.
+    public readonly struct MapIssue
+    {
+        public readonly string Message;
+        public readonly CTDungeonMapNode Node;
+        public readonly bool IsAdvisory;
+
+        public bool HasNode => Node != null;
+
+        public MapIssue(string message, bool advisory = false)
+        {
+            Message = message;
+            Node = null;
+            IsAdvisory = advisory;
+        }
+
+        public MapIssue(string message, CTDungeonMapNode node, bool advisory = false)
+        {
+            Message = message;
+            Node = node;
+            IsAdvisory = advisory;
+        }
+    }
+
+    // Every rule the renderer and the run impose, blocking ones first in the order they are hit.
+    public static List<MapIssue> Issues(CTDungeonMap map)
+    {
+        var issues = new List<MapIssue>();
+
+        if (map == null || map.Nodes.Count == 0)
+        {
+            issues.Add(new MapIssue("The map has no nodes."));
+            return issues;
+        }
 
         var linked = 0;
-        var starts = 0;
-        var hasTop = false;
+        var rows = Rows(map);
 
         foreach (var node in map.Nodes)
         {
             if (node == null) continue;
 
-            if (node.Y == 0) starts++;
-            if (node.Y == map.Layers - 1) hasTop = true;
-
-            foreach (var link in node.Outgoing)
+            foreach (var childId in node.Children)
             {
-                if (link == null) continue;
-
                 // The renderer never null-checks a link's far end: a dangling link is a crash.
-                if (map.NodeAt(link.X, link.Y) == null)
-                    return $"Node ({node.X},{node.Y}) links to ({link.X},{link.Y}), where there is no node.";
+                if (map.FindNode(childId) == null)
+                {
+                    issues.Add(new MapIssue(
+                        $"{Label(rows, node)} links to a node that is not on the map.", node));
+                    continue;
+                }
 
                 linked++;
             }
         }
 
-        // GetFirstNode() is a .First(): no node on layer 0 throws before anything is drawn.
-        if (starts == 0) return "No node on the bottom layer - that is where the run starts.";
+        // GetFirstNode() is a .First(): the leftmost node on the bottom row is the start, and a
+        // second node down there is never reachable.
+        if (rows.Count > 0 && rows[0].Count > 1)
+        {
+            var message = $"{rows[0].Count} nodes on layer 1 - the run can only start on one. " +
+                          "Drag the others up a little.";
+            for (var i = 1; i < rows[0].Count; i++)
+                issues.Add(new MapIssue(message, rows[0][i]));
+        }
 
-        // The renderer marks GetFirstNode() visited; a second bottom node would never be reachable.
-        if (starts > 1) return $"{starts} nodes on the bottom layer - the run can only start on one.";
-        if (!hasTop) return "No node on the top layer - the run has nowhere to end.";
-        if (linked == 0) return "Nothing is linked; the map would render empty.";
+        // The run ends when the top row is reached, so a map that is all one row is over at once.
+        if (rows.Count == 1)
+            issues.Add(new MapIssue("Every node is on layer 1, so the run would end after the " +
+                                    "first floor. Drag some nodes higher."));
+
+        if (linked == 0) issues.Add(new MapIssue("Nothing is linked; the map would render empty."));
 
         // A node with no connections at all is silently skipped by the renderer.
         foreach (var node in map.Nodes)
         {
-            if (node == null || node.Outgoing.Count > 0) continue;
-            if (IsLinkedFrom(map, node.X, node.Y)) continue;
+            if (node == null || node.Children.Count > 0) continue;
+            if (IsLinkedFrom(map, node.Id)) continue;
 
-            return $"Node ({node.X},{node.Y}) has no links, so the game would not draw it.";
+            issues.Add(new MapIssue(
+                $"{Label(rows, node)} has no links, so the game would not draw it.", node));
         }
 
         // Not fatal (falls back to a vanilla floor) but almost always a rename; catch it here.
@@ -57,10 +163,61 @@ public static class DungeonMapBuilder
         {
             if (node == null || string.IsNullOrEmpty(node.Level)) continue;
             if (!CTLevelSerialization.Available(node.Level))
-                return $"Node ({node.X},{node.Y}) plays level '{node.Level}', which is not saved.";
+                issues.Add(new MapIssue(
+                    $"{Label(rows, node)} plays level '{node.Level}', which is not saved.", node));
         }
 
-        return Reachable(map);
+        foreach (var node in Unreachable(map))
+            issues.Add(new MapIssue(
+                $"{Label(rows, node)} cannot be reached from layer 1.", node));
+
+        AddTypeAdvisory(map, rows, issues);
+        AddBossAdvisory(map, rows, issues);
+        return issues;
+    }
+
+    // A dungeon node has no name - the game's own map does not give it one - so it is named by
+    // the layer it resolved onto, which is what the node's own caption reads as "(L1)" and what
+    // the halo on the map is pointing at. Rows and layers are the same thing here: a row of the
+    // resolved layout is one layer of the run.
+    private static string Label(List<List<CTDungeonMapNode>> rows, CTDungeonMapNode node)
+    {
+        for (var y = 0; y < rows.Count; y++)
+            if (rows[y].Contains(node)) return $"The {node.NodeType} on layer {y + 1}";
+
+        return "The " + node.NodeType;
+    }
+
+    // A type this scene's dungeon config has no blueprint for. Not blocking: the dungeon the map
+    // is actually entered from loads its own config, which may well have it - which is exactly the
+    // shape of the surprise, since Preview builds against whatever config is loaded here and
+    // refuses, while entering the dungeon works.
+    private static void AddTypeAdvisory(CTDungeonMap map, List<List<CTDungeonMapNode>> rows,
+        List<MapIssue> issues)
+    {
+        var config = Config();
+        if (config == null) return;
+
+        foreach (var node in map.Nodes)
+        {
+            if (node == null) continue;
+            if (TryParseType(node.NodeType, out var type) &&
+                global::Map.MapManager.GetBlueprint(type, config) != null) continue;
+
+            issues.Add(new MapIssue(
+                $"This scene's dungeon config has no blueprint for '{node.NodeType}', so Preview " +
+                "cannot draw it - the dungeon it is entered from may still have one.",
+                node, advisory: true));
+        }
+    }
+
+    // Null when the map is playable; otherwise the first thing wrong.
+    public static string Validate(CTDungeonMap map)
+    {
+        foreach (var issue in Issues(map))
+            if (!issue.IsAdvisory) return issue.Message;
+
+        return null;
     }
 
     // Warn, don't refuse: a boss node with no level bound generates an ordinary floor (the
@@ -70,38 +227,55 @@ public static class DungeonMapBuilder
     {
         if (map == null) return null;
 
-        var plain = 0;
+        foreach (var issue in Issues(map))
+            if (issue.IsAdvisory) return issue.Message;
+
+        return null;
+    }
+
+    // The aggregate first, so Advisory reads as one sentence about the map; the per-node entries
+    // after it are only there to carry cells for the editor's rings.
+    private static void AddBossAdvisory(CTDungeonMap map, List<List<CTDungeonMapNode>> rows,
+        List<MapIssue> issues)
+    {
+        var plain = new List<CTDungeonMapNode>();
         foreach (var node in map.Nodes)
         {
             if (node == null || !string.IsNullOrEmpty(node.Level)) continue;
-            if (node.NodeType is "MiniBossFloor" or "Boss" or "FinalBoss") plain++;
+            if (node.NodeType is "MiniBossFloor" or "Boss" or "FinalBoss") plain.Add(node);
         }
 
-        return plain == 0
-            ? null
-            : $"{plain} boss node(s) have no level bound, so they generate an ordinary floor - " +
-              "vanilla picks its bosses from save data this dungeon has none of.";
+        if (plain.Count == 0) return;
+
+        issues.Add(new MapIssue(
+            $"{plain.Count} boss node(s) have no level bound, so they generate an ordinary floor - " +
+            "vanilla picks its bosses from save data this dungeon has none of.", advisory: true));
+
+        foreach (var node in plain)
+            issues.Add(new MapIssue("This boss node has no level bound.", node, advisory: true));
     }
 
     // The player only moves along outgoing links; an unreachable branch is drawn but unenterable.
-    private static string Reachable(CTDungeonMap map)
+    private static List<CTDungeonMapNode> Unreachable(CTDungeonMap map)
     {
         var open = new Queue<CTDungeonMapNode>();
         var seen = new HashSet<CTDungeonMapNode>();
+        var stranded = new List<CTDungeonMapNode>();
 
-        foreach (var node in map.Nodes)
-        {
-            if (node == null || node.Y != 0) continue;
-            open.Enqueue(node);
-            seen.Add(node);
-        }
+        var rows = Rows(map);
+        if (rows.Count > 0)
+            foreach (var node in rows[0])
+            {
+                open.Enqueue(node);
+                seen.Add(node);
+            }
 
         while (open.Count > 0)
         {
             var node = open.Dequeue();
-            foreach (var link in node.Outgoing)
+            foreach (var childId in node.Children)
             {
-                var next = map.NodeAt(link.X, link.Y);
+                var next = map.FindNode(childId);
                 if (next == null || !seen.Add(next)) continue;
                 open.Enqueue(next);
             }
@@ -109,15 +283,15 @@ public static class DungeonMapBuilder
 
         foreach (var node in map.Nodes)
             if (node != null && !seen.Contains(node))
-                return $"Node ({node.X},{node.Y}) cannot be reached from the bottom layer.";
+                stranded.Add(node);
 
-        return null;
+        return stranded;
     }
 
-    public static bool IsLinkedFrom(CTDungeonMap map, int x, int y)
+    public static bool IsLinkedFrom(CTDungeonMap map, string id)
     {
         foreach (var node in map.Nodes)
-            if (node != null && node.LinksTo(x, y)) return true;
+            if (node != null && node.LinksTo(id)) return true;
 
         return false;
     }
@@ -192,16 +366,18 @@ public static class DungeonMapBuilder
             return null;
         }
 
+        var points = Layout(map);
         var built = new Dictionary<CTDungeonMapNode, global::Map.Node>();
         var nodes = new List<global::Map.Node>();
 
-        foreach (var authored in map.Nodes)
+        // In layout order, bottom row first and left to right: GetFirstNode() is a .First() over
+        // this list, so the leftmost node of the bottom row is the one the run starts on.
+        foreach (var row in Rows(map))
+        foreach (var authored in row)
         {
-            if (authored == null) continue;
-
             if (!TryParseType(authored.NodeType, out var type))
             {
-                error = $"Node ({authored.X},{authored.Y}) has unknown type '{authored.NodeType}'.";
+                error = $"A node has unknown type '{authored.NodeType}'.";
                 return null;
             }
 
@@ -212,25 +388,26 @@ public static class DungeonMapBuilder
                 return null;
             }
 
-            var node = new global::Map.Node(type, blueprint, new global::Map.Point(authored.X, authored.Y))
+            var point = points[authored];
+            var node = new global::Map.Node(type, blueprint, point)
             {
                 // The Node constructor hides one node in ten at random; show what was authored.
                 Hidden = false,
                 CanBeHidden = false,
-                position = new Vector2(authored.X, authored.Y)
+                position = new Vector2(point.x, point.y)
             };
 
             built[authored] = node;
             nodes.Add(node);
         }
 
-        // Both directions come from the authored outgoing list: the renderer walks outgoing,
+        // Both directions come from the authored link list: the renderer walks outgoing,
         // traversal walks incoming, and they must agree.
         foreach (var pair in built)
         {
-            foreach (var link in pair.Key.Outgoing)
+            foreach (var childId in pair.Key.Children)
             {
-                var target = map.NodeAt(link.X, link.Y);
+                var target = map.FindNode(childId);
                 if (target == null || !built.TryGetValue(target, out var targetNode)) continue;
 
                 pair.Value.AddOutgoing(targetNode.point);

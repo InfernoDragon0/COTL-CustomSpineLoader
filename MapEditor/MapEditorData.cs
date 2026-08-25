@@ -38,6 +38,13 @@ public class MapShapeData
     public bool HasCollision = true;
     public int ColliderDetail = 16;
     public float ColliderOffset;
+
+    // Order in layer - what actually stacks sprite shapes, since Z barely reaches the sorting at
+    // all. Nullable so a map saved before this existed says nothing rather than saying zero: a
+    // rebuilt shape then keeps the order it inherits from the room's template, which is what those
+    // maps have always looked like.
+    public int? SortingOrder;
+
     public List<MapShapePointData> Points = [];
 }
 

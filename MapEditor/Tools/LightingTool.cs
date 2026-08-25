@@ -14,8 +14,11 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     private readonly RuntimeMapEditor _editor;
 
-    private TMP_Text _stateLabel;
     private bool _built;
+
+    // What the Shape and Trigger tools use for their section headings. This tool was on the 24pt
+    // default, which read as a different panel from a different mod.
+    private const int HeaderSize = 19;
 
     // Slider + reader pairs, so a profile or loaded map can move the knobs.
     private readonly List<(Slider slider, Func<float> read)> _sliders = [];
@@ -32,36 +35,39 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        _stateLabel = ui.CreateLabel(panel, "Following the biome", 15, TextAlignmentOptions.Center)
-            .GetComponent<TMP_Text>();
-
-        ui.CreateButton(panel, "Capture Biome Lighting", () =>
-        {
-            CaptureCurrent();
-            Data.Enabled = true;
-            Apply();
-            _editor.SetStatus("Biome lighting captured.");
-        });
+        // No "Capture Biome Lighting" button: entering the tool already does it. OnEnter captures
+        // the live biome into an untouched blueprint, so the sliders open showing what the room is
+        // actually doing, and the first slider moved flips the map to overriding. The button's only
+        // unique effect was that flip *without* a value change - "pin this exact biome look" - which
+        // a nudge of any slider gives, and which nothing else in the editor needs.
+        //
+        // No state note either. It said "Following the biome" or "Overriding the biome" for a fact
+        // the sliders and the room already show.
 
         ui.CreateButton(panel, "Reset To Biome", () =>
         {
-            Data.Enabled = false;
             ForgetCurrentRoom();
             ClearOverride();
-            UpdateStateLabel();
+
+            // The knobs have to come back too. Left where the override put them, the next slider
+            // touched would snap the room straight back to the look just thrown away - and the
+            // panel would be describing a room that no longer looks like that.
+            AdoptBiomeValues();
+
+            _editor.MarkEdited();
             _editor.SetStatus("Lighting reset to biome.");
         });
 
-        ui.CreateHeader(panel, "Profiles");
+        ui.CreateHeader(panel, "- Profiles -", HeaderSize);
         _profileDropdown = ui.CreateDropdown(panel, "Apply saved profile", LightingProfiles.Names(),
             (_, name) => ApplyProfile(name));
         ui.CreateButton(panel, "Save As Profile", SaveProfile);
         ui.CreateButton(panel, "Delete Selected Profile", DeleteProfile);
 
-        ui.CreateHeader(panel, "Ambient");
+        ui.CreateHeader(panel, "- Ambient -", HeaderSize);
         ColourSliders(ui, panel, "Ambient", () => Data.Ambient);
 
-        ui.CreateHeader(panel, "Sun");
+        ui.CreateHeader(panel, "- Sun -", HeaderSize);
         ColourSliders(ui, panel, "Sun", () => Data.DirectionalLight);
         TrackedSlider(ui, panel, "Sun Intensity", 0f, 4f,
             () => Data.DirectionalIntensity, v => Data.DirectionalIntensity = v);
@@ -70,7 +76,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         TrackedSlider(ui, panel, "Exposure", 0f, 3f,
             () => Data.Exposure, v => Data.Exposure = v);
 
-        ui.CreateHeader(panel, "Fog");
+        ui.CreateHeader(panel, "- Fog -", HeaderSize);
         ColourSliders(ui, panel, "Fog", () => Data.Fog);
         // Near/far: fade distances. Height/spread: vertical reach and edge softness.
         TrackedSlider(ui, panel, "Fog Near", 0f, 60f, () => Data.FogNear, v => Data.FogNear = v);
@@ -121,7 +127,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         _editor.Map.Lighting = LightingProfiles.Clone(profile.Data);
         Apply();
         SyncSliders();
-        UpdateStateLabel();
+        _editor.MarkEdited();
         _editor.SetStatus($"Applied lighting profile '{profile.Name}'.");
     }
 
@@ -177,8 +183,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         SyncSliders();
         RefreshProfileOptions();
 
-        UpdateStateLabel();
-        _editor.SetStatus("Capture the biome, then edit.");
+        _editor.SetStatus("Drag a slider to take the room's lighting off the biome.");
     }
 
     public void OnExit() { }
@@ -189,13 +194,21 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         if (!_built) return;
         Data.Enabled = true;
         Apply();
-        UpdateStateLabel();
+        _editor.MarkEdited();
     }
 
-    private void UpdateStateLabel()
+    // The biome's own values, back onto the sliders.
+    //
+    // Read from the snapshot taken *before* anything overrode the lighting, not from the manager:
+    // ClearOverride fades back over several seconds, so asking the manager now would read a frame
+    // from the middle of that fade and pin the knobs to a colour the room is only passing through.
+    private void AdoptBiomeValues()
     {
-        if (_stateLabel != null)
-            _stateLabel.text = Data.Enabled ? "Overriding the biome" : "Following the biome";
+        if (_biomeSnapshot != null) _editor.Map.Lighting = LightingProfiles.Clone(_biomeSnapshot);
+        else CaptureCurrent();      // nothing ever overrode it, so the manager is showing the biome
+
+        Data.Enabled = false;
+        SyncSliders();
     }
 
     private void CaptureCurrent()
