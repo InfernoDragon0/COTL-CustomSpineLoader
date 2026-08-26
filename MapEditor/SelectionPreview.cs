@@ -285,15 +285,10 @@ public static class SelectionPreview
         if (_layer >= 0) _camera.cullingMask = 1 << _layer;
     }
 
-    private static int FindFreeLayer()
-    {
-        // Downwards: the high layers are the ones projects leave unnamed. Without one the portrait
-        // still works, it just has the room in the background.
-        for (var i = 31; i >= 8; i--)
-            if (string.IsNullOrEmpty(LayerMask.LayerToName(i))) return i;
-
-        return -1;
-    }
+    // Shared with the other off-screen rigs - see OffscreenLayer. Without a private one the portrait
+    // still works, it just has the room in the background: this is the rig that photographs its
+    // subject where it stands, so the layer is the only thing holding the room out.
+    private static int FindFreeLayer() => OffscreenLayer.Value;
 
     private static void Restage(GameObject subject)
     {

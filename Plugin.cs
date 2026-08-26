@@ -232,26 +232,6 @@ namespace CustomSpineLoader
             // around it name the culprit. Four reads per second.
             SpineMemory.Watch();
 
-            // if (Input.GetKeyDown(KeyCode.F9))
-            // {
-            //     Log.LogInfo("Toggling Fleece Cycling to " + !FleeceCyclingEnabled.Value);
-            //     FleeceCyclingEnabled.Value = !FleeceCyclingEnabled.Value;
-
-            //     if (!FleeceCyclingEnabled.Value && PlayerFarming.Instance != null)
-            //     {
-            //         if (CoopManager.CoopActive)
-            //         {
-            //             PlayerFarming.players[1].SetSkin();
-            //         }
-            //         PlayerFarming.Instance.SetSkin();
-
-            //     }
-            //     else
-            //     {
-            //         TestApplySpineOverride(cycle: false);
-            //     }
-            // }
-
             // F7 used to cycle player 1's fleece one step per press. It opens the mod panel
             // instead, which does the same job as a list (for every player) alongside the spine
             // pickers and the mod's own information. F8 keeps the one-key cycle.

@@ -384,6 +384,16 @@ public class MapEditorGrid
         if (Root != null && Root.transform is RectTransform root)
             LayoutRebuilder.ForceRebuildLayoutImmediate(root);
 
+        // And to the top AFTER the rebuild, which is the half Clear() cannot do.
+        //
+        // Clear() resets the scroll while the box is empty, and it has to - a shorter list must not
+        // inherit the last one's position. But the box then grows through the staggered fill, and a
+        // scroll view whose content gets taller under it does not keep its top where it was: by the
+        // end of the fill the first row had drifted above the viewport. That is the clipped row, and
+        // it came good on the next selection only because a second settle happened to land after the
+        // growing had stopped. Here it always does.
+        ScrollBoxToTop();
+
         _ui.Editor?.RequestOptionsResize();
     }
 
@@ -446,6 +456,7 @@ public class MapEditorGrid
         if (host == null)
         {
             foreach (var entry in entries) AddEntry(entry, onCellAdded);
+            Reflow();
             return;
         }
 
@@ -466,6 +477,12 @@ public class MapEditorGrid
 
         _fill = null;
         _ui.Editor?.RequestOptionsResize();
+
+        // The box grew all the way through the fill, and a scroll view whose content gets taller
+        // under it does not keep its top where it was - which is why the first row came up clipped
+        // on the first draw and came good on the next one, when something else forced a re-measure.
+        // Measured once here, at the only moment the final height is known.
+        Reflow();
     }
 
     private void AddEntry(Entry entry, Action<string> onCellAdded)
@@ -476,6 +493,29 @@ public class MapEditorGrid
         onCellAdded?.Invoke(entry.Id);
     }
 
+    // Re-measures the grid where Unity would not have thought to.
+    //
+    // A layout rebuilds when its own contents change, not when it is moved: a grid that is
+    // reparented - the level tool lifts this one out of its column so a rebuild of the column
+    // cannot destroy it - keeps whatever sizes it was measured with in its old home, and a scroll
+    // box measured against a stale content height clips the first row. Nothing about that is
+    // visible until it happens, which is why it appeared only sometimes.
+    public void Reflow()
+    {
+        if (Root == null) return;
+
+        // Through the same settle every other re-measure goes through, rather than a rebuild of its
+        // own: the box needs a couple of frames for destroyed cells to actually be gone, and two
+        // rebuilds racing each other is how the last attempt at this ended up depending on timing.
+        SettleBox();
+    }
+
+    // Whether each cell carries its own name along the bottom. Off by default: a catalogue of
+    // hundreds is browsed by picture and the name lives in the caption under the grid, where one
+    // line serves every cell. A short list of things the author named themselves is the other case
+    // - there the name IS the identifying thing, and reading it should not need a hover.
+    public bool ShowNames { get; set; }
+
     public void AddCell(string id, string displayName, Sprite icon, Action onClick)
     {
         if (string.IsNullOrEmpty(id) || _byId.ContainsKey(id)) return;
@@ -485,6 +525,8 @@ public class MapEditorGrid
             SetSelected(id);
             onClick?.Invoke();
         }, out var border, hoverText: displayName);
+
+        if (ShowNames) AddCellName(go, displayName);
 
         var hover = go.GetComponent<MapEditorHover>();
         if (hover != null)
@@ -519,6 +561,35 @@ public class MapEditorGrid
         if (border != null && _multi.Contains(id)) border.gameObject.SetActive(true);
 
         UpdateBoxHeight();
+    }
+
+    // A strip along the bottom of the cell, over the picture rather than beside it - the cell is
+    // square and the name is one line, so taking a slice of the image costs less than shrinking
+    // every image to make room.
+    private void AddCellName(GameObject cell, string displayName)
+    {
+        var stripRt = MapEditorUI.NewChild(cell.transform, "Name", stretch: false);
+        stripRt.anchorMin = new Vector2(0f, 0f);
+        stripRt.anchorMax = new Vector2(1f, 0f);
+        stripRt.pivot = new Vector2(0.5f, 0f);
+        stripRt.offsetMin = new Vector2(3f, 3f);
+        stripRt.offsetMax = new Vector2(-3f, 25f);
+
+        var plate = stripRt.gameObject.AddComponent<Image>();
+        plate.color = new Color(0f, 0f, 0f, 0.66f);
+        plate.raycastTarget = false;
+
+        var label = _ui.CreateLabel(stripRt, displayName, 12, TextAlignmentOptions.Center);
+        var labelRt = label.GetComponent<RectTransform>();
+        labelRt.anchorMin = Vector2.zero;
+        labelRt.anchorMax = Vector2.one;
+        labelRt.offsetMin = new Vector2(2f, 0f);
+        labelRt.offsetMax = new Vector2(-2f, 0f);
+
+        var text = label.GetComponent<TMP_Text>();
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.raycastTarget = false;
     }
 
     private void ShowCaption(string text)

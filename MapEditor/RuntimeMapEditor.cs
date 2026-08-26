@@ -1373,6 +1373,24 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     // Ends an open prompt exactly as Enter does. Picking something out of a list the prompt was
     // filtering says "this one" as plainly as the key does, so a caller can finish the typing on
     // the user's behalf instead of making them press Enter and then click.
+    // Ends an open prompt as Escape does, for a caller that is taking the prompt's own UI away.
+    //
+    // Typing locks the game's navigator and clears the EventSystem's selection every frame, and the
+    // only things that used to lift those locks were Enter and Escape - both of which need the
+    // prompt to still be on screen to be pressed. Closing a screen out from under a live search
+    // therefore left the editor typing into a field that no longer existed, with input locked and
+    // nothing visible to explain it.
+    public void CancelPrompt()
+    {
+        if (!_renaming) return;
+
+        var cancelled = _promptCancelled;
+        _promptDone = null;
+        EndPrompt();
+        UpdateNameLabel();
+        cancelled?.Invoke();
+    }
+
     public void ConfirmPrompt()
     {
         if (!_renaming) return;
@@ -1659,12 +1677,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         SetStatus($"Saved '{Map.MapName}'.", StatusSeverity.Success);
     }
 
-    // Preview width; height follows the screen's aspect. Wide enough to hold up when a snapshot is
-    // blown up rather than only glanced at in a grid cell: at 512 the hover preview was already
-    // upscaling on a high-resolution screen. A screen narrower than this is written as it is, since
-    // Downscale never enlarges. Snapshots already on disk keep the width they were taken at - saving
-    // a map again is what re-takes it.
-    private const int SnapshotWidth = 1280;
+    // Preview width; height follows the screen's aspect.
+    //
+    // 1080p, deliberately, and it is a ceiling rather than a target: Downscale never enlarges, so a
+    // 1080p screen is written as it is and only a larger one is brought down to this. Going higher
+    // was tried and reverted - it costs every author disk and memory for a sharpness only the
+    // minority on a bigger monitor would ever see, and a snapshot is a picture of a room, not the
+    // room. The earlier 512 and 1280 were each sized for the largest use at the time (a grid cell,
+    // then a hover preview) and each outgrown; this one is sized for the common screen instead.
+    //
+    // Snapshots already on disk keep the width they were taken at - saving a map again is what
+    // re-takes it.
+    private const int SnapshotWidth = 1920;
 
     private static Texture2D Downscale(Texture2D source, int width)
     {

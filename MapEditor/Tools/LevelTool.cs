@@ -68,9 +68,9 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("Left click", "Select room / drag"),
-        ("Ctrl+Left", "Add a room here"),
-        ("Right click", "Open/close door to selection"),
+        ("LMB", "Select room / drag"),
+        ("Ctrl+LMB", "Add a room here"),
+        ("RMB", "Toggle node doors"),
         ("Del", "Delete selected room")
     ];
 
@@ -233,6 +233,10 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     private void TeardownCanvas()
     {
+        // By hand, because the grid spends part of its life parented to nothing (DetachPoolGrid) and
+        // closing the canvas would not take it with it.
+        DestroyPoolGrid();
+
         _canvas?.Close();
         _canvas = null;
         _dragging = false;
@@ -310,7 +314,7 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
     // ---- options column ------------------------------------------------------------------------------
 
     private static readonly string[] Modifiers = ["None", "Combat", "Reward"];
-    private const string VanillaLabel = "Vanilla generated room";
+    private const string VanillaLabel = "Vanilla generated";
 
     private static readonly string[] RoomKinds =
         [CTLevelRoom.Generated, CTLevelRoom.PodiumRoom, CTLevelRoom.EndOfFloorRoom];
@@ -321,19 +325,26 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         if (column == null) return;
 
         _ui.CloseTransientUi();
+
+        // The grid steps out of the way before the column is wiped and steps back in below, so
+        // selecting a room does not tear down and refill a hundred cells that were already correct.
+        // Its contents are every saved room, which does not depend on which room is selected - only
+        // the lit ones do, and that is one call.
+        DetachPoolGrid();
+
         for (var i = column.childCount - 1; i >= 0; i--)
             UnityEngine.Object.Destroy(column.GetChild(i).gameObject);
 
-        _ui.CreateHeader(column, "- Level -", 22);
-        Note(column, Summary());
+        _poolNote = null;
 
         _ui.CreateToggle(column, "Random walk", !_level.AuthoredLayout, on => SetAuthored(!on));
 
         if (_selected == null)
         {
-            Note(column, _level.Rooms.Count == 0
-                ? "No rooms yet - ctrl+click a cell to add one."
-                : "Nothing selected. Left-click a room, or ctrl+click a cell to add one.");
+            // The empty level is the one case worth a word, because there is nothing on the grid to
+            // click and no way to guess that ctrl is what adds a room. With rooms on screen the
+            // grid speaks for itself.
+            if (_level.Rooms.Count == 0) Note(column, "No rooms yet - ctrl+click a cell to add one.");
             return;
         }
 
@@ -342,63 +353,81 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         BuildEndControls(column, index);
 
-        if (_level.AuthoredLayout)
-        {
-            BuildKindControl(column);
-            BuildSideControls(column);
-        }
-
-        Label(column, "Modifier");
-        var modifierLabels = new List<string>(Modifiers.Length);
-        foreach (var modifier in Modifiers) modifierLabels.Add("Modifier: " + modifier);
-
-        var modifierPicker = _ui.CreateDropdown(column, "Modifier", modifierLabels, (i, _) =>
-        {
-            if (i < 0 || i >= Modifiers.Length || _selected == null) return;
-            _selected.Modifier = Modifiers[i];
-            BuildOptionsColumn();
-        });
-        modifierPicker.SetSelected(Array.IndexOf(Modifiers, _selected.Modifier));
+        // Doors are not listed. Every side that faces another room is toggled by right-clicking the
+        // pair, which is both quicker than finding the side in a list and impossible to get the
+        // wrong way round - so a column of dropdowns saying the same thing was only a second place
+        // to look.
+        if (_level.AuthoredLayout) BuildKindControl(column);
 
         // A prefab room has no pool to pick from: it is that room, and the podiums or the exit
         // platform standing in it are the reason it is there.
-        if (_selected.VanillaRoom != CTLevelRoom.Generated)
+        if (_selected.VanillaRoom == CTLevelRoom.Generated)
+        {
+            _ui.CreateHeader(column, "- Maps -", 20);
+            BuildPoolControls(column, _selected);
+        }
+        else if (_selected.VanillaRoom == CTLevelRoom.PodiumRoom)
         {
             // The podiums take themselves away past the first floor of a run - the game's rule, not
             // ours - and a room that arrives empty reads as a broken feature unless it is said here.
-            if (_selected.VanillaRoom == CTLevelRoom.PodiumRoom)
-                Note(column, "The podiums only appear on the first floor of a run.");
-
-            return;
+            Note(column, "The podiums only appear on the first floor of a run.");
         }
 
-        _ui.CreateHeader(column, "- Plays -", 20);
-        BuildPoolControls(column, _selected);
+        // Last, under the room list. It is one dropdown against a grid of rooms, and putting it
+        // above pushed the list - the thing this panel is mostly for - off the bottom of the screen.
+        BuildModifierControl(column);
+    }
+
+    private void BuildModifierControl(RectTransform column)
+    {
+        Label(column, "Modifier");
+
+        var labels = new List<string>(Modifiers.Length);
+        foreach (var modifier in Modifiers) labels.Add("Modifier: " + modifier);
+
+        var picker = _ui.CreateDropdown(column, "Modifier", labels, (i, _) =>
+        {
+            if (i < 0 || i >= Modifiers.Length || _selected == null) return;
+
+            _selected.Modifier = Modifiers[i];
+
+            // The room's border is drawn from this, so the grid is repainted - but the column is
+            // left alone, since nothing in it has changed.
+            _canvas?.RebuildVisuals();
+            _canvas?.HighlightRoom(_selected);
+        });
+
+        picker.SetSelected(Array.IndexOf(Modifiers, _selected.Modifier));
     }
 
     // Which room the run starts in and which one has the way out are the first and last in the
-    // level, so choosing them is choosing where this room sits in it. The doors themselves are
-    // placed by LevelLayout - there is nothing here to wire.
+    // level, so these say where this room sits in it. The doors themselves are placed by
+    // LevelLayout - there is nothing here to wire.
+    //
+    // Tickboxes rather than buttons, because being the entrance is a STATE of the room and a
+    // button could only ever say what it would do, never what is true. Unticking is refused: a
+    // level has a first room and a last room whether anyone chose them or not, so there is no such
+    // thing as taking the entrance away - only giving it to a different room.
     private void BuildEndControls(RectTransform column, int index)
     {
+        // Under a random walk the ends are the game's own rooms and their position is not a choice.
+        if (!_level.AuthoredLayout) return;
+
         var first = index == 0;
         var last = index == _level.Rooms.Count - 1;
 
-        // Under a random walk the ends are the game's own rooms and their position is not a choice,
-        // so there is nothing to move and nothing to move it to.
-        if (!_level.AuthoredLayout)
+        _ui.CreateToggle(column, "Entrance", first, on =>
         {
-            if (first) Note(column, "Built by the game. The run starts here.");
-            else if (last) Note(column, "Built by the game. The way out is here.");
-            return;
-        }
+            if (on && _selected != null && _level.Rooms.IndexOf(_selected) != 0) MoveTo(0, "starts here");
+            else BuildOptionsColumn();
+        });
 
-        if (first && last) Note(column, "The only room: the run starts and ends here.");
-        else if (first) Note(column, "The run starts here.");
-        else if (last) Note(column, "The way out is here.");
-
-        if (!first) _ui.CreateButton(column, "Start Here", () => MoveTo(0, "starts here"));
-        if (!last) _ui.CreateButton(column, "Way Out Here", () => MoveTo(-1, "has the way out"));
+        _ui.CreateToggle(column, "Exit", last, on =>
+        {
+            if (on && _selected != null && _level.Rooms.IndexOf(_selected) != _level.Rooms.Count - 1)
+                MoveTo(-1, "has the way out");
+            else BuildOptionsColumn();
+        });
     }
 
     private void MoveTo(int position, string became)
@@ -417,25 +446,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         PushUndo("change which room is an end", before);
         AfterMutation($"Room {_level.Rooms.IndexOf(room) + 1} {became}.");
-    }
-
-    private string Summary()
-    {
-        if (_level == null) return "";
-
-        var bound = 0;
-        var prefabs = 0;
-        foreach (var room in _level.Rooms)
-        {
-            if (room == null) continue;
-            if (room.VanillaRoom != CTLevelRoom.Generated) prefabs++;
-            else if (room.NodePool.Count > 0) bound++;
-        }
-
-        // The two the game builds are rooms in the level now, so the count on screen is the floor
-        // the player will walk - there is no arithmetic left to explain.
-        return $"{_level.Rooms.Count} room(s), {bound} naming a blueprint" +
-               (prefabs > 0 ? $", {prefabs} built by the game" : "");
     }
 
     // Whether this room is generated - the kind a blueprint is pasted onto - or one of the game's
@@ -462,106 +472,245 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         picker.SetSelected(at < 0 ? 0 : at);
     }
 
-    // Only the sides that face another room. Doors are opened for every room this one touches the
-    // moment it is placed or dragged, so these are here to close one again - a spiral, a room you
-    // walk past rather than through. A side facing open grid has nothing to decide: it is a wall,
-    // or it is one of the two end doors, and both of those are placed by LevelLayout.
-    private void BuildSideControls(RectTransform column)
-    {
-        var joins = new List<LevelSide>();
-        foreach (var side in LevelLayout.Sides)
-            if (LevelLayout.Neighbour(_level, _selected, side) != null) joins.Add(side);
+    // Every saved room as a picture, the ones in the pool lit up.
+    //
+    // This was a dropdown of names plus an X row per member, which asked you to know what a room
+    // looked like from its name and split one question - "which rooms can appear here?" - across two
+    // controls that disagreed about what was in the list. A grid of snapshots answers it in one
+    // place, the way the structure tool does: click to add, click again to remove, and the lit
+    // cells ARE the pool.
+    private MapEditorGrid _poolGrid;
+    private GameObject _poolNote;
 
-        var wayIn = LevelLayout.SideCarrying(_selected, CTLevelRoom.WayIn);
-        var wayOut = LevelLayout.SideCarrying(_selected, CTLevelRoom.WayOut);
+    private const float PoolGridHeight = 320f;
 
-        if (joins.Count == 0 && wayIn == null && wayOut == null) return;
-
-        _ui.CreateHeader(column, "- Doors -", 20);
-
-        if (wayIn != null) Note(column, $"Way in: {LevelLayout.DescribeSide(wayIn.Value)}");
-        if (wayOut != null) Note(column, $"Way out: {LevelLayout.DescribeSide(wayOut.Value)}");
-
-        var keys = new List<string> { CTLevelRoom.Door, CTLevelRoom.Wall };
-
-        foreach (var side in joins)
-        {
-            var captured = side;
-            var name = LevelLayout.DescribeSide(side);
-            var labels = new List<string> { $"{name}: door", $"{name}: wall" };
-
-            var picker = _ui.CreateDropdown(column, name, labels, (i, _) =>
-            {
-                if (i < 0 || i >= keys.Count || _selected == null) return;
-                SetSide(_selected, captured, keys[i]);
-            });
-
-            picker.SetSelected(LevelLayout.Get(_selected, side) == CTLevelRoom.Door ? 0 : 1);
-        }
-    }
-
-    // One dropdown offering what is not in the pool yet, and an X row per member, so the panel
-    // scales with the pool rather than with the save folder.
     private void BuildPoolControls(RectTransform column, CTLevelRoom room)
     {
-        var candidateKeys = new List<string>();
-        var candidateLabels = new List<string>();
+        // Above the grid, as in the structure tool. A save folder grows without limit and the room
+        // you want is rarely the one your eye lands on; the grid stays live underneath so a result
+        // can still be hovered for the big picture.
+        _poolSearch = new MapEditorSearchRow(_editor, _ui, column, ShowPoolSearch, ShowPoolAll);
 
-        // <vanilla> = the room the game would have generated.
-        if (!room.NodePool.Contains(CTLevelRoom.VanillaNode))
+        // Built once per session and kept. The cells are every saved room, which is the same list
+        // whichever room is selected - so the only thing a new selection changes is which of them
+        // are lit.
+        if (_poolGrid == null)
         {
-            candidateKeys.Add(CTLevelRoom.VanillaNode);
-            candidateLabels.Add(VanillaLabel);
-        }
+            // Three across at a larger cell, and each cell carries its room's name: these are rooms
+            // the author made and named, so the name is half of what identifies one - a grid of
+            // near-identical dungeon snapshots is not.
+            _poolGrid = _ui.CreateIconGrid(column, "PoolGrid", columns: 3, cellSize: 132f,
+                scrollHeight: PoolGridHeight);
+            _poolGrid.ShowNames = true;
 
-        foreach (var node in MapEditorSerialization.LoadAll())
-        {
-            if (room.NodePool.Contains(node.MapName)) continue;
-            candidateKeys.Add(node.MapName);
-            candidateLabels.Add(node.MapName);
-        }
-
-        if (candidateLabels.Count > 0)
-        {
-            var dropdown = _ui.CreateDropdown(column, "Add To Pool", candidateLabels, (index, _) =>
+            var entries = new List<MapEditorGrid.Entry>
             {
-                if (index < 0 || index >= candidateKeys.Count) return;
+                // <vanilla> = the room the game would have generated. First, because it is the
+                // answer for "anything, I do not mind" and that is a common thing to want.
+                new()
+                {
+                    Id = CTLevelRoom.VanillaNode,
+                    Display = VanillaLabel,
+                    OnClick = () => TogglePool(CTLevelRoom.VanillaNode)
+                }
+            };
 
-                room.NodePool.Add(candidateKeys[index]);
-                AfterPoolChange();
-            });
-            dropdown.SetSelected(-1);
+            // Names off the file system rather than out of the blueprints: parsing every saved room
+            // to read its name back was a stall on every selection.
+            foreach (var name in MapEditorSerialization.SavedNames())
+            {
+                var captured = name;
+                entries.Add(new MapEditorGrid.Entry
+                {
+                    Id = captured,
+                    Display = captured,
+                    OnClick = () =>
+                    {
+                        // Picking one ends the search, the way it does in the structure tool: the
+                        // filter has done its job and the pool is easier to read whole.
+                        _poolSearch?.Confirm();
+                        TogglePool(captured);
+                    }
+                });
+            }
+
+            _poolEntries = entries;
+            PopulatePool(null);
         }
         else
         {
-            Note(column, "Everything saved is already in this pool.");
+            _poolGrid.Root.transform.SetParent(column, false);
+            _poolGrid.Root.SetActive(true);
+
+            // Measured again in its new parent - see Reflow. Without this the box keeps the height
+            // it had before it was lifted out, and the first row is clipped.
+            _poolGrid.Reflow();
         }
 
-        if (room.NodePool.Count == 0)
+        _poolGrid.SetSelectedMany(room.NodePool);
+
+        _ui.CreateButton(column, "Clear Map Selection", ClearPool);
+
+        _poolNote = _ui.CreateLabel(column, PoolNoteFor(room), 14, TextAlignmentOptions.Center);
+        MapEditorUI.FitLabelHeight(_poolNote);
+    }
+
+    // The full list, built once; the grid shows all of it or the part that matches a query.
+    private List<MapEditorGrid.Entry> _poolEntries;
+    private MapEditorSearchRow _poolSearch;
+
+    private void PopulatePool(string needle)
+    {
+        if (_poolGrid == null || _poolEntries == null) return;
+
+        var shown = _poolEntries;
+
+        if (!string.IsNullOrEmpty(needle))
+            shown = _poolEntries.FindAll(entry =>
+                entry.Display != null &&
+                entry.Display.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0);
+
+        _poolGrid.Populate(_editor, shown, RequestRoomIcon);
+
+        // Membership survives a filter: the pool is what it was, the grid is just showing less of
+        // it, so the cells that come back must come back lit.
+        if (_selected != null) _poolGrid.SetSelectedMany(_selected.NodePool);
+    }
+
+    private void ShowPoolSearch(string needle)
+    {
+        PopulatePool(needle);
+
+        var matches = _poolGrid != null && _poolEntries != null
+            ? _poolEntries.FindAll(entry =>
+                entry.Display != null &&
+                entry.Display.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0).Count
+            : 0;
+
+        _poolSearch?.ReportCount(matches, matches, needle);
+    }
+
+    private void ShowPoolAll() => PopulatePool(null);
+
+    private static string PoolNoteFor(CTLevelRoom room) =>
+        room == null || room.NodePool.Count == 0
+            ? "Empty - any saved map can appear here."
+            : $"{room.NodePool.Count} map(s) can appear here.";
+
+    // Off the column, not destroyed: BuildOptionsColumn wipes its children and this has to survive
+    // that. Parented to nothing it is a scene root, which is why TeardownCanvas destroys it by hand.
+    private void DetachPoolGrid()
+    {
+        if (_poolGrid?.Root == null) return;
+
+        _poolGrid.Root.transform.SetParent(null, false);
+        _poolGrid.Root.SetActive(false);
+    }
+
+    private void DestroyPoolGrid()
+    {
+        if (_poolGrid?.Root != null) UnityEngine.Object.Destroy(_poolGrid.Root);
+        _poolGrid = null;
+        _poolNote = null;
+    }
+
+    // Repaints the marks and the grid, NOT the column. Rebuilding the column would destroy the grid
+    // under the pointer and throw the scroll position away on every click, which for a control
+    // whose whole purpose is picking several things in a row is the one thing it must not do - so
+    // the note is written here rather than left to a rebuild that never comes.
+    private void TogglePool(string key)
+    {
+        var room = _selected;
+        if (room == null) return;
+
+        if (!room.NodePool.Remove(key)) room.NodePool.Add(key);
+
+        AfterPoolEdit(room);
+    }
+
+    private void ClearPool()
+    {
+        var room = _selected;
+        if (room == null || room.NodePool.Count == 0) return;
+
+        room.NodePool.Clear();
+        AfterPoolEdit(room);
+    }
+
+    private void AfterPoolEdit(CTLevelRoom room)
+    {
+        _poolGrid?.SetSelectedMany(room.NodePool);
+
+        if (_poolNote != null)
         {
-            Note(column, "Empty - any saved room can appear here.");
+            var text = _poolNote.GetComponent<TMP_Text>();
+            if (text != null) text.text = PoolNoteFor(room);
+        }
+
+        _canvas?.RebuildVisuals();
+        _canvas?.HighlightRoom(_selected);
+        RefreshChrome();
+    }
+
+    // A room's own snapshot as its icon, so the grid shows rooms rather than filenames - and the
+    // grid's hover preview then blows up the picture of the room, which is the thing worth seeing.
+    //
+    // Read through UnityWebRequestTexture, which decodes off the main thread: these are full-screen
+    // pngs and forty of them decoded inline is the stall the load browser was fixed for.
+    private static readonly Dictionary<string, Sprite> _roomIcons = [];
+
+    private void RequestRoomIcon(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+
+        if (id == CTLevelRoom.VanillaNode)
+        {
+            _poolGrid?.SetCellIcon(id, MapEditorIcons.GetToolIconOrNull("World File"));
             return;
         }
 
-        // Copied: removing walks the list these rows were built from.
-        foreach (var entry in new List<string>(room.NodePool))
+        if (_roomIcons.TryGetValue(id, out var cached))
         {
-            var captured = entry;
-            var label = captured == CTLevelRoom.VanillaNode ? VanillaLabel : captured;
-            _ui.CreateButton(column, "X  " + label, () =>
-            {
-                room.NodePool.Remove(captured);
-                AfterPoolChange();
-            });
+            if (cached != null) _poolGrid?.SetCellIcon(id, cached);
+            return;
         }
+
+        _editor.StartCoroutine(LoadRoomIcon(id));
     }
 
-    private void AfterPoolChange()
+    private System.Collections.IEnumerator LoadRoomIcon(string mapName)
     {
-        _canvas?.RebuildVisuals();
-        _canvas?.HighlightRoom(_selected);
-        BuildOptionsColumn();
-        RefreshChrome();
+        // Remembered as "looked and found nothing" too, so a room with no snapshot is not re-read
+        // every time a pool is drawn.
+        _roomIcons[mapName] = null;
+
+        var path = MapEditorSerialization.SnapshotPathFor(mapName);
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) yield break;
+
+        string uri;
+        try
+        {
+            uri = new Uri(path).AbsoluteUri;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: snapshot path '{path}' is not readable: {e.Message}");
+            yield break;
+        }
+
+        using var request = UnityEngine.Networking.UnityWebRequestTexture.GetTexture(uri, nonReadable: true);
+        yield return request.SendWebRequest();
+
+        if (!string.IsNullOrEmpty(request.error)) yield break;
+
+        var texture = UnityEngine.Networking.DownloadHandlerTexture.GetContent(request);
+        if (texture == null) yield break;
+
+        var sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height),
+            new Vector2(0.5f, 0.5f));
+
+        _roomIcons[mapName] = sprite;
+        _poolGrid?.SetCellIcon(mapName, sprite);
     }
 
     // ---- mutation --------------------------------------------------------------------------------------

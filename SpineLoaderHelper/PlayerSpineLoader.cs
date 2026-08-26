@@ -353,14 +353,21 @@ public class PlayerSpineLoader
 
     // "<spine>/<skin>" -> "<spine>". The API tracks a spine for players one and two only, so a
     // third player is reading player one's - which is also the spine they are actually wearing.
-    public static string ActiveSpineName(int playerId)
+    public static string ActiveSpineName(int playerId) => SpineNameFromKey(ActiveSpineKey(playerId));
+
+    public static string SpineNameFromKey(string key)
     {
-        var key = ActiveSpineKey(playerId);
         if (string.IsNullOrEmpty(key)) return "";
 
         var slash = key.IndexOf('/');
         return slash < 0 ? key : key.Substring(0, slash);
     }
+
+    // The choice this mod wrote down, as opposed to the one the API is currently holding. At boot
+    // these differ for a while: ours is on disk from the moment it was picked, the API's does not
+    // exist until something puts it back.
+    public static string RememberedSpineKey(int playerId) =>
+        (playerId == 0 ? Plugin.SelectedSpineP1?.Value : Plugin.SelectedSpineP2?.Value) ?? "";
 
     // Null for the vanilla spine and for any custom one without a config.json, which is the signal
     // to leave everything at its default behaviour.
@@ -792,15 +799,48 @@ public class PlayerSpineLoader
     // lost - that this exists for.
     private static void RestoreSelectedSpine(int playerId)
     {
-        var saved = playerId == 0 ? Plugin.SelectedSpineP1?.Value : Plugin.SelectedSpineP2?.Value;
+        var saved = RememberedSpineKey(playerId);
         if (string.IsNullOrEmpty(saved)) return;
 
         if (!string.IsNullOrEmpty(ActiveSpineKey(playerId))) return;
 
+        // Loaded first, selected second, and that order is the fix.
+        //
+        // ChangeSelectedPlayerSpine only takes a spine the API has been handed, and a spine is not
+        // handed over until it has loaded (Register, at the end of the load). Selecting first meant
+        // naming something that did not exist yet: the API kept its default and the player came up
+        // in the plain lamb, with the log cheerfully reporting a restore that never happened.
+        var name = SpineNameFromKey(saved);
+        if (!string.IsNullOrEmpty(name) && Registry.ContainsKey(name) && !IsLoaded(name))
+        {
+            EnsureLoaded(name, () => ApplySavedSpine(playerId, saved));
+            return;
+        }
+
+        ApplySavedSpine(playerId, saved);
+    }
+
+    private static void ApplySavedSpine(int playerId, string saved)
+    {
         try
         {
             CustomSkinManager.ChangeSelectedPlayerSpine(saved, playerId);
-            Plugin.Log.LogInfo($"Player {playerId + 1} spine restored to {saved}.");
+
+            // Read back rather than assumed. The API takes a string and reports nothing, so the only
+            // way to know a selection was accepted is to ask what the selection is now - and a
+            // restore that silently did nothing is exactly the failure this is here to catch.
+            var actual = ActiveSpineKey(playerId);
+            if (string.Equals(actual, saved, StringComparison.Ordinal))
+            {
+                Plugin.Log.LogInfo($"Player {playerId + 1} spine restored to {saved}.");
+                ResolvePlayer(playerId)?.SetSkin();
+            }
+            else
+            {
+                Plugin.Log.LogWarning($"Player {playerId + 1}: spine '{saved}' was not accepted - the " +
+                                      $"selection is '{(string.IsNullOrEmpty(actual) ? "<none>" : actual)}'. " +
+                                      "It is most likely not registered under that name.");
+            }
         }
         catch (Exception e)
         {
@@ -881,11 +921,20 @@ public class PlayerSpineLoader
 
         // The saved looks load now, synchronously, the way every spine used to - the player must
         // wear their choice on the first frame, not two seconds in.
+        //
+        // Both sources are asked, and asking only the first is what lost the remembered spine.
+        // ActiveSpineName reads COTL_API's selection, and at this point in the boot there isn't one:
+        // this runs from Plugin.Awake, long before anything has put a selection back. So the list
+        // came out empty, the remembered spine was never loaded here, and by the time
+        // RestoreSelectedSpine tried to select it the API had nothing registered under that name to
+        // select - leaving the player in the default lamb. Our own note on disk has the answer from
+        // the moment it was written, so it is read too.
         var loadWatch = Stopwatch.StartNew();
         var eager = 0;
         foreach (var name in new[]
                  {
                      ActiveSpineName(0), ActiveSpineName(1),
+                     SpineNameFromKey(RememberedSpineKey(0)), SpineNameFromKey(RememberedSpineKey(1)),
                      SpineNameFromFleece(Plugin.CurrentFleeceNameP1?.Value),
                      SpineNameFromFleece(Plugin.CurrentFleeceNameP2?.Value)
                  })

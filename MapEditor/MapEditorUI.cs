@@ -543,6 +543,13 @@ public class MapEditorUI
     private Image _previewImage;
     private TMP_Text _previewCaption;
 
+    // How far in from the right edge the hover preview sits. The default clears the room editor's
+    // own panel; a screen that puts a wider panel there raises this while it is up, or the preview
+    // lands on top of the very grid it is previewing.
+    public float IconPreviewRightOffset { get; set; } = PreviewRightOffset;
+
+    public static float DefaultIconPreviewRightOffset => PreviewRightOffset;
+
     public void ShowIconPreview(Sprite sprite, string caption)
     {
         if (sprite == null || _canvasRoot == null)
@@ -553,6 +560,17 @@ public class MapEditorUI
 
         EnsurePreview();
         if (_previewGO == null) return;
+
+        // Placed on every show rather than once at build: the offset belongs to whichever screen is
+        // open, and the preview outlives all of them.
+        var rect = (RectTransform)_previewGO.transform;
+        rect.anchoredPosition = new Vector2(-IconPreviewRightOffset, -12f);
+
+        // And raised to the front for the same reason. Sibling order is draw order on a canvas, and
+        // this is built the first time anything hovers a cell - so any full-screen tool opened after
+        // that is a later sibling and draws straight over it. Raising it on show costs nothing and
+        // does not care which screens have come and gone.
+        rect.SetAsLastSibling();
 
         _previewImage.sprite = sprite;
         _previewCaption.text = caption ?? "";

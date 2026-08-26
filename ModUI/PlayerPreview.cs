@@ -260,6 +260,18 @@ public static class PlayerPreview
     // first time, which is before any mesh has been generated - so sharedMaterials was still empty,
     // nothing was registered, and the portrait carried on rendering unlit-dark through the game's
     // material. It is retried each frame until it takes.
+    // What comes off the game's own shader for a portrait: everything that answers to where the
+    // player is standing rather than to what they look like. The woods fade is the one that made
+    // the portrait dark - it tints the character toward the environment, and the portrait's corner
+    // of the map has no environment to tint toward.
+    private static readonly string[] WorldKeywords =
+        ["_USEFADEINWOODSCOLOR", "_RECEIVESHADOW", "_USEEMISSION_ON"];
+
+    // ASE writes a toggle as a keyword plus a float of the same name, and a shader that branches on
+    // the float rather than the keyword would ignore the list above on its own.
+    private static readonly string[] WorldToggles =
+        ["_UseFadeInWoodsColor", "_ReceiveShadow", "_UseEmission"];
+
     private static bool Untint(SkeletonAnimation spine)
     {
         var renderer = spine != null ? spine.GetComponent<MeshRenderer>() : null;
@@ -277,28 +289,59 @@ public static class PlayerPreview
             any = true;
             if (spine.CustomMaterialOverride.ContainsKey(source)) continue;
 
-            // Copied from the material the player is actually wearing, then dropped onto the stock
-            // shader - not built blank from the stock shader.
-            //
-            // That distinction is the whole fix. The game's player material arrives with settings
-            // this mod has already corrected on it, and the one that matters here is the emission
-            // map: SpinePatches zeroes its texture scale on the player's atlas material, because
-            // custom skins otherwise glow red at the edges, and every custom spine is loaded against
-            // that same corrected material. A blank material starts from the shader's defaults and
-            // therefore un-fixes it - which is why the artifacts came back on the portrait and
-            // nowhere else. Copying first carries the correction across; the shader swap after it is
-            // what drops the world's lighting.
             var plain = new Material(source)
             {
                 name = source.name + " (portrait)",
                 hideFlags = HideFlags.HideAndDontSave
             };
 
-            plain.shader = stock;
-            plain.mainTexture = source.mainTexture;
+            // Which shader the portrait keeps depends on whose atlas it is, and the two cases want
+            // opposite things.
+            //
+            // A CUSTOM spine is built by this mod against Spine/Skeleton, with an atlas packed by
+            // Spine's own packer. Handing it the stock shader is a no-op that costs nothing, and
+            // this is the case that has always looked right.
+            //
+            // The STOCK lamb wears the game's own Skeleton_ASE_v1_SoftAlphaTest, and the name is
+            // the whole story: it alpha-TESTS. A texel below the cutoff is discarded outright,
+            // colour and all. Spine/Skeleton alpha-BLENDS instead, so those same texels come back
+            // at whatever alpha they carry - which is why the lamb's atlas showed a red haze on the
+            // ears and a red shape floating above the head, and why neither premultiplied nor
+            // straight blending could remove them. Nothing about the blend was ever going to; the
+            // pixels are supposed to be thrown away, not blended.
+            //
+            // So the stock lamb keeps the shader that draws it correctly in the world, and only the
+            // parts of it that depend on where the player is STANDING come off. That is also the
+            // honest answer to the original problem: the portrait was never missing a light, it was
+            // wearing the woods' fade colour in a corner of the map with no woods in it.
+            var fromSpineShader = source.shader != null && source.shader.name.StartsWith("Spine/");
 
-            // Belt and braces: a property that survived the shader swap keeps the copied value, and
-            // one that did not is re-zeroed here rather than left at the new shader's default.
+            if (fromSpineShader)
+            {
+                plain.shader = stock;
+                plain.mainTexture = source.mainTexture;
+            }
+            else
+            {
+                foreach (var keyword in WorldKeywords) plain.DisableKeyword(keyword);
+                foreach (var toggle in WorldToggles)
+                    if (plain.HasProperty(toggle)) plain.SetFloat(toggle, 0f);
+            }
+
+            // The biome's colours, pinned ON THE MATERIAL rather than swapped around the render.
+            //
+            // These are shader globals - LightingManager drives _TimeOfDayColor from the biome's
+            // god-ray colour, and in a torch-lit dungeon it reads RGBA(0.358, 0.304, 0.186): the
+            // orange. Setting the global to white for the duration of Camera.Render did not stick,
+            // which is the tell that something else writes it inside the frame. A value set on the
+            // material cannot be raced that way - Unity resolves a material's own property before
+            // it ever looks at the global - so the portrait carries its own neutral copy and stops
+            // caring what the world is doing.
+            plain.SetColor(TimeOfDayColor, Color.white);
+            plain.SetColor(GlobalHCol, Color.white);
+            plain.SetFloat(GlobalExposure, 1f);
+
+            // The v1.0.4 "red overlays" correction, applied where it can no longer be skipped.
             if (plain.HasProperty("_EmissionMap"))
                 plain.SetTextureScale("_EmissionMap", Vector2.zero);
 
@@ -417,6 +460,21 @@ public static class PlayerPreview
         }
     }
 
+    // The biome's own colours, which the game keeps as SHADER GLOBALS rather than on any material.
+    //
+    // This is where the tint comes from, and why nothing done to the material could reach it: the
+    // player's shader multiplies by _TimeOfDayColor, and LightingManager drives that from the
+    // biome's god-ray colour (GameManager sets it to plain white for the untinted case, which is
+    // where the neutral value below comes from). Stand in a torch-lit dungeon and the lamb is
+    // orange - correctly, in the world, and pointlessly in a portrait that is not standing anywhere.
+    //
+    // Set immediately around Camera.Render, which draws synchronously, and put straight back. The
+    // globals belong to the whole game and the world's own cameras must not see this.
+    private static readonly int TimeOfDayColor = Shader.PropertyToID("_TimeOfDayColor");
+    private static readonly int GlobalHCol = Shader.PropertyToID("_GlobalHCol");
+    private static readonly int GlobalSCol = Shader.PropertyToID("_GlobalSCol");
+    private static readonly int GlobalExposure = Shader.PropertyToID("_GlobalExposure");
+
     private static void Render(Portrait portrait)
     {
         if (_camera == null || portrait.Spine == null || portrait.Texture == null) return;
@@ -426,8 +484,28 @@ public static class PlayerPreview
         _camera.transform.position = portrait.Position + new Vector3(0f, portrait.Size * 0.75f, -100f);
         _camera.orthographicSize = portrait.Size;
         _camera.targetTexture = portrait.Texture;
-        _camera.Render();
-        _camera.targetTexture = null;
+
+        var timeOfDay = Shader.GetGlobalColor(TimeOfDayColor);
+        var highlight = Shader.GetGlobalColor(GlobalHCol);
+        var shadow = Shader.GetGlobalColor(GlobalSCol);
+        var exposure = Shader.GetGlobalFloat(GlobalExposure);
+
+        Shader.SetGlobalColor(TimeOfDayColor, Color.white);
+        Shader.SetGlobalColor(GlobalHCol, Color.white);
+        Shader.SetGlobalFloat(GlobalExposure, 1f);
+
+        try
+        {
+            _camera.Render();
+        }
+        finally
+        {
+            Shader.SetGlobalColor(TimeOfDayColor, timeOfDay);
+            Shader.SetGlobalColor(GlobalHCol, highlight);
+            Shader.SetGlobalColor(GlobalSCol, shadow);
+            Shader.SetGlobalFloat(GlobalExposure, exposure);
+            _camera.targetTexture = null;
+        }
     }
 
     // ---- the rig -----------------------------------------------------------------------------------------
@@ -436,12 +514,8 @@ public static class PlayerPreview
     {
         if (_camera != null && _root != null) return true;
 
+        // FreeLayer always answers now - see there - so there is no failure to report here.
         if (_layer < 0) _layer = FreeLayer();
-        if (_layer < 0)
-        {
-            Plugin.Log.LogWarning("CultTweaker: no spare layer for the player portraits.");
-            return false;
-        }
 
         if (_root == null)
         {
@@ -474,14 +548,9 @@ public static class PlayerPreview
         return true;
     }
 
-    // A layer no camera in the game draws, so a portrait can never appear in the world.
-    private static int FreeLayer()
-    {
-        for (var i = 31; i >= 8; i--)
-            if (string.IsNullOrEmpty(LayerMask.LayerToName(i))) return i;
-
-        return -1;
-    }
+    // A layer no camera in the game draws, so a portrait can never appear in the world - asked of
+    // OffscreenLayer, which every rig shares. Preferred, not required: see there.
+    private static int FreeLayer() => MapEditor.OffscreenLayer.Value;
 
     private static void SetLayer(GameObject go, int layer)
     {

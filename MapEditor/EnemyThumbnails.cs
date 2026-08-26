@@ -164,15 +164,9 @@ public static class EnemyThumbnails
         }
     }
 
-    private static int FindFreeLayer()
-    {
-        // Downwards: the high layers are the ones projects leave unnamed.
-        for (var i = 31; i >= 8; i--)
-            if (string.IsNullOrEmpty(LayerMask.LayerToName(i))) return i;
-
-        Plugin.Log.LogInfo("MapEditor: no spare layer for thumbnails; the staging camera relies on distance instead.");
-        return -1;
-    }
+    // Shared with the other off-screen rigs - see OffscreenLayer, which says once what this used to
+    // say once per thumbnail.
+    private static int FindFreeLayer() => OffscreenLayer.Value;
 
     private static IEnumerator Render(ThumbRequest request)
     {

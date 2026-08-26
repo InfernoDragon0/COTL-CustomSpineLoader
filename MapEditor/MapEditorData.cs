@@ -354,6 +354,32 @@ public static class MapEditorSerialization
         return results;
     }
 
+    // The saved blueprints by name, without parsing a single one of them.
+    //
+    // Save writes to PathFor(MapName) after sanitising it, so the file name IS the map name. A
+    // picker or a browser that only needs names therefore has no business deserialising a folder of
+    // rooms to read them back out - a blueprint carries every shape, prop, structure and enemy in
+    // its room, and that is a lot of json to parse for a string that was already on the file.
+    public static List<string> SavedNames()
+    {
+        var names = new List<string>();
+
+        try
+        {
+            foreach (var file in APIHelper.ModContentPaths.FilesIn(FolderName, "*.json"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (!string.IsNullOrEmpty(name)) names.Add(name);
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogError("MapEditor: blueprint name scan failed: " + e);
+        }
+
+        return names;
+    }
+
     public static CTNodeBlueprint LoadByName(string mapName)
     {
         var path = ReadPathFor(mapName);

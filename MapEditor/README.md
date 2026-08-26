@@ -830,6 +830,30 @@ the file system already knows. Working on a room usually means working on the on
 list needs no reading most of the time. Dates within a day read as a clock time, so the ones you are
 actually iterating on are legible at a glance rather than being four identical timestamps.
 
+**Nothing is parsed to list it**, and that was the second stutter on opening. The browser needs a
+name and a date; a blueprint carries every shape, prop, structure and enemy in its room. Reading the
+folder used to mean deserialising all of that — every saved room, on the main thread, before the
+first card appeared. But `Save` writes to `PathFor(MapName)` after sanitising it, so **the file name
+is the map name**, and the write time is on the file: the listing is now a directory read, and the
+one blueprint that gets parsed is the one that gets clicked (`MapEditorSerialization.SavedNames`
+offers the same listing to anything else that only wants names — the Level tool's *Add To Pool*
+picker was doing the identical thing on every selection change).
+
+What is left of the scan — the directory walk, the write times, and the level blueprints the hub
+filter has to read — runs on a worker thread through `Task.Run`, the way `SaveAsync` already writes.
+The coroutine holds a "Reading saved rooms..." note until it lands. Nothing on that thread touches a
+Unity API; `ModContentPaths` is `System.IO` and a static path, and its bridge list is warmed on the
+main thread first so the lazy fill is not a race.
+
+**Cards are built six to a frame** with a count in the status bar, on the model of the NPC tool's
+room scan. Each card is a plate, two labels and a picture frame, so a folder of forty in one frame
+was a visible lurch even once the parsing was gone.
+
+**Hubs are filtered by sanitised name.** `HubSession` stores the blueprint name as the author typed
+it and `LoadByName` sanitises before going to disk, so comparing sanitised names compares the two
+things the loader itself would — where the old comparison against the blueprint's own `MapName`
+field would have missed a name that needed sanitising.
+
 **Notes**
 
 - Screenshots are written at **1280 wide** (height follows the screen's aspect; a narrower screen
@@ -849,6 +873,11 @@ actually iterating on are legible at a glance rather than being four identical t
   editor. A token is bumped whenever the list is rebuilt or the tool exits, so a snapshot still
   decoding for a grid that no longer exists throws its texture away instead of filling a dead
   cell.
+- **Three at a time, not all at once.** The decode is off the main thread but the *upload* is not,
+  and forty of those landing within a few frames is a stutter of its own. Three worker coroutines
+  pull from one cursor over the list, so the pipe stays busy without uploads piling up — and since
+  the list is newest-first, the pictures worth waiting for arrive first. They start only once every
+  card is standing, so the pictures fill in against a list that has stopped moving.
 - A manual load cancels any running level: a stale run advancing on the next door would teleport
   the player into an unrelated room chain.
 

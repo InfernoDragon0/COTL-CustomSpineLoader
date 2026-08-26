@@ -67,6 +67,11 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             options.Add($"{group} ({Catalog()[group].Count})");
         }
 
+        // Opened rather than scanned, so it goes last and says so: picking it reads room prefabs
+        // off disk, which the other groups never do.
+        _groupKeys.Add(BossGroupKey);
+        options.Add("Bosses (inside rooms)");
+
         // Not cached: mods register enemies at their own pace, so this group is read live.
         _groupKeys.Add(null);
         options.Add("Custom (mods)");
@@ -117,6 +122,19 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
                 list.Add(CellFor(entry.label, entry.key, isCustom: false));
         }
 
+        // Boss-room characters, but only once the group has been opened - searching cannot open two
+        // dozen room prefabs on a keystroke, so until then they are simply not there to find.
+        if (_bossEntries != null)
+            foreach (var entry in _bossEntries)
+            {
+                if (entry.label.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (!seen.Add(entry.key)) continue;
+
+                total++;
+                if (list.Count < MapEditorSearchRow.MaxResults)
+                    list.Add(CellFor(entry.label, entry.key, isCustom: false));
+            }
+
         foreach (var pair in CustomEnemies())
         {
             if (pair.Value == null) continue;
@@ -139,7 +157,150 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var group = _groupKeys[index];
         if (group == null) ShowCustomGroup();
+        else if (ReferenceEquals(group, BossGroupKey)) ShowBossGroup();
         else ShowGroup(group);
+    }
+
+    // ---- bosses that live inside rooms ---------------------------------------------------------
+
+    // A sentinel, compared by reference, so it can never collide with a real biome folder name.
+    private static readonly string BossGroupKey = "\0bosses";
+
+    // The rooms worth opening. Every boss and miniboss arena, plus Narinder's two - which is where
+    // the Guardians and the Death Cat itself are, none of them addressable in their own right.
+    // Restricted to the top level of _Rooms: the BossRoomAssets folder beside it is scenery.
+    private static readonly string[] BossRoomNames =
+        ["Boss Room Dungeon", "MiniBoss Room Dungeon", "Death Cat Room", "Special Baal & Aym"];
+
+    private const string RoomPrefix = "Assets/_Rooms/";
+
+    private static List<string> BossRoomKeys()
+    {
+        var keys = new List<string>();
+
+        foreach (var locator in Addressables.ResourceLocators)
+        {
+            if (locator?.Keys == null) continue;
+
+            foreach (var keyObj in locator.Keys)
+            {
+                if (keyObj is not string key || !key.EndsWith(".prefab")) continue;
+                if (!key.StartsWith(RoomPrefix)) continue;
+
+                // One segment only - "Assets/_Rooms/X.prefab", never "Assets/_Rooms/Sub/X.prefab".
+                var relative = key.Substring(RoomPrefix.Length);
+                if (relative.IndexOf('/') >= 0) continue;
+
+                var name = Path.GetFileNameWithoutExtension(key);
+                if (!BossRoomNames.Any(n => name.IndexOf(n, System.StringComparison.OrdinalIgnoreCase) >= 0))
+                    continue;
+
+                if (!keys.Contains(key)) keys.Add(key);
+            }
+        }
+
+        keys.Sort(System.StringComparer.OrdinalIgnoreCase);
+        return keys;
+    }
+
+    // Opened once per session. A room prefab is a heavy thing to load and there are a couple of
+    // dozen of them, so the answer is kept rather than the rooms re-read every time the group is
+    // picked.
+    private static List<(string label, string key)> _bossEntries;
+    private static int _bossScanToken;
+
+    private void ShowBossGroup()
+    {
+        if (_grid == null) return;
+
+        if (_bossEntries != null)
+        {
+            var list = new List<MapEditorGrid.Entry>(_bossEntries.Count);
+            foreach (var entry in _bossEntries) list.Add(CellFor(entry.label, entry.key, isCustom: false));
+            Populate(list);
+            _editor.SetStatus($"{_bossEntries.Count} boss-room character(s).");
+            return;
+        }
+
+        _editor.StartCoroutine(ScanBossRooms(++_bossScanToken));
+    }
+
+    // The NPC tool's room scan, pointed at arenas and looking for enemies instead of NPCs. Rooms are
+    // opened one at a time with the grid filling in behind, because loading two dozen room prefabs
+    // in a frame is a freeze and there is nothing to look at until the first one lands anyway.
+    private IEnumerator ScanBossRooms(int token)
+    {
+        _grid.Clear();
+        EnemyThumbnails.CancelPending();
+
+        var rooms = BossRoomKeys();
+        var found = new List<(string label, string key)>();
+
+        for (var i = 0; i < rooms.Count; i++)
+        {
+            if (token != _bossScanToken) yield break;
+
+            _editor.SetStatus($"Opening boss rooms - {i + 1} of {rooms.Count}...");
+
+            GameObject room = null;
+            yield return RoomSnapshot.LoadPrefabByKeyRoutine(rooms[i], p => room = p);
+            if (token != _bossScanToken) yield break;
+            if (room == null) continue;
+
+            foreach (var entry in ExtractEnemies(room, rooms[i]))
+            {
+                if (_grid.Has(entry.key)) continue;
+
+                found.Add(entry);
+                _grid.AddCell(entry.key, entry.label, null, CellFor(entry.label, entry.key, isCustom: false).OnClick);
+            }
+
+            _editor.RequestOptionsResize();
+        }
+
+        _bossEntries = found;
+
+        // Icons last: the thumbnail rig stages each subject and photographs it, and doing that while
+        // rooms are still being opened is two heavy loads competing.
+        Populate([.. found.Select(e => CellFor(e.label, e.key, isCustom: false))]);
+
+        Plugin.Log.LogInfo($"MapEditor: boss rooms hold {found.Count} placeable character(s) " +
+                           $"across {rooms.Count} room(s).");
+
+        _editor.SetStatus(found.Count > 0
+            ? $"{found.Count} boss-room character(s)."
+            : "No placeable characters found in the boss rooms.", found.Count > 0
+            ? StatusSeverity.Info
+            : StatusSeverity.Warning);
+    }
+
+    // What counts as an enemy inside a room.
+    //
+    // Deliberately NOT the NPC tool's test, which asks for conversation and shop components: a boss
+    // has none of those. It has a UnitObject and a Health, which is what makes it a thing that
+    // fights - and the same pair is what the enemy prefabs under Assets/Prefabs/Enemies carry.
+    private static List<(string label, string key)> ExtractEnemies(GameObject room, string roomKey)
+    {
+        var results = new List<(string label, string key)>();
+        var seen = new HashSet<Transform>();
+
+        foreach (var unit in room.GetComponentsInChildren<UnitObject>(true))
+        {
+            if (unit == null || unit.transform == room.transform) continue;
+
+            // The UnitObject's own node, not a parent: a boss controller holds several of these
+            // (Narinder, two Guardians, the eyes) and climbing above one would take them all as a
+            // single lump.
+            var root = unit.transform;
+            if (!seen.Add(root)) continue;
+
+            // Something has to draw, or the entry is an invisible marker.
+            if (root.GetComponentInChildren<SkeletonAnimation>(true) == null) continue;
+
+            results.Add((root.name, RoomChildPrefabs.KeyFor(roomKey, RoomChildPrefabs.PathOf(root, room.transform))));
+        }
+
+        return results;
     }
 
     private readonly List<string> _groupKeys = [];
@@ -212,6 +373,12 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             yield break;
         }
 
+        if (RoomChildPrefabs.IsRoomKey(key))
+        {
+            yield return SpawnRoomChild(key, position);
+            yield break;
+        }
+
         var parent = SceneRefs.ContentRoot;
         AsyncOperationHandle<GameObject> handle;
         try
@@ -248,10 +415,54 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         }
 
         go.AddComponent<EnemyContainment>();
+
         var placed = new PlacedEnemy { Key = key, IsCustom = false, Instance = go };
         _placed.Add(placed);
         PushUndo(placed, Path.GetFileNameWithoutExtension(key));
         _editor.SetStatus($"Placed {Path.GetFileNameWithoutExtension(key)}.");
+    }
+
+    // A boss lifted out of its arena.
+    //
+    // Instantiate on the prefab CHILD, not Addressables on the room: Unity hands back that subtree
+    // alone, so the boss arrives without the room it was standing in. It also arrives without the
+    // ritual that would normally start it - a placed boss stands where it is put rather than
+    // playing its intro, which is what an editor wants and worth knowing before wondering why it
+    // is not attacking.
+    private IEnumerator SpawnRoomChild(string key, Vector3 position)
+    {
+        GameObject source = null;
+        yield return RoomChildPrefabs.ResolveRoutine(key, p => source = p);
+
+        var label = RoomChildPrefabs.Label(key) ?? key;
+
+        if (source == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: '{key}' could not be found in its room prefab.");
+            _editor.SetStatus($"'{label}' could not be read out of its room.", StatusSeverity.Error);
+            yield break;
+        }
+
+        GameObject go;
+        try
+        {
+            go = Object.Instantiate(source, SceneRefs.ContentRoot);
+            go.SetActive(true);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: '{key}' failed to instantiate: {e.Message}");
+            _editor.SetStatus($"'{label}' could not be placed.", StatusSeverity.Error);
+            yield break;
+        }
+
+        go.transform.position = position;
+        go.AddComponent<EnemyContainment>();
+
+        var placed = new PlacedEnemy { Key = key, IsCustom = false, Instance = go };
+        _placed.Add(placed);
+        PushUndo(placed, label);
+        _editor.SetStatus($"Placed {label}.");
     }
 
     private void SpawnCustom(string internalName, Vector3 position)
@@ -268,6 +479,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             }
 
             unit.gameObject.AddComponent<EnemyContainment>();
+
             var placed = new PlacedEnemy { Key = internalName, IsCustom = true, Instance = unit.gameObject };
             _placed.Add(placed);
             PushUndo(placed, internalName);
@@ -426,6 +638,14 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     // Key to prefab; shared with the thumbnail renderer.
     internal static IEnumerator ResolvePrefabRoutine(string key, bool isCustom, System.Action<GameObject> done)
     {
+        // A boss that lives inside its arena: the room prefab is the address, the child is the
+        // subject. Same grammar the NPC tool uses, shared through RoomChildPrefabs.
+        if (RoomChildPrefabs.IsRoomKey(key))
+        {
+            yield return RoomChildPrefabs.ResolveRoutine(key, done);
+            yield break;
+        }
+
         if (isCustom)
         {
             GameObject found = null;
@@ -523,6 +743,8 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             }
 
             if (isCustom) ApplyCustomSkin(spine, key);
+
+            // Before the alpha, so what is dragged around looks like what will be placed.
 
             if (spine.Skeleton != null) spine.Skeleton.A = 0.6f;
         }
