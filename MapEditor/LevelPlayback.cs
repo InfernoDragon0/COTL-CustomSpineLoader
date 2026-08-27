@@ -575,6 +575,25 @@ public static class LevelPlayback
         }
     }
 
+    // The room is built and the player is about to walk in - lift the fade now.
+    //
+    // The hold deliberately leaves the world running behind the black screen (see the comment where
+    // it is armed: the game's own generation will not finish while its clock is stopped). That is
+    // fine for the few hundred milliseconds of building, and was not fine afterwards: the walk-in
+    // was playing out under the cover as well, so the first thing a room did was hit the player
+    // with something they could hear but not see. Vanilla lifts the fade *onto* the walk-in, and so
+    // does this.
+    //
+    // Called by the loader rather than waited for here: only the loader knows when the room has
+    // stopped changing, and by then it has already handed the room its lighting.
+    public static void OnContentReady()
+    {
+        if (!_holdingResume) return;
+
+        Plugin.Log.LogInfo("MapEditor: room is built; lifting the fade for the walk-in.");
+        ReleaseHold();
+    }
+
     // A newer room apply or Stop() invalidates this routine; those paths release the hold.
     private static bool Abort(int token) => !Active || token != _applyToken;
 

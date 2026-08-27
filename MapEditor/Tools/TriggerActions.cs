@@ -52,8 +52,10 @@ public enum TriggerActionType
     ReturnToBase,
 
     // No target, and nothing happens when it runs: the trigger carrying it marks where the player
-    // arrives in a hub, and HubSession reads it off the trigger's position. A hub cannot be saved
-    // without one - see HubSession.SpawnPoint.
+    // arrives, and the arrival reads it off the trigger's position. A hub cannot be saved without one
+    // (HubSession.SpawnPoint); a base may have one and lands the player on it if it does
+    // (BaseDelta.SpawnPoint), read out of the saved file rather than off the trigger, because the
+    // player is put down before the base's own contents are rebuilt.
     HubSpawnPoint
 }
 

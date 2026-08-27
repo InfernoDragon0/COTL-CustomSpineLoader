@@ -7,14 +7,38 @@ namespace CustomSpineLoader.MapEditor;
 
 public static class SceneRefs
 {
-    public static GenerateRoom Room => GenerateRoom.Instance;
+    // The room every tool works on.
+    //
+    // Normally that is GenerateRoom.Instance, which is whichever room enabled last - fine in a
+    // dungeon, where there is one, and fine in a hub, where raising the town room makes it the last
+    // one enabled. The base scene holds four of them (the base, its door room, the town room and the
+    // church) and the winner depends on the order they happened to switch on in, so a base session
+    // says which one it means instead of hoping.
+    //
+    // Only ever set while the base is the room, and dropped the moment anything else claims it.
+    public static GenerateRoom RoomOverride { get; set; }
 
-    public static bool HasRoom => GenerateRoom.Instance != null;
+    public static GenerateRoom Room => RoomOverride != null ? RoomOverride : GenerateRoom.Instance;
+
+    public static bool HasRoom => Room != null;
+
+    // Where the tools build, when the room's own answer is not one we can use.
+    //
+    // A dungeon room's CustomTransform is empty and ours to fill. The base's is not: the room ships
+    // one already, with the player's own things under it, and "what is under the content root" is how
+    // the base editor tells its own work from theirs. Borrowing that container made every object in
+    // it look like ours - so nothing in the base was protected and nothing done to it was recorded.
+    //
+    // A base session therefore builds its own root and says so here, rather than reassigning the
+    // room's field out from under the game.
+    public static Transform ContentRootOverride { get; set; }
 
     public static Transform ContentRoot
     {
         get
         {
+            if (ContentRootOverride != null) return ContentRootOverride;
+
             var room = Room;
             if (room == null) return null;
             if (room.CustomTransform != null) return room.CustomTransform.transform;

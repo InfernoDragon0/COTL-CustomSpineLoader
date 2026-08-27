@@ -83,6 +83,15 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     // Hover widgets reach the status bar through this; one editor host per scene.
     public static RuntimeMapEditor Active { get; private set; }
 
+    // The editor is normally created for dungeon scenes by the plugin. A hub or base session is the
+    // other way one comes into being: the room it edits is already standing, so the session stands
+    // the host up beside it and it goes away with the scene.
+    public static RuntimeMapEditor Ensure(string hostName)
+    {
+        if (Active != null) return Active;
+        return new GameObject(hostName).AddComponent<RuntimeMapEditor>();
+    }
+
     private void Awake()
     {
         Active = this;
@@ -119,15 +128,39 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     // closing the screen means leaving the tool: there is nothing behind it to come back to.
     public void SelectFirstTool() => SelectTool(_tools.FirstOrDefault());
 
-    // A hub is a safe town in the game's own base: nothing spawns there, no weapon podium belongs
-    // there, it has no doors to a next room, and it is not part of a level or a dungeon graph. The
-    // tools are still built - the loader and the clear sweeps ask for them by type - they just have
-    // no place on the dock or in the wheel.
-    private static bool HiddenInHub(IMapEditorTool tool) =>
-        tool is EnemyTool or PodiumTool or DoorTool or LevelTool or DungeonBuilderTool;
+    // Which of the three rooms the editor is standing in. Everything that differs between them -
+    // which tools are on the dock, what a save writes, what the load browser lists - asks this
+    // rather than testing one session's flag and quietly meaning "not the other one".
+    public static EditorContext Context =>
+        BaseSession.Active ? EditorContext.Base
+        : HubSession.Active ? EditorContext.Hub
+        : EditorContext.Dungeon;
 
-    private List<IMapEditorTool> DockTools() =>
-        HubSession.Active ? _tools.Where(t => !HiddenInHub(t)).ToList() : _tools;
+    // A hub is a safe town in the game's own base: nothing spawns there, no weapon podium belongs
+    // there, it has no doors to a next room, and it is not part of a level or a dungeon graph.
+    //
+    // The base is all of that and one thing more: it is somewhere that already exists and is not
+    // ours to replace. Clearing it and loading a room over it are the two gestures that would do
+    // exactly that, so neither is offered - a base session only ever adds to what is standing, and
+    // its one file is the slot's own.
+    //
+    // The tools are still built in every context - the loader and the clear sweeps ask for them by
+    // type - they just have no place on the dock or in the wheel.
+    private static bool HiddenIn(EditorContext context, IMapEditorTool tool) => context switch
+    {
+        EditorContext.Hub => tool is EnemyTool or PodiumTool or DoorTool or LevelTool or DungeonBuilderTool,
+        EditorContext.Base => tool is EnemyTool or PodiumTool or DoorTool or LevelTool or DungeonBuilderTool
+            or ClearTool or LoadTool,
+        _ => false
+    };
+
+    private List<IMapEditorTool> DockTools()
+    {
+        var context = Context;
+        return context == EditorContext.Dungeon
+            ? _tools
+            : _tools.Where(t => !HiddenIn(context, t)).ToList();
+    }
 
     public MapEditorHistory History { get; } = new();
 
@@ -205,6 +238,25 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
               "arrives with a trigger's 'Hub spawn point' action, then Save Map.");
     }
 
+    // Handed the player's own base by BaseSession. Nothing is cleared and nothing is rebuilt: the
+    // base is already standing, and what the editor holds is only the difference between it and
+    // what this save slot's author has added to it. That difference was applied on arrival, so the
+    // tools are already tracking every object in it and a save reads back what is on screen.
+    public void BeginBaseEditing()
+    {
+        var delta = BaseDelta.Content;
+
+        // Named after the file it will be written to, so the title bar says which save slot is being
+        // edited rather than "Untitled".
+        delta.MapName = $"base_slot{BaseDelta.Slot}";
+        AdoptBlueprint(delta);
+
+        if (!_editing) EnterEditorMode();
+
+        SetStatus("Editing the base. Save writes this slot's own file; the game's save is not " +
+                  "touched.");
+    }
+
     // The walk-in entry runs on scaled time; the open editor would re-freeze timeScale.
     public void ExitForPlayback()
     {
@@ -241,6 +293,17 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         if (!_editing)
         {
+            // The host outlives its session in the base's scene: it is what applies a saved base
+            // delta on arrival, and it is still there once a hub has been played. F4 must not turn
+            // that into a way into the editor from anywhere - a base is edited from the F7 panel,
+            // where the guards that decide whether editing it is safe are.
+            if (BaseSession.SceneOwnsSessions && Context == EditorContext.Dungeon)
+            {
+                Plugin.Log.LogInfo("MapEditor: F4 does nothing here - open the base editor from the " +
+                                   "F7 panel, or enter a hub.");
+                return;
+            }
+
             EnterEditorMode();
             return;
         }
@@ -434,6 +497,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         }
 
         EnsureEventSystem();
+
+        RefreshDockForContext();
 
         _editing = true;
         _canvas.enabled = true;
@@ -1003,9 +1068,35 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     // Resolved once the fitter has run; the status bar sits on top of the dock and matches it.
     private float _dockWidth = 600f;
 
+    private RectTransform _dock;
+    private EditorContext _dockContext;
+
+    // The dock is built once at construction, and the context can change under it: the host that
+    // applies a saved base on arrival is stood up before anybody has opened the base editor, so its
+    // dock was laid out for a dungeon. Rebuilt on the way in whenever the two disagree.
+    private void RefreshDockForContext()
+    {
+        if (_dock == null || _dockContext == Context) return;
+
+        foreach (Transform child in _dock) Destroy(child.gameObject);
+        _toolRings.Clear();
+
+        PopulateDock(_dock);
+
+        LayoutRebuilder.ForceRebuildLayoutImmediate(_dock);
+        _dockWidth = _dock.rect.width;
+
+        if (_statusPanel != null)
+        {
+            var rect = _statusPanel.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(_dockWidth, rect.sizeDelta.y);
+        }
+    }
+
     private void CreateDock()
     {
         var dock = CreatePanel("Dock", new Vector2(0.5f, 0f), new Vector2(0f, DockHeight), new Vector2(0f, 12f));
+        _dock = dock;
 
         var layout = dock.gameObject.AddComponent<HorizontalLayoutGroup>();
         layout.padding = new RectOffset(DockPadding, DockPadding, DockPadding, DockPadding);
@@ -1016,23 +1107,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         layout.childForceExpandWidth = false;
         layout.childForceExpandHeight = false;
 
-        var tools = DockTools();
-        foreach (var tool in tools)
-        {
-            var captured = tool;
-            _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon(tool.Name), tool.Name,
-                () => SelectTool(captured), out var ring, ToolIconSize, hoverText: tool.Name);
-            _toolRings[tool.Name] = ring;
-
-            // The dungeon half ends at the doors - or, with no door tool on the dock, at the one
-            // before the lighting tool.
-            if (tool is DoorTool || (HubSession.Active && tool is NpcTool))
-                CreateDockSeparator(dock);
-
-            if (tool is LoadTool)
-                _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
-                    out _, ToolIconSize, hoverText: "Save map");
-        }
+        PopulateDock(dock);
 
         // Horizontal only: a vertical fit collapses the plate for a frame before icons report sizes.
         var fitter = dock.gameObject.AddComponent<ContentSizeFitter>();
@@ -1041,6 +1116,38 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         // Resolve now: the status bar built next sizes itself off _dockWidth.
         LayoutRebuilder.ForceRebuildLayoutImmediate(dock);
         _dockWidth = dock.rect.width;
+    }
+
+    // The icons themselves, in whichever set this context has. The Save button rides beside the
+    // Load tool where there is one; in the base there is no load browser - the slot's file is the
+    // only one - so it stands on its own at the end.
+    private void PopulateDock(RectTransform dock)
+    {
+        _dockContext = Context;
+
+        foreach (var tool in DockTools())
+        {
+            var captured = tool;
+            _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon(tool.Name), tool.Name,
+                () => SelectTool(captured), out var ring, ToolIconSize, hoverText: tool.Name);
+            _toolRings[tool.Name] = ring;
+
+            // The dungeon half ends at the doors - or, with no door tool on the dock, at the one
+            // before the lighting tool.
+            if (tool is DoorTool || (_dockContext != EditorContext.Dungeon && tool is NpcTool))
+                CreateDockSeparator(dock);
+
+            if (tool is LoadTool)
+                _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
+                    out _, ToolIconSize, hoverText: "Save map");
+        }
+
+        if (_dockContext == EditorContext.Base)
+        {
+            CreateDockSeparator(dock);
+            _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
+                out _, ToolIconSize, hoverText: "Save base");
+        }
     }
 
     private void CreateDockSeparator(Transform parent)
@@ -1466,6 +1573,15 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     {
         if (_renaming || ModalOpen) return;
 
+        // The base has one file and the slot names it, so there is nothing to arm against: a
+        // quicksave cannot land on somebody else's map when there is only ever one of them.
+        if (Context == EditorContext.Base)
+        {
+            SetStatus("Saving the base...");
+            WriteMap();
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(Map.MapName))
         {
             // Nothing to quicksave under; the dialog is the only way to name it.
@@ -1504,8 +1620,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private string SaveBlock()
     {
         // A hub is a town room, not a dungeon room: it has no doors to a next room, and the four
-        // the check wants do not exist in Woolhaven at all.
-        var doorTool = HubSession.Active ? null : GetTool<DoorTool>();
+        // the check wants do not exist in Woolhaven at all. Nor in the base.
+        var doorTool = Context == EditorContext.Dungeon ? GetTool<DoorTool>() : null;
         var missing = doorTool?.MissingDirections();
         if (missing != null && missing.Count > 0)
             return $"Cannot save: missing {string.Join(", ", missing)} door(s). " +
@@ -1533,6 +1649,14 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             SetStatus(blocked, StatusSeverity.Error);
             Plugin.Log.LogWarning($"MapEditor: save blocked - '{Map.MapName}': {blocked}");
             _closeAfterSave = false;
+            return;
+        }
+
+        // The base has one file per save slot and the slot already names it. There is nothing to
+        // ask, so the dialog - and the editor closing to show it - is skipped entirely.
+        if (Context == EditorContext.Base)
+        {
+            WriteMap();
             return;
         }
 
@@ -1580,6 +1704,38 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         yield return null;
 
+        // The base is saved as a difference, never as a picture. A full sweep there would write down
+        // the player's entire town - every building, tree and follower hut - and the apply pass would
+        // then rebuild a second copy of it on top of the real one. What the tools just contributed is
+        // exactly what this session added; the journal beside it is what it took away or moved.
+        if (Context == EditorContext.Base)
+        {
+            var written = BaseDelta.Save(Map);
+            UpdateNameLabel();
+
+            SetStatus(written
+                    ? $"Saved the base for slot {BaseDelta.Slot}. The game's own save is untouched."
+                    : "The base file could not be written, see log.",
+                written ? StatusSeverity.Success : StatusSeverity.Error);
+
+            if (!written)
+            {
+                // A failed write must leave the editor open with the work still in it.
+                _closeAfterSave = false;
+                yield break;
+            }
+
+            MarkSaved();
+
+            if (_closeAfterSave)
+            {
+                _closeAfterSave = false;
+                ExitEditorMode();
+            }
+
+            yield break;
+        }
+
         // Full-room prop snapshot: everything the tools do not own.
         RoomSnapshot.Collect(Map, this);
 
@@ -1604,7 +1760,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         // Saving in a hub session saves a hub: the record beside the blueprint is what the world
         // map's Hub picker lists and what playback rebuilds. It follows the name the save used, so
         // saving under a new name makes that the hub.
-        if (HubSession.Active)
+        if (Context == EditorContext.Hub)
         {
             HubSession.WriteRecord(Map.MapName, Map.MapName);
             SetStatus($"Saved hub '{Map.MapName}'. World map nodes can target it as a Hub.",
@@ -1751,6 +1907,15 @@ internal static class Interactor_Update_Patch
 {
     private static bool Prefix() =>
         RuntimeMapEditor.Active == null || !RuntimeMapEditor.Active.IsEditing;
+}
+
+// Which room the editor has been opened on. Not a mode the author picks: it follows from where the
+// session was started, and every tool reads it rather than deciding for itself.
+public enum EditorContext
+{
+    Dungeon,
+    Hub,
+    Base
 }
 
 public enum StatusSeverity

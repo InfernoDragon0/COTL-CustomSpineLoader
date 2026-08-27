@@ -34,6 +34,11 @@ public static class HubSession
     public static bool Active => Current != Mode.None;
     public static bool IsAuthoring => Current == Mode.Authoring;
 
+    // A hub is open, being prepared, or on its way. Anything else in this scene that wants to know
+    // whether the base is the player's own base asks this: a trip to a hub lands in the base first,
+    // and for a second or two afterwards the base looks exactly like a base nobody is leaving.
+    public static bool Busy => Active || _running || _pendingMode != Mode.None;
+
     // The hub being authored or played, by name.
     public static string HubName { get; private set; }
 
@@ -70,6 +75,12 @@ public static class HubSession
         if (_running) return "A hub is already being prepared.";
 
         if (PlayerFarming.Instance == null) return "Hubs open in game, not on the menu.";
+
+        // A base session in this same scene may have pointed the editor's tools at the base room.
+        // From here the town room is the room, and it says so itself by being the last one enabled.
+        BaseSession.End();
+        SceneRefs.RoomOverride = null;
+        SceneRefs.ContentRootOverride = null;
 
         _pendingHub = hubName;
         _pendingMode = mode;
@@ -149,6 +160,11 @@ public static class HubSession
 
     private static void EndActive()
     {
+        // The buildings a hub's totem put up are ours, and the game never clears the brains behind
+        // them on a scene change - left alone they would still be listed against the town room the
+        // next time the player walks into the real one.
+        HubStructureStore.TearDown();
+
         Current = Mode.None;
         HubName = null;
         _running = false;
@@ -827,15 +843,9 @@ public static class HubSession
         yield return null;
     }
 
-    // The editor is normally scoped to dungeon scenes. A hub session is the one time it belongs
-    // in the base, and it goes away with the session.
-    private static RuntimeMapEditor EnsureEditor()
-    {
-        if (RuntimeMapEditor.Active != null) return RuntimeMapEditor.Active;
-
-        var host = new GameObject("RuntimeMapEditorHost_Hub");
-        return host.AddComponent<RuntimeMapEditor>();
-    }
+    // The editor is normally scoped to dungeon scenes. A hub session is one of the two times it
+    // belongs in the base, and it goes away with the session.
+    private static RuntimeMapEditor EnsureEditor() => RuntimeMapEditor.Ensure("RuntimeMapEditorHost_Hub");
 
     // ---- the hub record -----------------------------------------------------------------------
 
@@ -850,6 +860,30 @@ public static class HubSession
         if (pool == null || pool.Count == 0) return null;
 
         return string.IsNullOrWhiteSpace(pool[0]) ? null : pool[0];
+    }
+
+    // Every room blueprint a saved hub is dressed with, as the file name it resolves to.
+    //
+    // A hub's room is an ordinary node blueprint on disk - the same folder, the same format - so
+    // nothing about the file says it is a town rather than a dungeon room. Only the hub record
+    // beside it does, and this is that record read back. Anything offering the author a room to
+    // choose from asks this so a hub is not offered where a dungeon room belongs.
+    //
+    // Sanitized rather than taken as written, because that is the name the loader will look the file
+    // up under: the record stores whatever the author typed, and LoadByName sanitizes it before
+    // going to disk. Comparing sanitized names is therefore comparing the same two things the
+    // loader would.
+    public static System.Collections.Generic.HashSet<string> BlueprintNames()
+    {
+        var names = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+
+        foreach (var level in CTLevelSerialization.LoadAll())
+        {
+            var blueprint = BlueprintFor(level);
+            if (blueprint != null) names.Add(MapEditorSerialization.Sanitize(blueprint));
+        }
+
+        return names;
     }
 
     // Written when a hub room is saved from the editor, so the world map's Hub picker can find it

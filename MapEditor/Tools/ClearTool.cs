@@ -189,7 +189,7 @@ public class ClearTool : IMapEditorTool
 
         var destroyed = 0;
 
-        if (room.RoomSpriteShape != null && !MapEditorProtection.IsProtected(room.RoomSpriteShape.gameObject))
+        if (room.RoomSpriteShape != null && MapEditorProtection.CanDelete(room.RoomSpriteShape.gameObject))
         {
             Object.Destroy(room.RoomSpriteShape.gameObject);
             destroyed++;
@@ -199,7 +199,7 @@ public class ClearTool : IMapEditorTool
         {
             foreach (var ctrl in new List<SpriteShapeController>(room.SpriteShapeControllers))
             {
-                if (ctrl == null || MapEditorProtection.IsProtected(ctrl.gameObject)) continue;
+                if (ctrl == null || !MapEditorProtection.CanDelete(ctrl.gameObject)) continue;
                 Object.Destroy(ctrl.gameObject);
                 destroyed++;
             }
@@ -211,7 +211,7 @@ public class ClearTool : IMapEditorTool
             {
                 if (piece == null) continue;
                 if (MapEditorProtection.IsProtectedPiece(piece)) continue;
-                if (MapEditorProtection.IsProtected(piece.gameObject)) continue;
+                if (!MapEditorProtection.CanDelete(piece.gameObject)) continue;
                 Object.Destroy(piece.gameObject);
                 destroyed++;
             }
@@ -253,7 +253,7 @@ public class ClearTool : IMapEditorTool
                 continue;
             }
 
-            if (MapEditorProtection.IsProtected(child.gameObject))
+            if (!MapEditorProtection.CanDelete(child.gameObject))
             {
                 destroyed += ClearRecursive(child, keep, includeTerrain, depth + 1);
                 continue;
@@ -273,7 +273,7 @@ public class ClearTool : IMapEditorTool
         for (var i = parent.childCount - 1; i >= 0; i--)
         {
             var child = parent.GetChild(i).gameObject;
-            if (MapEditorProtection.IsProtected(child)) continue;
+            if (!MapEditorProtection.CanDelete(child)) continue;
             Object.Destroy(child);
             destroyed++;
         }

@@ -27,6 +27,16 @@ public class CTNodeBlueprint
     public List<MapNpcData> Npcs = [];
     public List<MapTriggerData> Triggers = [];
     public List<MapPodiumData> Podiums = [];
+
+    // Where the hub's build totem stands, if the author placed one. Null means no totem, which is
+    // every map made before this existed and every map that simply does not want one.
+    public MapTotemData BuildTotem;
+}
+
+[Serializable]
+public class MapTotemData
+{
+    public SerializableVector3 Position;
 }
 
 [Serializable]
@@ -102,6 +112,11 @@ public class MapStructureData
     // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 
+    // Two separate looks, borrowed from the crystal tree. SeeThrough is the player showing through
+    // it; FogThrough is the weather passing through it. Off on every blueprint written before they
+    // existed, which is the same as those maps have always looked.
+    public bool SeeThrough;
+    public bool FogThrough;
 }
 
 // Door-to-next-node routing is NOT stored here: which blueprint a door leads to is level-scoped

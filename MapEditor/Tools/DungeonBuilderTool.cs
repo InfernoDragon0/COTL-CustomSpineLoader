@@ -391,6 +391,10 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
         var levelLabels = new List<string> { "Vanilla floor" };
         foreach (var level in CTLevelSerialization.LoadAll())
         {
+            // A hub shares the level file format but is not a floor: it is one town room entered
+            // from the world map, with no doors and nowhere for a run to continue to.
+            if (level.IsHub) continue;
+
             _levelNames.Add(level.LevelName);
             levelLabels.Add($"{level.LevelName} ({level.Rooms.Count} rooms)");
         }

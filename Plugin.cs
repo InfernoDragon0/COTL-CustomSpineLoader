@@ -328,6 +328,10 @@ namespace CustomSpineLoader
             // its scene up here - and ends on any other.
             MapEditor.HubSession.OnSceneLoaded(scene);
 
+            // The base's own room, in the same scene. Arriving there re-applies whatever this save
+            // slot's author has added to it, whether or not they open the editor.
+            MapEditor.BaseSession.OnSceneLoaded(scene);
+
             if (scene.name == "Dungeon1")
             {
                 TryCreateRuntimeEditor(scene);

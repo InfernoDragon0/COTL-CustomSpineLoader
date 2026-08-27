@@ -70,7 +70,7 @@ public class LoadTool : IMapEditorTool, IMapEditorScreenTool, IMapEditorShortcut
             CloseRequested = CloseScreen,
             LoadRequested = () => Load(_selected)
         };
-        _screen.Open(HubSession.Active ? "Load hub" : "Load map");
+        _screen.Open(RuntimeMapEditor.Context == EditorContext.Hub ? "Load hub" : "Load map");
         RefreshList();
         return true;
     }
@@ -140,25 +140,6 @@ public class LoadTool : IMapEditorTool, IMapEditorScreenTool, IMapEditorShortcut
         public System.DateTime Saved;
     }
 
-    // The room blueprint each saved hub is dressed with, as the file name it resolves to.
-    //
-    // Sanitized rather than taken as written, because that is the name the loader will look the file
-    // up under: HubSession stores whatever the author typed, and LoadByName sanitizes it before
-    // going to disk. Comparing sanitized names is therefore comparing the same two things the
-    // loader would.
-    private static HashSet<string> HubBlueprintNames()
-    {
-        var names = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-
-        foreach (var level in CTLevelSerialization.LoadAll())
-        {
-            var blueprint = HubSession.BlueprintFor(level);
-            if (blueprint != null) names.Add(MapEditorSerialization.Sanitize(blueprint));
-        }
-
-        return names;
-    }
-
     // Listing the folder, off the main thread.
     //
     // Nothing here parses a room blueprint, and that is the point: a blueprint carries every shape,
@@ -168,7 +149,7 @@ public class LoadTool : IMapEditorTool, IMapEditorScreenTool, IMapEditorShortcut
     // blueprint that does get parsed is the one that gets clicked.
     private static List<SavedRoom> Scan(bool wantHubs)
     {
-        var hubBlueprints = HubBlueprintNames();
+        var hubBlueprints = HubSession.BlueprintNames();
         var rooms = new List<SavedRoom>();
 
         foreach (var file in APIHelper.ModContentPaths.FilesIn(MapEditorSerialization.FolderName, "*.json"))
@@ -208,7 +189,7 @@ public class LoadTool : IMapEditorTool, IMapEditorScreenTool, IMapEditorShortcut
 
     private IEnumerator RefreshRoutine(int token)
     {
-        var wantHubs = HubSession.Active;
+        var wantHubs = RuntimeMapEditor.Context == EditorContext.Hub;
         var waiting = _screen.AddNote("Reading saved maps...");
 
         // Warmed here rather than on the worker: the bridge scan fills a static list the first time

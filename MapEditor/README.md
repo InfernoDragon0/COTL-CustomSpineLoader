@@ -6,7 +6,7 @@ blueprint** (`CustomLevelBlueprints/<name>.json`) that plays through the mod's o
 
 | Key | Action |
 | --- | --- |
-| `F4` | Open / close the editor (Dungeon1 scenes only) |
+| `F4` | Open / close the editor (Dungeon1 scenes; in the base, only once a hub or the base editor has been opened from the F7 panel) |
 | `F5` | Enter the test dungeon — or, with the editor open, reset the room |
 | `F6` | Hide / show the editor's UI while it stays paused (screenshots); on an open world map, flip between play view and editing |
 | `F7` | CultTweaker panel (fleeces, player spines, mod info) — not part of the editor |
@@ -30,7 +30,7 @@ camera would otherwise make the world appear to delete itself.
 - [Tools](#tools)
   - [Select](#select) · [Shape](#shape) · [Structure](#structure) · [Enemy](#enemy) · [NPC](#npc)
   - [Podium](#podium) · [Trigger](#trigger) · [Door](#door) · [Lighting](#lighting) · [Music](#music)
-  - [Clear](#clear) · [Load Map](#load-map) · [Level](#level) · [Hubs](#hubs) · [Dungeon Builder](#dungeon-builder)
+  - [Clear](#clear) · [Load Map](#load-map) · [Level](#level) · [Hubs](#hubs) ([build totem](#the-build-totem)) · [Base editor](#base-editor) · [Dungeon Builder](#dungeon-builder)
 - [Trigger actions](#trigger-actions)
 - [Custom NPCs and dialogue](#custom-npcs-and-dialogue)
 - [Saving and loading](#saving-and-loading)
@@ -171,6 +171,16 @@ the art is flat, so nothing here is ever turned - the tool refuses to rotate for
 and a row that always reads 0 is noise. The numbers follow a drag at 10Hz; they are one label, but a
 label is a text mesh rebuild and the gizmos move every frame. With nothing selected the box says so
 and the readout and *Deselect* go away rather than standing there empty.
+
+**The readout names the thing, not the GameObject.** An `Internal` row sits under the Unity name,
+carrying whatever the files call it: a map author reading `Building Bed(Clone)` cannot tell which
+structure that is in a blueprint or in a `BuildingOverrides/` folder, and the internal name is the
+one both of those are keyed by. Three tiers, first answer wins - `StructureTool.TryGetPlacedName`
+(ours, and the only one that knows a custom structure's COTL_API name), then a `Structure`
+component's `Brain.Data.Type` (every vanilla structure, including anything the player built), then
+`RoomSnapshot.TryResolveKey` for the addressable key a save would write for a piece of scenery.
+Nothing resolvable, no row. It is resolved **on selection, not in the refresh**: the refresh runs at
+10Hz through a drag and the last tier walks the addressables catalog.
 
 The tool also **refuses to pick a trigger**, on both picking paths: the trigger tool draws them,
 lists them and edits their actions, and selecting an invisible volume here meant it could be
@@ -1227,6 +1237,260 @@ A world map node reaches a hub with `TargetKind: "Hub"`; hubs are listed there r
 Level, and the node goes through `HubSession` rather than the level runner — a hub is a town room,
 not a dungeon. Entering one never completes the node: a hub has no success path to record.
 
+#### The build totem
+
+A hub can have the base's **build totem** standing in it: the player walks up, the real build menu
+opens, and they place real buildings on the hub's ground for real resources. It is placed by hand
+like anything else — first entry in the Structure tool's list, hub context only — and saved in the
+blueprint as `BuildTotem { Position }`. No totem, no build menu; that is the whole switch.
+
+**It is a copy of the one in the base, not a rebuild.** A hub runs in `Base Biome 1`, so the
+original is in the same scene, switched off with the base room —
+`Resources.FindObjectsOfTypeAll` reaches it there. Copying it brings its art, its
+`Interaction_PlacementRegion`, its `PlacementRegion` and the whole build menu behind it. The vanilla
+totem is a scene object rather than a saved structure, which is the only reason this is possible:
+nothing in the save refers to it, so nothing in the save has to be told a second one exists.
+
+Three details of the copy are load-bearing:
+
+- **It wakes inside a switched-off holder**, the same trick the placement ghosts use. A region claims
+  `PlacementRegion.Instance` in its own `Awake`, and that field is how the rest of the game finds the
+  *town's* region — so `SetAsInstance` has to be off before the copy is ever allowed to wake.
+- **`OnDestroy` clears `Instance` whether or not that region was holding it.** Harmless in a game
+  with one region and a scene reload behind every teardown; not harmless when a hub's copy is torn
+  down while the town's own sits switched off. A prefix/postfix pair puts it back — for our regions
+  only, vanilla's behaviour untouched.
+- **The region needs a `Structure` with a brain before it can hold a single tile**, because
+  `PlacementRegion.Grid` *is* `StructureInfo.Grid`; without one it hands back a throwaway list and
+  the fill looks like it worked. `Structure.CreateStructure(..., save: false)` gives it one without
+  the save hearing about it. Reading the `structureBrain` property once is also required: the build
+  path uses the cached field directly, past the lazy getter that would have filled it.
+
+**The grid is ours** (`HubBuildRegion`). Vanilla's fill is the right idea — walk the integer lattice
+of the region's local space, keep every point inside a `PolygonCollider2D` — but two details do not
+survive the trip. It is seeded once at local `(0,0)`, so ground the seed cannot walk to is not
+buildable, and a hub is often several islands with the totem on one of them; and with the major DLC
+installed it rebuilds the polygon from the *base's* cached outline every time it runs, which would
+throw the hub's shape away a frame after we set it. So a prefix on `CreateFloodFill` sends our region
+to a bounded scan instead: same lattice, same `ClosestPoint(p) == p` inside test, no seed, and the
+polygon cut from the room's own collision composite — the buildable area *is* the ground, with
+nothing to author twice and nothing to keep in step with the Shape tool. Disjoint islands included.
+
+The grid is re-cut every time the menu opens, because a hub's ground is not fixed the way the town's
+is — its author can redraw it between visits. A fresh grid is an empty grid, so everything standing
+is re-stamped onto it immediately afterwards (vanilla hits the same problem when the player buys land
+and solves it the same way); skip that and the next building lands on top of the last.
+
+**Nothing reaches the player's save.** The temptation is real — a hub runs in the Woolhaven room and
+Woolhaven has a real save list behind it — and it must be resisted. That list is shared by every hub
+*and* by the actual Woolhaven, and `DLCShrineRoomLocationManager.PlaceStructures` prunes it on load:
+an entry whose grid cell is already taken is deleted outright, which is precisely what two hubs
+sharing one list would do to each other. So the vanilla flow runs end to end — grid, cost, build —
+and the moment the game files the new structure, `StructureManager.AddStructure`'s postfix takes it
+back out and writes it to `CustomHubStructures/slot<N>/<hub>.json` instead. The brain is made either
+way, and the brain is the building; the list decides only whether the game will save it.
+
+The interception is scoped as tightly as it can be — **not** "anything while a hub is open", because
+the game restores the player's actual Woolhaven buildings through the same call and deleting those
+would cost them their town. It is only what passes through a build driven by *our* region: a
+prefix/finalizer pair around `PlacementRegion.Build` (which also catches the branch that hard-codes
+`FollowerLocation.Base`, the one that would have put a fence built in a hub into the player's town),
+and another around `StructureManager.BuildStructure` for the hub location (the far end of a build
+site, long after the placement loop is gone). `HistoryOfStructures` is a save field too, and it is
+put back for a type first seen in a hub.
+
+Two consequences worth knowing. **Build sites finish instantly**: what completes one is a follower
+walking over with an armful of wood, and nobody lives in a hub — so the site is built one frame after
+it appears, which is when the region has finished stamping its cell and bounds. And **the brains are
+retired on the way out**: the game clears them only on quit/death/menu, never on a scene change, so
+left alone they would still be listed against the town room the next time the player walks into the
+real one.
+
+`PlacementRegion.PlayRoutine` also reaches for a handful of base-scene singletons without checking
+any of them — `TownCentre`, the HUD, the weather, the path tiles, the lighting, the player, the
+camera, and `DLCLandController` under the major DLC. All should be present, since a hub is in the
+base's own scene; but a null inside a coroutine dies halfway through and leaves the player unable to
+move, so the interaction is refused with a log line instead if one is missing. The mouse clamp
+(`X_Constraints`/`Y_Constraints`, static get-only properties) is widened to the hub's own bounds
+while a totem is standing — the vanilla numbers are the base's extents, which would pin the cursor to
+a corner of a hub or off it entirely.
+
+### Base editor
+
+The same tools, run on the player's own base. Opened from the **F7 panel → Edit Base**, which is
+offered only while the player is actually standing in it: the base editor edits what is under their
+feet and never travels. Once open, `F4` closes and reopens it for the rest of the visit.
+
+**Everything here is a difference, not a picture.** A hub is authored from nothing — the town room is
+emptied first, so a save can simply write down everything in it. The base already exists and most of
+what is standing in it is the player's save. So the file holds three lists: what this mod added, what
+was taken away, and what was moved. It is `CustomBaseMaps/base_slot<N>.json`, one per save slot, and
+it is re-applied on every arrival in the base whether or not anybody opens the editor. A slot with
+nothing saved costs one settle-and-check on arrival and creates no editor at all.
+
+**The safeguard: the game's save file is never written to on the editor's behalf.** Not one structure
+added to it, not one removed, not one position changed in it. Uninstall the mod and the base is
+exactly the base — everything this editor added simply is not there any more.
+
+**What can be touched.** Rearranging the base is the whole point, so what is off-limits is
+deliberately tiny — and the line that matters is *deletion*, not movement:
+
+| Tier | What | Can be |
+| --- | --- | --- |
+| Editable | What this mod placed, and inert scenery — trees, rocks, grass | moved, resized, deleted |
+| Move only | Everything else of the player's: shrines, temples, beds, farm plots, dungeon doors, the town centre, the build totem | moved |
+| Protected | Followers and their pets (they walk off on their own), and the `PlacementRegion` object | nothing |
+
+The placement region is the one structural exception: its buildable grid is a lattice in that
+object's own local space, so moving it slides every cell in the base out from under every building
+standing on one. The totem the player walks up to is a separate object and moves freely.
+
+Deletion is never offered for anything the player owns — a building was paid for and may be holding a
+follower's job, and there is no undo. `MapEditorProtection.CanDelete` is the single answer, and every
+path that destroys something asks it rather than each tool deciding for itself.
+
+**A structure placed here is a real building.** Instantiating the prefab gets the art and nothing
+else — the components on it read `Structure.Brain`, so without one a bed cannot be slept in and a
+plot cannot be farmed. The brain is what makes it a building, and the game will make one without
+filing it: `AddStructure`'s `save` flag is the list write alone. So the building works exactly as the
+game intends and the save never hears about it. Ours are remembered in our own file, rebuilt on each
+arrival, and their brains retired on the way out — the game clears brains only on quit, death or the
+menu, so one left behind is a building the base thinks it still has. Objective progress raised by
+those placements is dropped, since the apply pass re-places every one of them on every arrival.
+Custom structures have no vanilla building data and stay decorative. Two things are still touched:
+`DataManager.StructureID` advances (a counter, not content — reusing ids would be worse), and bounds
+are assumed 1×1, so the build totem may allow something to overlap a placed structure.
+
+**The base's own terrain can be reshaped too.** Dragging a node on a sprite shape the base came with
+is recorded as an edit against that shape — found by hierarchy path, falling back to name and
+original position, like every other journal entry — and its spline is written back on arrival. New
+shapes drawn with the tool are separate, and round-trip through the delta's own `Shapes` list.
+
+The base's shapes ship with collision **off**: the town's walkable area is `Room.Pieces[0].Collider`,
+not the art. Turning *Shape Has Collision* on for one adds a collider, and that collider has to be
+folded into the room's composite outline (`MergeCollisionIntoRoom`) or it is a solid body standing on
+its own — indistinguishable from floor until something walks into it. The editor's own commit path
+always did this; the load path did not, which is why reshaped terrain came back from every load
+pushing the player around, and why toggling collision off and on again fixed it until the next load.
+
+**Moving one of the player's buildings** is the one place where the safeguard needs machinery rather
+than restraint. Followers navigate to `StructuresData.Position` and the buildable grid is stamped
+from `GridTilePosition`, so a transform-only move leaves everyone walking to where the building used
+to be. Both have to say the new place for the game to behave — and the file has to say the old one.
+`SaveMask` makes both true at different moments: a prefix on `SaveAndLoad.Saving` (the single
+statement that hands the live save object to the serializing thread, on the main thread, before it
+starts) puts every moved building back where the player left it, and the write's own completion
+callback puts the moves back. The window is a few frames, it only exists while a save is in flight,
+and if anything goes wrong the state left behind is the vanilla layout — the moves re-apply from our
+file on the next arrival. A watchdog lifts the mask after twenty seconds if the callback never comes.
+`Forget()` restores originals rather than lifting the mask: lifting it writes the moved values back
+into the live save data and then discards the entries that would hide them again, which is how an
+early version of this cost a player a temple.
+
+**Why it has to be airtight**, and the second half that does not depend on the first: what the game's
+loader does with a building's entry it dislikes is not correct it but *delete* it. `PlaceStructures`
+removes any entry whose grid cell another entry has already claimed, and any entry standing outside
+the base's ground polygon — silently, and unrecoverably. So `BaseDelta.RepairSavedPositions` runs
+from a prefix on `PlaceStructures` and puts every moved building back to its recorded original before
+a single entry has been looked at. The journal knows what it moved and where each one stood, so this
+is certainty rather than a bet; the move is re-applied by the apply pass a moment later. Between the
+mask on the way out and the repair on the way in, the loader can never act on a position this mod
+wrote — which is why a move is allowed to go anywhere, including places vanilla would have deleted
+the building for standing in.
+
+**New ground.** The Shape tool works as it does anywhere else, but in the base a shape has to reach
+three separate things or it is ground in name only (`BaseGround`):
+
+1. the room's collision composite and the navigation graph — what the player can walk on;
+2. `BiomeBaseManager`'s ground validation collider — what "inside the base" means to
+   `Follower.EnsureWithinBounds` (which teleports anyone outside it to the town centre) and to
+   `LocationManager.PlaceStructures` (which **deletes save entries** outside it on load);
+3. the build totem's placement region, whose buildable grid is a lattice cut from its own polygon.
+
+The sequence is the game's own, the one it runs when the player buys land: merge the outlines into
+`Room.Pieces[0].Collider`, re-derive the validation collider, `SetColliderAndUpdatePathfinding`,
+clear `Follower.Points`, then throw the buildable lattice away and cut it again. Path 0 is never
+touched — that path is the base as the game shipped it and every bounds check falls back to it; ours
+are only ever appended after it. Shape edits debounce into one apply, because each one rebuilds the
+navigation graph for the whole base.
+
+The buildable grid is extended rather than replaced, which is the opposite of what a hub does. A
+hub's region is ours and its ground is all authored, so its fill is ours too. The base's region is
+the player's, its fill knows about bought DLC land and the bridge, and none of that is ours to
+reimplement — so vanilla runs untouched and a second pass adds the lattice points inside the added
+outlines. The added paths come *off* the polygon before vanilla's fill runs and go back on after:
+that fill is recursive and walks from a single seed until it runs out of polygon or of tile budget,
+and budget spent wandering onto new ground is budget the base's own tiles do not get.
+
+**Buildings the player puts up on added ground** are the one case where their own build has to be
+intercepted, and only because the game would otherwise destroy it: `PlaceStructures` culls save
+entries outside the validation polygon at load, and our ground is not in the polygon the *save* was
+written against. So such a build is lifted out of `BaseStructures` in the same call that files it —
+the brain is made either way, so the building works exactly as the game intends — and remembered in
+our file instead. `HistoryOfStructures` is put back for a type first built there, since the game hands
+out unlocks off that list. Everything built on the base's own ground is left completely alone.
+
+**Where the player lands.** A base with a trigger carrying the *Hub spawn point* action puts the
+player on it — standing there from the start, not walking to it afterwards. The position is read from
+the saved file rather than the live trigger, because the player is placed during the base's arrival,
+long before the delta is applied and that trigger exists. So the base has to be saved once before it
+takes effect; without such a trigger the base's own arrival spots are used, as always.
+
+It hooks `Interaction_BaseTeleporter`'s warp-in and nothing else, because that is what the game runs
+for a real arrival. The obvious hook — `LocationManager.PositionPlayer`, which every arrival goes
+through — is too many arrivals: stepping out of the temple is one, and so is returning from the door
+room or the shrine room. Those are doorways *inside* the base with a spot apiece, and landing on the
+spawn point out of the temple door is not "the player arrives here", it is being teleported away from
+where they just were. (`GetStartPosition` is worse still: the same method answers for arriving
+*followers*, every one of whom would be dropped on the player's doorstep.)
+
+Three things the warp-in ties to the portal's own transform: it places the player on it, snaps the
+camera to it, and frames it for the length of the animation. That last one is why re-placing the
+player alone looked broken — `OnConversationNext` hands the camera a GameObject to follow and holds it
+there however often anything else asks it to look elsewhere, so the lamb appeared at the spawn point
+while the camera watched an empty portal. But it is *handed* that object, so a prefix hands it a
+stand-in parked on the spawn point instead, scoped to the teleporter's own call during an arrival so
+no other conversation in the game is touched. The player is then put on the mark over the following
+frames. The portal keeps its place in the base; what cannot follow is the warp effect itself, since
+that is an animation on the portal's own skeleton — it plays off-screen, and the player simply
+arrives.
+
+**Picking things out of an authored scene.** The Select tool climbs from whatever the cursor hit up to
+the thing the author means to move, which in a dungeon is the whole prop. The base is hand-authored
+and has real regions in it, so there the climb stops below anything larger than `RegionSize` (9 world
+units) across. Without that, clicking the teleport bridge handed back the whole teleport area, trees
+and DLC statue included; counting children instead was the first attempt and far too eager, since a
+single bush is several sprites and came apart into leaves. Size is the honest signal — things that
+belong together are together *because* they are in the same place. Buildings are still picked up
+whole: a `Structure` ancestor wins over the size rule, however its art is nested.
+
+**What the base editor changed outside the base.** Almost all of it is gated on
+`RuntimeMapEditor.Context`, which is `Dungeon` unless a hub or base session is running — the
+region-size selection rule, shape collection, the vanilla-floor toggle, base protection and every
+journal hook (`NoteRemoved`, `NoteMoved`, `NoteShapeTouched`, `BaseGround.RequestRefresh`) all return
+immediately elsewhere. Three changes are **not** gated and apply to dungeon and hub rooms too:
+
+| Change | Effect elsewhere |
+| --- | --- |
+| `EnsureCollider` delegates a new collider to the room composite at creation rather than at the bake | Same end state, earlier. Closes a one-frame window where a fresh collider is a solid body — harmless in a dungeon, where the clock is stopped, and the cause of the player being shoved off the spawn in a live base |
+| `SetActiveShapeCollision` / `ApplyColliderSettings` call `MarkEdited()` | Toggling collision or dragging collider detail now counts as unsaved work, so the close guard offers to save where it used to go quiet |
+| Hubs filtered out of the Level tool's room pool and the Dungeon Builder's level picker | Deliberate: a hub dealt into a floor arrives with no doors and the run stops in it |
+
+Three more are shared code that was rewritten but is *equivalent* rather than changed, worth knowing
+if one of them ever looks like a regression: `SelectionRoot` gained `SceneRefs.ContentRoot` as a stop
+(in a dungeon that resolves to `room.CustomTransform`, already in the list); every sweep moved from
+`IsProtected` to `CanDelete`, which outside the base is defined as exactly `!IsProtected`; and
+`SceneRefs.Room` / `ContentRoot` gained overrides that are null unless a base session sets them, and
+are cleared on scene load and whenever a hub starts. The patches in `BaseEditPatches` are all guarded
+on `Location == Base`, `!HubSession.Busy`, or state only a base session fills — except
+`GameManager.OnConversationNext`, which is patched globally but returns on a bool check unless a base
+arrival is in flight.
+
+Hidden in base context: **Clear** and **Load Map** (both would replace a room that is not ours),
+plus the dungeon-only tools. The Shape tool's *Vanilla Floor Collision* switch is hidden too —
+switching the base's own floor off would drop everyone standing on it. Save has no name dialog: the
+slot names the file.
+
 ### Dungeon Builder
 
 Authors a **dungeon** as the Slay-the-Spire-style node graph the game shows between rooms: one node
@@ -1933,10 +2197,27 @@ what the blueprint put in the room, so the two never arm together.
 | `CustomShapeProfiles.cs` | Disk-loaded SpriteShape profiles (`CultTweaker_*`) |
 | `CTLevelBlueprint.cs`, `CTLevelDungeon.cs`, `LevelPlayback.cs` | Level tier: data, dungeon, run driver |
 | `CustomRoomPatches.cs` | Marks rooms whose contents a blueprint replaced |
+| `HubBuildTotem.cs` | Copies the base's build totem into a hub (holder-wake, singleton guard, region data) |
+| `HubBuildRegion.cs` | The hub's buildable grid: ground outline in, lattice tiles out |
+| `HubStructureStore.cs` | What the player built in a hub, per save slot, in our own file |
+| `../Patches/HubBuildPatches.cs` | Keeps hub builds out of the game's save; grid, clamps, singleton |
+| `BaseSession.cs` | The base editor's lifetime and the guards that decide whether it may open |
+| `BaseDelta.cs` | The base as a difference: added content, the removed/moved journal, apply on arrival |
+| `BaseGround.cs` | Ground the base did not come with: collision, validation polygon, buildable grid |
+| `SaveMask.cs` | Hides a moved building from every write of the game's save file |
+| `../Patches/BaseEditPatches.cs` | Grid extension, builds on added ground, the save mask's trigger |
 | `Tools/DungeonMapCanvas.cs` | The dungeon map screen: chrome, free-placed node graph, geometric picking |
 | `Tools/DungeonMapSkin.cs`, `Tools/DungeonNodeVisual.cs` | The game's own adventure-map art, cloned and stripped (twins of `CustomMapSkin` / `CustomNodeVisual`) |
 | `../APIHelper/ModContentPaths.cs` | Finds the same content folders inside other mods' `CultTweaker` folders |
 | `Tools/*.cs` | One file per tool, plus shared gizmos, ghosts and protection rules |
+
+Three folders are **per save slot** rather than per map, because what they hold belongs to the
+player's game rather than to the content: `CustomWorldMaps/progress_slot<N>.json` (which nodes are
+beaten), `CustomHubStructures/slot<N>/<hub>.json` (what the player built in each hub) and
+`CustomBaseMaps/base_slot<N>.json` (what the author changed about that slot's base). `<N>` is
+`SaveAndLoad.SAVE_SLOT % 10` — saving a DLC game shifts that field by ten for the length of one
+write, and a file named from the shifted value is a file the next session cannot find. The slot is
+re-read on every access; there is no reliable "another save was loaded" hook.
 | `Tools/TriggerActions.cs` | Trigger action model and the sequence runner |
 | `Tools/TriggerCameraActions.cs` | Camera offset/zoom/look-at, post-processing effects, cutscenes |
 | `Tools/TriggerScreenText.cs` | The caption / title / fullscreen text overlay |

@@ -43,6 +43,10 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     private GameObject _detailsGO;
     private TMPro.TMP_Text _details;
     private MapEditorToggle _flipToggle;
+    private GameObject _seeThroughGO;
+    private MapEditorToggle _seeThroughToggle;
+    private GameObject _fogThroughGO;
+    private MapEditorToggle _fogThroughToggle;
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
@@ -64,6 +68,16 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         // tell whether what you were looking at was flipped already.
         var flip = ui.CreateToggle(panel, "Flipped horizontally", false, SetFlipped);
         _flipToggle = flip.GetComponent<MapEditorToggle>();
+
+        // Only shown for something that can carry them - a structure this editor placed. The rows
+        // disappear rather than sitting there greyed out for the many things that cannot.
+        _seeThroughGO = ui.CreateToggle(panel, "See-through", false, on => SetLook(player: on, fog: null));
+        _seeThroughToggle = _seeThroughGO.GetComponent<MapEditorToggle>();
+        _seeThroughGO.SetActive(false);
+
+        _fogThroughGO = ui.CreateToggle(panel, "Fog pass-through", false, on => SetLook(player: null, fog: on));
+        _fogThroughToggle = _fogThroughGO.GetComponent<MapEditorToggle>();
+        _fogThroughGO.SetActive(false);
 
         // No delete button: Del does it, and the button sat one slip away from the controls above.
         RefreshDetails();
@@ -170,8 +184,20 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         if (!hasSelection)
         {
             _flipToggle?.SetValue(false, notify: false);
+            _seeThroughGO?.SetActive(false);
+            _fogThroughGO?.SetActive(false);
             if (resize) _editor.RequestOptionsResize();
             return;
+        }
+
+        var structures = _editor.GetTool<StructureTool>();
+        var canSeeThrough = structures?.CanSetSeeThrough(_selected) == true;
+        _seeThroughGO?.SetActive(canSeeThrough);
+        _fogThroughGO?.SetActive(canSeeThrough);
+        if (canSeeThrough)
+        {
+            _seeThroughToggle?.SetValue(structures.IsSeeThrough(_selected), notify: false);
+            _fogThroughToggle?.SetValue(structures.IsFogThrough(_selected), notify: false);
         }
 
         var transform = _selected.transform;
@@ -186,14 +212,47 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         // the tool refuses to rotate for the same reason, and a row that always reads 0 is noise.
         _details.text =
             $"{_selected.name}\n" +
+            (string.IsNullOrEmpty(_internalName) ? "" : $"Internal   {_internalName}\n") +
             $"Position   {position.x:0.##}, {position.y:0.##}   (z {position.z:0.###})\n" +
             $"Scale   {Mathf.Abs(scale.x):0.###} x {scale.y:0.###}\n" +
             $"{scripts} script(s), {nested} in children, {renderers} renderer(s)" +
-            (MapEditorProtection.IsProtected(_selected) ? "\nProtected - cannot be deleted." : "");
+            (MapEditorProtection.IsProtected(_selected) ? "\nProtected - cannot be deleted."
+                : !MapEditorProtection.CanDelete(_selected)
+                    ? "\nOne of the base's own buildings - can be moved, not deleted."
+                    : "");
 
         MapEditorUI.FitLabelHeight(_detailsGO);
         _flipToggle?.SetValue(scale.x < 0f, notify: false);
         if (resize) _editor.RequestOptionsResize();
+    }
+
+    // What the object is called in the files, as opposed to what Unity calls the GameObject. A map
+    // author reading "Building Bed(Clone)" cannot tell which structure that is in a blueprint or in
+    // a BuildingOverrides folder; the internal name is the one both of those are keyed by.
+    private string _internalName;
+
+    private string ResolveInternalName(GameObject go)
+    {
+        // Ours, and the only tier that knows a custom structure's COTL_API name.
+        if (_editor.GetTool<StructureTool>()?.TryGetPlacedName(go, out var placed) == true)
+            return placed;
+
+        // Vanilla structures - the ones the game saved and spawned, including anything the player
+        // built. The brain carries the type the save uses; the component's own field is the
+        // fallback for one that has not been assigned a brain yet.
+        var structure = go.GetComponentInParent<Structure>();
+        if (structure != null)
+        {
+            var type = structure.Brain?.Data != null ? structure.Brain.Data.Type : structure.Type;
+            if (type != StructureBrain.TYPES.NONE)
+                return COTL_API.CustomStructures.CustomStructureManager.CustomStructureList
+                    .TryGetValue(type, out var custom) && custom != null
+                    ? custom.InternalName
+                    : type.ToString();
+        }
+
+        // Scenery: the addressable key a save would write for it.
+        return RoomSnapshot.TryResolveKey(go, out var key) ? key : null;
     }
 
     public void OnEnter() => _editor.SetStatus("Click an object to select it.");
@@ -477,20 +536,30 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         GameObject best = null;
         var bestSize = float.MaxValue;
 
+        // Cheapest questions first, and the expensive ones only for a renderer that is actually
+        // under the cursor and actually smaller than the best so far.
+        //
+        // The order used to be the other way round, which meant asking "is this protected" of every
+        // renderer in the scene. In a dungeon room that is a few hundred; in the player's base it is
+        // thousands, and each answer walks the object's ancestors and its whole subtree looking for
+        // followers, interactions and buildings. That is what made a click in the base stutter.
+        // Nothing about which object wins has changed - a protected one is still passed over so
+        // whatever is behind it can be reached.
         foreach (var renderer in Object.FindObjectsOfType<Renderer>())
         {
-            if (!IsVisibleRenderer(renderer)) continue;
-            if (MapEditorProtection.IsProtected(renderer.gameObject)) continue;
+            if (!IsDrawable(renderer)) continue;
             if (!TryScreenRect(renderer.bounds, cam, out var rect)) continue;
             if (!rect.Contains(screen)) continue;
 
             // Smallest on screen wins, so a small prop in front of a large backdrop is reachable.
             var size = rect.width * rect.height;
-            if (size < bestSize)
-            {
-                bestSize = size;
-                best = renderer.gameObject;
-            }
+            if (size >= bestSize) continue;
+
+            if (IsPickIgnored(renderer.gameObject)) continue;
+            if (MapEditorProtection.IsProtected(renderer.gameObject)) continue;
+
+            bestSize = size;
+            best = renderer.gameObject;
         }
 
         return best != null ? SelectionRoot(best) : null;
@@ -542,10 +611,18 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     private static bool IsVisibleRenderer(Renderer renderer)
     {
+        if (!IsDrawable(renderer)) return false;
+        return !IsPickIgnored(renderer.gameObject);
+    }
+
+    // The half of the question that costs nothing: is this renderer drawing anything at all. Kept
+    // apart from the ignore rules below, which walk the hierarchy and are worth asking only about a
+    // renderer that has already been found under the cursor.
+    private static bool IsDrawable(Renderer renderer)
+    {
         if (renderer == null || !renderer.enabled) return false;
         if (!renderer.gameObject.activeInHierarchy) return false;
         if (renderer is ParticleSystemRenderer) return false;
-        if (IsPickIgnored(renderer.gameObject)) return false;
         return renderer is SpriteRenderer || renderer is MeshRenderer || renderer is SkinnedMeshRenderer;
     }
 
@@ -590,23 +667,98 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             if (room.HeavyAssetsTransform != null) stops.Add(room.HeavyAssetsTransform);
         }
 
+        // Where the tools actually build, which in the base is a container of our own rather than
+        // the room's. Without it the walk climbs straight past that container and hands back
+        // everything the editor has ever placed as one object.
+        var content = SceneRefs.ContentRoot;
+        if (content != null) stops.Add(content);
+
+        var inBase = RuntimeMapEditor.Context == EditorContext.Base;
+
         var current = go.transform;
         var best = current;
 
         while (current.parent != null && !stops.Contains(current.parent))
         {
+            // A region, not a thing: stop below it. See IsRegion.
+            if (inBase && IsRegion(current.parent)) break;
+
             current = current.parent;
             if (MapEditorProtection.IsProtected(current.gameObject)) break;
             best = current;
         }
 
+        // A building is picked up whole, however its art is nested. The wrapper rule above would
+        // otherwise hand back whichever piece of a structure the cursor happened to be over.
+        if (inBase)
+        {
+            var structure = best.GetComponentInParent<Structure>();
+            if (structure != null && !stops.Contains(structure.transform) &&
+                !MapEditorProtection.IsProtected(structure.gameObject))
+                return structure.gameObject;
+        }
+
         return best.gameObject;
+    }
+
+    // How wide something can be before it stops being a thing and starts being a part of the map.
+    //
+    // A prop, a bush, a cluster of foliage, a market stall: all comfortably under this. The teleport
+    // area, a whole planted grove, a region of the base: all well over it. There is a lot of room
+    // between the two, which is why one number does the job.
+    private const float RegionSize = 9f;
+
+    // Is this object a piece of the map rather than something standing on it?
+    //
+    // The climb above exists because what the cursor lands on is usually a sprite inside the thing
+    // the author means to move - so it walks up until it runs out of parents. In a dungeon room that
+    // is right: the containers it stops at are the room's own, and everything between is one prop.
+    //
+    // The base is hand-authored, and authored scenes have regions in them. Climbing blindly there
+    // handed back the whole teleport area - trees, statue and bridge as one object - when the author
+    // clicked the bridge. Counting children was the first answer and it was far too eager: a single
+    // bush is several sprites, so it came apart into leaves.
+    //
+    // Size is the honest signal. Things that belong together are together *because* they are in the
+    // same place, so a group of them stays compact; a region is spread across the map by definition.
+    // So the climb keeps whole anything that fits in a reasonable armful, and stops below anything
+    // that does not.
+    private static bool IsRegion(Transform parent)
+    {
+        var renderers = parent.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0) return false;
+
+        var bounds = new Bounds();
+        var started = false;
+
+        foreach (var renderer in renderers)
+        {
+            if (renderer == null || !renderer.enabled) continue;
+            if (renderer is ParticleSystemRenderer) continue;
+
+            if (!started)
+            {
+                bounds = renderer.bounds;
+                started = true;
+                continue;
+            }
+
+            bounds.Encapsulate(renderer.bounds);
+        }
+
+        if (!started) return false;
+
+        return bounds.size.x > RegionSize || bounds.size.y > RegionSize;
     }
 
     private void Select(GameObject go)
     {
         ClearHighlight();
         _selected = go;
+
+        // Resolved here rather than in RefreshDetails: that runs ten times a second while something
+        // is being dragged, and the last tier of this walks the addressables catalog.
+        _internalName = _selected == null ? null : ResolveInternalName(_selected);
 
         if (_selected == null)
         {
@@ -759,12 +911,23 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         if (target.transform.position == position && target.transform.localScale == scale) return;
 
+        // Where the gesture started, which for something of the player's is what the journal has to
+        // find it by next time. Ours are recorded by the tools that own them and this does nothing.
+        BaseDelta.NoteMoved(target, position, scale);
+
         _editor.History.Push($"{label} {target.name}", () =>
         {
             if (target == null) return false;
 
+            // Undoing a move is itself a move as far as the base's journal is concerned: it has to
+            // learn the new resting place, and a building of the player's has to have its grid and
+            // its navigation data taken back with it.
+            var undoneFrom = target.transform.position;
+            var undoneScale = target.transform.localScale;
+
             target.transform.position = position;
             target.transform.localScale = scale;
+            BaseDelta.NoteMoved(target, undoneFrom, undoneScale);
             _editor.KeepCullingSuspended = true;
 
             if (_selected == target)
@@ -897,6 +1060,48 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     // Sets the flip rather than toggling it, so the checkbox and the object cannot drift apart:
     // ticking it always means flipped, whatever the object was.
+    // The two borrowed looks. Either box changes one of them and leaves the other where it is, so
+    // both are passed every time and the untouched one is read back from the object. Undoable like
+    // any other edit, and written into the blueprint by the tool that owns the object.
+    private void SetLook(bool? player, bool? fog)
+    {
+        var structures = _editor.GetTool<StructureTool>();
+        if (_selected == null || structures == null) return;
+
+        var wasPlayer = structures.IsSeeThrough(_selected);
+        var wasFog = structures.IsFogThrough(_selected);
+
+        var wantPlayer = player ?? wasPlayer;
+        var wantFog = fog ?? wasFog;
+        if (wantPlayer == wasPlayer && wantFog == wasFog) return;
+
+        if (!structures.TrySetSeeThrough(_selected, wantPlayer, wantFog))
+        {
+            _editor.SetStatus("This one cannot take those looks.", StatusSeverity.Warning);
+            _seeThroughToggle?.SetValue(wasPlayer, notify: false);
+            _fogThroughToggle?.SetValue(wasFog, notify: false);
+            return;
+        }
+
+        var nowPlayer = structures.IsSeeThrough(_selected);
+        var nowFog = structures.IsFogThrough(_selected);
+        _seeThroughToggle?.SetValue(nowPlayer, notify: false);
+        _fogThroughToggle?.SetValue(nowFog, notify: false);
+
+        var target = _selected;
+        _editor.History.Push("appearance", () =>
+        {
+            if (target == null) return false;
+            structures.TrySetSeeThrough(target, wasPlayer, wasFog);
+            if (_selected == target) RefreshDetails();
+            return true;
+        });
+
+        _editor.SetStatus(nowPlayer || nowFog
+            ? $"See-through {(nowPlayer ? "on" : "off")}, fog {(nowFog ? "on" : "off")}."
+            : "Back to normal.");
+    }
+
     private void SetFlipped(bool flipped)
     {
         if (_selected == null)
@@ -972,7 +1177,23 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
+        // In the base, a building the player paid for is movable but never deletable: undoing a
+        // deletion would mean giving it back, and the game's own edit mode already demolishes with
+        // the refund. Nothing here is allowed to cost them a building.
+        if (!MapEditorProtection.CanDelete(_selected))
+        {
+            _editor.SetStatus($"'{_selected.name}' is one of the base's own buildings - it can be " +
+                              "moved, not deleted. Demolish it from the build totem.",
+                StatusSeverity.Warning);
+            return;
+        }
+
         var path = HierarchyPath(_selected.transform);
+
+        // Written down before it is destroyed, while there is still something to describe. Only
+        // says true for the player's own scenery: what this editor placed is remembered by the tool
+        // that placed it.
+        var journalled = BaseDelta.NoteRemoved(_selected);
 
         ClearHighlight();
         Object.Destroy(_selected);
@@ -980,7 +1201,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         SceneRefs.RescanNavigation();
         _editor.MarkEdited();
-        _editor.SetStatus("Deleted " + path);
+        _editor.SetStatus("Deleted " + path +
+                          (journalled ? " - it stays gone once the base is saved." : ""));
     }
 
     private static string HierarchyPath(Transform t)

@@ -383,6 +383,17 @@ public static class RoomSnapshot
         return null;
     }
 
+    // One object rather than a sweep: the Select tool names what is under the cursor with the same
+    // three tiers a save uses, so the readout and the blueprint agree on what a thing is called.
+    // Called on a click, never per frame - the pool lookup it builds is not free.
+    internal static bool TryResolveKey(GameObject go, out string key)
+    {
+        key = null;
+        if (go == null) return false;
+
+        return TryResolve(go, BuildPrefabPathLookup(), out key, out _);
+    }
+
     private static bool TryResolve(GameObject go,
         Dictionary<GameObject, (string key, bool addressable)> prefabPaths,
         out string key, out bool isAddressable)

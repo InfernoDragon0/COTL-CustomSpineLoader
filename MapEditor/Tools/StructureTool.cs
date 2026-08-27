@@ -30,7 +30,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         public GameObject Instance;
         public float Rotation;
         public bool FlipX;
+        public bool SeeThrough;
+        public bool FogThrough;
     }
+
+    // Armed for the next placement, the way the scatter setting is: what is placed while these are
+    // ticked comes out that way. Anything already down is changed from the Select tool instead.
+    private bool _placeSeeThrough;
+    private bool _placeFogThrough;
 
     public StructureTool(RuntimeMapEditor editor)
     {
@@ -65,6 +72,25 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _grid = ui.CreateIconGrid(panel, "PlacementGrid", scrollHeight: GridHeight);
 
         ui.CreateToggle(panel, "Multi-select randomised placement", false, SetScatterMode);
+
+        // The crystal tree's two looks, on anything, and separately: one lets the player show
+        // through, the other lets the weather through. Anything already down is changed with the
+        // Select tool.
+        ui.CreateToggle(panel, "Place see-through", false, on =>
+        {
+            _placeSeeThrough = on;
+            _editor.SetStatus(on
+                ? "New objects will show the player through."
+                : "New objects will hide the player.");
+        });
+
+        ui.CreateToggle(panel, "Place fog pass-through", false, on =>
+        {
+            _placeFogThrough = on;
+            _editor.SetStatus(on
+                ? "New objects will take the fog."
+                : "New objects will ignore the fog.");
+        });
 
         ui.CreateButton(panel, "Clear Selection", () =>
         {
@@ -179,6 +205,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         var entries = new List<MapEditorGrid.Entry>();
         var seen = new HashSet<StructureBrain.TYPES>();
 
+        // First in the list, and only in a hub: it is the one entry here that is not a building but
+        // the thing that lets the player put buildings up for themselves.
+        if (HubSession.Active) entries.Add(TotemEntry());
+
         var host = Object.FindObjectOfType<TypeAndPlacementObjects>();
         if (host?.TypeAndPlacementObject != null)
         {
@@ -202,6 +232,103 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         return entries;
     }
+
+    // ---- the hub's build totem ------------------------------------------------------------------
+
+    // Placed by hand like anything else in this tool: pick it, a ghost follows the cursor, click to
+    // stand it up. What it does at play time is the game's own build menu - the player walks up to
+    // it, opens it, and puts real buildings on the hub's ground for real resources.
+    public const string TotemId = "hub:buildtotem";
+    private const string TotemLabel = "Build Totem";
+
+    private bool _pendingTotem;
+    private GameObject _totemGhost;
+    private Vector3 _totemGhostOffset;
+    private GameObject _placedTotem;
+
+    private MapEditorGrid.Entry TotemEntry() => new()
+    {
+        Id = TotemId,
+        Display = TotemLabel,
+        OnClick = () =>
+        {
+            _search?.Confirm();
+
+            if (_placedTotem != null)
+            {
+                _editor.SetStatus("This hub already has a build totem.", StatusSeverity.Warning);
+                return;
+            }
+
+            _pending = StructureBrain.TYPES.NONE;
+            _propPath = null;
+            _picks.Clear();
+            DestroyPreview();
+            DestroyPropPreview();
+
+            _pendingTotem = true;
+            _editor.SetStatus("Click to place the build totem.");
+        }
+    };
+
+    private void UpdateTotemPlacement()
+    {
+        if (_totemGhost == null)
+        {
+            var source = HubBuildTotem.FindSourceObject();
+            if (source != null)
+            {
+                _totemGhost = MapEditorGhost.Create(source, _editor.transform,
+                    "CultTweaker_TotemPreview", disableBehaviours: true,
+                    beforeWake: HubBuildTotem.DisarmGhost);
+
+                _totemGhostOffset = HubBuildTotem.InteractionOffset(_totemGhost);
+            }
+        }
+
+        if (_totemGhost != null)
+            _totemGhost.transform.position = _editor.MouseWorld() - _totemGhostOffset;
+
+        if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
+
+        PlaceTotem(_editor.MouseWorld());
+    }
+
+    private void PlaceTotem(Vector3 position)
+    {
+        var totem = HubBuildTotem.Spawn(position, SceneRefs.ContentRoot);
+        if (totem == null)
+        {
+            _editor.SetStatus("The build totem could not be copied from the base.",
+                StatusSeverity.Error);
+            CancelTotem();
+            return;
+        }
+
+        _placedTotem = totem;
+        CancelTotem();
+
+        _editor.History.Push("place build totem", () =>
+        {
+            if (_placedTotem == null) return false;
+            Object.Destroy(_placedTotem);
+            _placedTotem = null;
+            HubBuildTotem.Forget();
+            return true;
+        });
+
+        _editor.SetStatus("Build totem placed. Players can build on the hub's ground from here.");
+    }
+
+    private void CancelTotem()
+    {
+        _pendingTotem = false;
+        if (_totemGhost != null) Object.Destroy(_totemGhost);
+        _totemGhost = null;
+    }
+
+    // For the loader: a totem rebuilt from the blueprint is the one this tool now owns.
+    public void AdoptTotem(GameObject totem) => _placedTotem = totem;
 
     private readonly Dictionary<string, StructureBrain.TYPES> _typesById = [];
 
@@ -549,6 +676,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         DestroyPreview();
         DestroyPropPreview();
+        CancelTotem();
     }
 
     public void ResetTracking()
@@ -557,19 +685,87 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _placedProps.Clear();
         _pending = StructureBrain.TYPES.NONE;
         _propPath = null;
+        _placedTotem = null;
         DestroyPreview();
         DestroyPropPreview();
+        CancelTotem();
     }
 
     // The room snapshot skips objects this tool already serializes.
     public bool IsTracked(GameObject go)
     {
         // Cursor ghosts are live pooled objects in the room; the snapshot must skip them too.
-        if (go != null && (go == _preview || go == _propPreview)) return true;
+        if (go != null && (go == _preview || go == _propPreview || go == _totemGhost)) return true;
+
+        // The totem round-trips as a position on the blueprint, and it is rebuilt from the base's
+        // own on every load. Unclaimed, the snapshot took it for authored scenery - its name does
+        // not end in "(Clone)" - and wrote it into KeptAuthored as well, which is a second way to
+        // bring back an object that already has one.
+        if (go != null && _placedTotem != null && go == _placedTotem) return true;
 
         foreach (var placed in _placed)
             if (placed.Instance == go) return true;
         return false;
+    }
+
+    // What this tool would call the object if it saved it now - the name that goes in the blueprint
+    // and that other mods' folders are keyed by. The Select tool shows it; a clone dragged off a
+    // placed structure is tracked too, so it answers for those as well.
+    public bool TryGetPlacedName(GameObject go, out string internalName)
+    {
+        internalName = null;
+        if (go == null) return false;
+
+        foreach (var placed in _placed)
+        {
+            if (placed.Instance != go) continue;
+            internalName = placed.IsCustom ? CustomInternalName(placed.Type) : placed.Type.ToString();
+            return true;
+        }
+        return false;
+    }
+
+    // The Select tool's two boxes. Only a structure this tool placed can answer, because only those
+    // round-trip through the blueprint - the flags have to be written down as well as applied, or
+    // they would be gone the next time the map is loaded.
+    public bool CanSetSeeThrough(GameObject go) => IndexOfPlaced(go) >= 0;
+
+    public bool IsSeeThrough(GameObject go)
+    {
+        var index = IndexOfPlaced(go);
+        return index >= 0 && _placed[index].SeeThrough;
+    }
+
+    public bool IsFogThrough(GameObject go)
+    {
+        var index = IndexOfPlaced(go);
+        return index >= 0 && _placed[index].FogThrough;
+    }
+
+    public bool TrySetSeeThrough(GameObject go, bool player, bool fog)
+    {
+        var index = IndexOfPlaced(go);
+        if (index < 0) return false;
+
+        var placed = _placed[index];
+        if (placed.Instance == null) return false;
+
+        SeeThrough.Set(placed.Instance, player, fog);
+
+        // Read back rather than assumed: a sprite an effect could not attach to leaves the boxes
+        // saying what actually happened.
+        placed.SeeThrough = SeeThrough.IsPlayerThrough(placed.Instance);
+        placed.FogThrough = SeeThrough.IsFogThrough(placed.Instance);
+        return true;
+    }
+
+    private int IndexOfPlaced(GameObject go)
+    {
+        if (go == null) return -1;
+
+        for (var i = 0; i < _placed.Count; i++)
+            if (_placed[i].Instance == go) return i;
+        return -1;
     }
 
     // Keeps the serialised mirror flag in step with a transform flip (select tool's flip button).
@@ -596,7 +792,12 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 IsCustom = placed.IsCustom,
                 Instance = clone,
                 Rotation = placed.Rotation,
-                FlipX = placed.FlipX
+                FlipX = placed.FlipX,
+
+                // A ctrl-drag copy is a copy of the whole thing, the looks included - Unity copied
+                // the components and materials with it.
+                SeeThrough = placed.SeeThrough,
+                FogThrough = placed.FogThrough
             });
             return true;
         }
@@ -605,6 +806,12 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void OnUpdate()
     {
+        if (_pendingTotem)
+        {
+            UpdateTotemPlacement();
+            return;
+        }
+
         if (_scatter)
         {
             if (_picks.Count > 0) UpdateScatterPlacement();
@@ -694,6 +901,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 disableBehaviours: true);
 
             if (ghost != null && isCustom) DressCustomStructure(ghost, type, ghostAlpha: 0.6f);
+            else if (ghost != null) DressOverriddenBuilding(ghost, type);
         }
 
         if (ghost == null)
@@ -765,6 +973,31 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         }
     }
 
+    // A vanilla building re-skinned by a BuildingOverrides folder gets its new look from a postfix
+    // on Structure.Start. The ghost never wakes that behaviour, so without this it shows the stock
+    // art while you aim and the override only after the click - the one moment you are choosing by
+    // eye is the one moment it lies.
+    private static void DressOverriddenBuilding(GameObject ghost, StructureBrain.TYPES type)
+    {
+        var overrides = StructureBuildingOverrideHelper.GetOverridesForBuilding(type.ToString());
+        if (overrides == null || overrides.Count == 0) return;
+
+        try
+        {
+            CustomStructureManager.OverrideStructureBuilding(ghost, overrides);
+
+            // The ghost was faded on the way out of MapEditorGhost.Create; these renderers are
+            // newer than that pass.
+            foreach (var renderer in ghost.GetComponentsInChildren<SpriteRenderer>(true))
+                renderer.color = new Color(renderer.color.r, renderer.color.g, renderer.color.b, 0.6f);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: {type} preview could not take its building " +
+                                  $"override: {e.Message}");
+        }
+    }
+
     private static string ResolvePrefabPath(StructureBrain.TYPES type, bool isCustom)
     {
         if (isCustom && CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom))
@@ -779,7 +1012,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     }
 
     public IEnumerator PlaceAt(StructureBrain.TYPES type, bool isCustom, Vector3 position,
-        float rotation, bool flipX, bool deferNav)
+        float rotation, bool flipX, bool deferNav) =>
+        PlaceAt(type, isCustom, position, rotation, flipX, deferNav, _placeSeeThrough, _placeFogThrough);
+
+    public IEnumerator PlaceAt(StructureBrain.TYPES type, bool isCustom, Vector3 position,
+        float rotation, bool flipX, bool deferNav, bool seeThrough, bool fogThrough)
     {
         var root = SceneRefs.ContentRoot;
         if (root == null)
@@ -833,13 +1070,24 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             go.transform.localScale = new Vector3(-s.x, s.y, s.z);
         }
 
+        // After the flip and the scale, and after a custom structure has had its own art attached:
+        // both looks read the sprite that is there when they are applied.
+        if (seeThrough || fogThrough) SeeThrough.Set(go, seeThrough, fogThrough);
+
+        // In the base, a structure is meant to be a building rather than a picture of one: the bed
+        // gets slept in, the plot gets farmed. That takes a brain, which the game will make without
+        // filing it in the player's save.
+        BaseDelta.GiveBrain(go, type, position);
+
         var placed = new PlacedStructure
         {
             Type = type,
             IsCustom = isCustom,
             Instance = go,
             Rotation = rotation,
-            FlipX = flipX
+            FlipX = flipX,
+            SeeThrough = seeThrough,
+            FogThrough = fogThrough
         };
         _placed.Add(placed);
         _editor.History.Push($"place {type}", () =>
@@ -887,6 +1135,12 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void ContributeTo(CTNodeBlueprint map)
     {
+        // Destroyed with the Select tool rather than un-placed, so the check is for the object
+        // still being there, not for a flag somebody remembered to clear.
+        map.BuildTotem = _placedTotem == null
+            ? null
+            : new MapTotemData { Position = MapEditorSerialization.V3(_placedTotem.transform.position) };
+
         map.Structures.Clear();
         foreach (var placed in _placed)
         {
@@ -900,6 +1154,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
                 Rotation = placed.Rotation,
                 FlipX = placed.FlipX,
+                SeeThrough = placed.SeeThrough,
+                FogThrough = placed.FogThrough,
 
                 // Absolute: FlipX is stored separately and re-applied on load; a negative X
                 // here would cancel it out.
@@ -908,12 +1164,21 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         }
     }
 
-    private static string CustomInternalName(StructureBrain.TYPES type)
-    {
-        return CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom)
+    private static string CustomInternalName(StructureBrain.TYPES type) => InternalNameOf(type);
+
+    // The name a structure is written down by, whoever is doing the writing - a blueprint, a hub's
+    // building file, the Select tool's readout. A GuidManager-minted enum prints a bare integer
+    // that resolves differently next launch, so a custom structure answers with the name its own
+    // mod gave it.
+    public static string InternalNameOf(StructureBrain.TYPES type) =>
+        CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom) && custom != null
             ? custom.InternalName
             : type.ToString();
-    }
+
+    // For callers that saved a name without recording whether it was custom.
+    public static bool TryResolveAnyType(string typeName, out StructureBrain.TYPES type) =>
+        TryResolveType(typeName, isCustom: true, out type) ||
+        TryResolveType(typeName, isCustom: false, out type);
 
     // Resolves a saved TypeName back to a live enum value.
     public static bool TryResolveType(string typeName, bool isCustom, out StructureBrain.TYPES type)

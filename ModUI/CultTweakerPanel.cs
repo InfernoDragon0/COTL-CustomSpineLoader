@@ -365,6 +365,7 @@ public class CultTweakerPanel : MonoBehaviour
         _ui.CreateHeader(_content, "- Go -", 22);
         BuildDungeonPicker();
         BuildHubSection();
+        BuildBaseSection();
         BuildWorldMapSection();
 
         _ui.CreateHeader(_content, "- Extras -", 22);
@@ -442,6 +443,33 @@ public class CultTweakerPanel : MonoBehaviour
         }
 
         _ui.CreateButton(_content, "New Hub", () => BeginHub(MapEditor.HubSession.FreeName()));
+    }
+
+    // The base editor. It has no picker and no list: there is one base, it is the one the player is
+    // standing in, and its file is named after their save slot. So the section is a button and a
+    // line saying why it is not available when it is not.
+    private void BuildBaseSection()
+    {
+        var blocked = MapEditor.BaseSession.WhyNot();
+
+        if (blocked != null)
+        {
+            Note("Base editor: " + blocked);
+            return;
+        }
+
+        _ui.CreateButton(_content, "Edit Base", EditBase);
+        Note($"Edits the base for save slot {MapEditor.BaseDelta.Slot}. The game's own save is not " +
+             "written to.");
+    }
+
+    private void EditBase()
+    {
+        // Closed first: the editor takes the screen and the pause.
+        Close();
+
+        var error = MapEditor.BaseSession.Enter();
+        if (error != null) Plugin.Log.LogWarning("CultTweaker: " + error);
     }
 
     private void BeginHub(string hubName)

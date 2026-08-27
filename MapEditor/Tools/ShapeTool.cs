@@ -32,6 +32,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private GameObject _centerHandle;
 
     private GameObject _collisionToggleRow;
+    private MapEditorToggle _collisionToggle;
+    private GameObject _vanillaFloorRow;
 
     // Spline.InsertPointAt throws if a new point lands on an existing one.
     private const float MinPointSpacing = 0.25f;
@@ -58,8 +60,10 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         });
 
         _collisionToggleRow = ui.CreateToggle(panel, "Shape Has Collision", true, SetActiveShapeCollision);
+        _collisionToggle = _collisionToggleRow.GetComponent<MapEditorToggle>();
 
-        ui.CreateToggle(panel, "Vanilla Floor Collision", _useVanillaFloor, SetVanillaFloorCollision);
+        _vanillaFloorRow = ui.CreateToggle(panel, "Vanilla Floor Collision", _useVanillaFloor,
+            SetVanillaFloorCollision);
 
         ui.CreateToggle(panel, "Open Ended", _openEnded, v =>
         {
@@ -138,6 +142,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _toolActive = true;
         CaptureTemplate();
         CollectProfiles();
+
+        // In a dungeon or a hub this switch decides whether the room's own floor or the author's
+        // shapes carry the collision, and both answers are reasonable. In the base the room's own
+        // floor is the player's town, and switching it off would drop everyone standing on it.
+        _vanillaFloorRow?.SetActive(RuntimeMapEditor.Context != EditorContext.Base);
 
         if (_active == null)
             _active = Object.FindObjectOfType<SpriteShapeController>();
@@ -437,6 +446,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var go = Object.Instantiate(_template.gameObject, root);
         go.name = "CultTweaker_Shape";
+        go.AddComponent<CTEditorShape>();
         go.SetActive(true);
         go.transform.position = center;
 
@@ -536,6 +546,57 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         var renderer = ctrl != null ? ctrl.spriteShapeRenderer : null;
         if (renderer != null) renderer.sortingOrder = order;
+    }
+
+    // The layer the game's own room shapes are on, and where ours have to be too.
+    private const string GroundLayer = "Ground";
+
+    // Ground is ground, whatever it was cloned from.
+    //
+    // A shape is made by copying a live one, so it inherits that one's sorting - fine in a dungeon,
+    // where the only shapes to copy are the room's own. A town has other kinds, and a copy of one of
+    // those can land on the same sorting layer and order as the structures standing on it. Sorting
+    // layer decides first, then order in layer, and only then distance - so when the first two tie,
+    // the decision falls to a depth difference the game leaves at 0.0001 of a unit. That is a
+    // rounding nudge, not a gap, and two surfaces that close flicker over each other as the camera
+    // moves. Which is the whole of the terrain-versus-structure fight.
+    private static bool _saidWhereGroundWent;
+
+    private static void SettleSorting(SpriteShapeController ctrl)
+    {
+        var renderer = ctrl != null ? ctrl.spriteShapeRenderer : null;
+        if (renderer == null) return;
+
+        if (!HasGroundLayer())
+        {
+            if (!_saidWhereGroundWent)
+            {
+                _saidWhereGroundWent = true;
+                Plugin.Log.LogWarning("MapEditor: this game has no 'Ground' sorting layer, so " +
+                                      "terrain keeps whatever it was copied from and may fight with " +
+                                      "structures standing on it.");
+            }
+            return;
+        }
+
+        if (renderer.sortingLayerName == GroundLayer) return;
+
+        if (!_saidWhereGroundWent)
+        {
+            _saidWhereGroundWent = true;
+            Plugin.Log.LogInfo($"MapEditor: terrain copied from a '{renderer.sortingLayerName}' " +
+                               $"shape (order {renderer.sortingOrder}); moved to '{GroundLayer}' so " +
+                               "structures draw over it.");
+        }
+
+        renderer.sortingLayerName = GroundLayer;
+    }
+
+    private static bool HasGroundLayer()
+    {
+        foreach (var layer in SortingLayer.layers)
+            if (layer.name == GroundLayer) return true;
+        return false;
     }
 
     private const float RowHeight = 30f;
@@ -677,6 +738,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (shape == null) return;
 
         var doomed = shape;
+
+        // A piece of the player's own ground, deleted. Written down before it is destroyed, while
+        // there is still something to describe.
+        BaseDelta.NoteRemoved(doomed.gameObject);
+
         _shapes.Remove(doomed);
         if (_active == doomed) _active = null;
 
@@ -685,6 +751,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         // DestroyImmediate: a deferred destroy leaves the shape in the merged outline until the next change.
         Object.DestroyImmediate(doomed.gameObject);
         SceneRefs.RegenerateRoomCollision();
+        BaseGround.RequestRefresh();
         RefreshCollisionOverlay();
 
         UpdateLabels();
@@ -723,12 +790,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     // notify: false - selecting a shape must not add or strip a collider as a side effect.
     private void SyncCollisionToggle()
     {
-        if (_collisionToggleRow == null) return;
+        if (_collisionToggle == null) return;
 
-        var toggle = _collisionToggleRow.GetComponent<MapEditorToggle>();
-        if (toggle == null) return;
-
-        toggle.SetValue(ShapeHasCollision(_active), notify: false);
+        _collisionToggle.SetValue(ShapeHasCollision(_active), notify: false);
     }
 
     private void UpdateLabels()
@@ -827,6 +891,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private void ApplyColliderSettings()
     {
         if (_active == null) return;
+
+        _editor.MarkEdited();
         _active.colliderDetail = _colliderDetail;
         _active.colliderOffset = _colliderOffset;
         _active.autoUpdateCollider = true;
@@ -851,6 +917,17 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (ctrl.gameObject.GetComponent<PolygonCollider2D>() == null)
                 ctrl.gameObject.AddComponent<PolygonCollider2D>();
         }
+
+        // Handed to the room's outline in the same breath it is born, before physics has ever
+        // stepped over it.
+        //
+        // A collider is a solid body of its own until something delegates it to the composite, and
+        // everything that does so runs a frame later, once the sprite shape's mesh exists. In the
+        // editor that gap costs nothing - the clock is stopped. On the way into a base it is a real
+        // frame of real physics, and anything standing where the collider appears is shoved off it:
+        // that is what pushed the player away from the spawn point when a base with reshaped ground
+        // loaded. The geometry catches up at the bake; what matters here is that it never acts alone.
+        JoinRoomComposite(ctrl);
     }
 
     private void RefreshCollisionOverlay()
@@ -942,6 +1019,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             return;
         }
 
+        _editor.MarkEdited();
+
         if (enabled)
         {
             EnsureCollider(_active);
@@ -971,6 +1050,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         _editor.MarkEdited();
 
+        // In the base, a shape the tool did not make is a piece of the player's own ground. Nothing
+        // is written down here - a drag commits on every frame it moves - only the fact that this
+        // shape has been touched, and where it stood before anyone touched it.
+        BaseDelta.NoteShapeTouched(ctrl);
+
         // Visual-only shapes never get a collider: editing decorative geometry must not turn it solid.
         if (!ShapeHasCollision(ctrl))
         {
@@ -983,6 +1067,24 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.StartCoroutine(BakeNextFrame(ctrl));
     }
 
+    // Bake a shape's collider and fold it into the room's collision outline.
+    //
+    // The half of a commit that decides whether a shape is floor or a wall you bounce off. A collider
+    // that is not part of the room's composite is a solid body on its own, and the two are
+    // indistinguishable until something walks into one. Split out because a shape rebuilt on load has
+    // to be given the same treatment a shape edited by hand gets - which it was not, and that is what
+    // left reshaped base terrain pushing the player around after every load.
+    //
+    // Sorting is deliberately left alone here, unlike FinalizeLoadedShape: the base's own terrain
+    // came with a draw order the game chose, and this is about collision.
+    public void MergeCollisionIntoRoom(SpriteShapeController ctrl)
+    {
+        if (ctrl == null || !ShapeHasCollision(ctrl)) return;
+
+        ctrl.BakeCollider();
+        JoinRoomComposite(ctrl);
+    }
+
     private IEnumerator BakeNextFrame(SpriteShapeController ctrl)
     {
         yield return null;
@@ -993,11 +1095,24 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         SceneRefs.RegenerateRoomCollision();
 
+        // In the base, collision is only half of what makes a floor. The polygon the game validates
+        // positions against, the followers' bounds check and the buildable grid all read a separate
+        // outline, and ground that is solid but not in that outline is ground the game keeps
+        // teleporting people off.
+        BaseGround.RequestRefresh();
+
         if (ReferenceEquals(ctrl, _active)) RefreshCollisionOverlay();
     }
 
     private void SetVanillaFloorCollision(bool enabled)
     {
+        if (RuntimeMapEditor.Context == EditorContext.Base)
+        {
+            _editor.SetStatus("The base's own floor stays on; everything standing on it is the " +
+                              "player's.", StatusSeverity.Warning);
+            return;
+        }
+
         var affected = ApplyVanillaFloorFlag(enabled);
 
         SceneRefs.RegenerateRoomCollision();
@@ -1176,34 +1291,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         foreach (var ctrl in CollectSerializableShapes())
         {
             if (ctrl == null) continue;
-
-            var spline = ctrl.spline;
-            var data = new MapShapeData
-            {
-                Position = MapEditorSerialization.V3(ctrl.transform.position),
-                Profile = ctrl.spriteShape != null ? ctrl.spriteShape.name : "",
-                IsOpenEnded = spline.isOpenEnded,
-                HasCollision = ShapeHasCollision(ctrl),
-                ColliderDetail = ctrl.colliderDetail,
-                ColliderOffset = ctrl.colliderOffset,
-                SortingOrder = SortOrderOf(ctrl)
-            };
-
-            for (var i = 0; i < spline.GetPointCount(); i++)
-            {
-                data.Points.Add(new MapShapePointData
-                {
-                    Position = MapEditorSerialization.V3(spline.GetPosition(i)),
-                    LeftTangent = MapEditorSerialization.V3(spline.GetLeftTangent(i)),
-                    RightTangent = MapEditorSerialization.V3(spline.GetRightTangent(i)),
-                    TangentMode = spline.GetTangentMode(i).ToString(),
-                    Height = spline.GetHeight(i),
-                    SpriteIndex = spline.GetSpriteIndex(i),
-                    Corner = spline.GetCorner(i)
-                });
-            }
-
-            map.Shapes.Add(data);
+            map.Shapes.Add(Describe(ctrl));
         }
     }
 
@@ -1213,6 +1301,13 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         foreach (var s in _shapes)
             if (s != null && !list.Contains(s)) list.Add(s);
+
+        // In the base, only what this tool made. The sweep below exists so a dungeon room's own
+        // authored terrain round-trips through a blueprint, which is the right thing when the
+        // blueprint *is* the room. A base file is a difference from a room that already exists, and
+        // sweeping there would write down the player's whole town - and then lay a second copy of it
+        // over the first on the way back in.
+        if (RuntimeMapEditor.Context == EditorContext.Base) return list;
 
         foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
         {
@@ -1241,6 +1336,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         foreach (var inherited in go.GetComponents<Collider2D>())
             Object.DestroyImmediate(inherited);
 
+        SettleSorting(ctrl);
         ctrl.spline.Clear();
         return ctrl;
     }
@@ -1266,13 +1362,68 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var go = Object.Instantiate(_template.gameObject, root);
         go.name = "CultTweaker_Shape";
+        go.AddComponent<CTEditorShape>();
         go.SetActive(true);
+        SettleSorting(go.GetComponent<SpriteShapeController>());
         go.transform.position = MapEditorSerialization.ToVector3(data.Position);
 
         var ctrl = go.GetComponent<SpriteShapeController>();
 
         foreach (var inherited in go.GetComponents<Collider2D>())
             Object.DestroyImmediate(inherited);
+
+        if (!ApplyShapeData(ctrl, data))
+        {
+            Object.Destroy(go);
+            return null;
+        }
+
+        _shapes.Add(ctrl);
+        return ctrl;
+    }
+
+    // A live shape written down: the same record a save makes of it, wherever the caller means to
+    // put that record. The base editor keeps one per piece of the player's own terrain it changed.
+    public static MapShapeData Describe(SpriteShapeController ctrl)
+    {
+        var spline = ctrl.spline;
+        var data = new MapShapeData
+        {
+            Position = MapEditorSerialization.V3(ctrl.transform.position),
+            Profile = ctrl.spriteShape != null ? ctrl.spriteShape.name : "",
+            IsOpenEnded = spline.isOpenEnded,
+            HasCollision = ShapeHasCollision(ctrl),
+            ColliderDetail = ctrl.colliderDetail,
+            ColliderOffset = ctrl.colliderOffset,
+            SortingOrder = SortOrderOf(ctrl)
+        };
+
+        for (var i = 0; i < spline.GetPointCount(); i++)
+        {
+            data.Points.Add(new MapShapePointData
+            {
+                Position = MapEditorSerialization.V3(spline.GetPosition(i)),
+                LeftTangent = MapEditorSerialization.V3(spline.GetLeftTangent(i)),
+                RightTangent = MapEditorSerialization.V3(spline.GetRightTangent(i)),
+                TangentMode = spline.GetTangentMode(i).ToString(),
+                Height = spline.GetHeight(i),
+                SpriteIndex = spline.GetSpriteIndex(i),
+                Corner = spline.GetCorner(i)
+            });
+        }
+
+        return data;
+    }
+
+    // A saved shape's profile, spline and collider written onto a controller that already exists.
+    //
+    // Split out of RebuildShape because the base editor needs the second half of it on its own: a
+    // shape the player's base came with is not rebuilt from nothing, it is found where it stands and
+    // told what the author did to it. Returns false when the data does not describe a usable shape,
+    // which is the caller's cue to throw away whatever it made for it.
+    public bool ApplyShapeData(SpriteShapeController ctrl, MapShapeData data)
+    {
+        if (ctrl == null || data?.Points == null) return false;
 
         var profile = FindProfile(data.Profile);
         if (profile != null) ctrl.spriteShape = profile;
@@ -1310,9 +1461,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         if (added < 3)
         {
-            Object.Destroy(go);
             Plugin.Log.LogWarning("MapEditor: shape had fewer than 3 usable points, dropped.");
-            return null;
+            return false;
         }
 
         spline.isOpenEnded = data.IsOpenEnded;
@@ -1330,14 +1480,15 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         }
 
         ctrl.RefreshSpriteShape();
-        _shapes.Add(ctrl);
-        return ctrl;
+        return true;
     }
 
     // Must run a frame after RebuildShape: mesh gen is deferred to end of frame, so baking
     // earlier captures the stale outline.
     public void FinalizeLoadedShape(SpriteShapeController ctrl)
     {
+        SettleSorting(ctrl);
+
         if (ctrl == null || !ShapeHasCollision(ctrl)) return;
         ctrl.BakeCollider();
         JoinRoomComposite(ctrl);
@@ -1348,6 +1499,23 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (_active == null) return;
         _editor.MoveCameraTo(_active.transform.position);
     }
+
+    // Terrain the base editor's journal must not treat as the player's own.
+    public bool IsTracked(GameObject go)
+    {
+        if (go == null) return false;
+        return go.GetComponentInParent<CTEditorShape>() != null;
+    }
+}
+
+// Marks a piece of terrain as this tool's rather than the room's.
+//
+// It matters in exactly one place, and only there because the base is edited in place: a dungeon
+// room's shapes are all ours by the time a save runs, and a hub's room was emptied first. The base
+// keeps its own ground standing beside anything drawn on top of it, and nothing about a sprite shape
+// says which of the two it is.
+public class CTEditorShape : MonoBehaviour
+{
 }
 
 // Drag to move a spline point; right-click to delete it.

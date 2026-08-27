@@ -517,8 +517,17 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
             // Names off the file system rather than out of the blueprints: parsing every saved room
             // to read its name back was a stall on every selection.
+            //
+            // Hubs are left out. A hub's room is an ordinary blueprint file, so the folder listing
+            // cannot tell one from a dungeon room - only the hub record beside it can, which is what
+            // BlueprintNames reads back. Dealt into a floor a town arrives with no doors, and the run
+            // stops in it.
+            var hubBlueprints = HubSession.BlueprintNames();
+
             foreach (var name in MapEditorSerialization.SavedNames())
             {
+                if (hubBlueprints.Contains(name)) continue;
+
                 var captured = name;
                 entries.Add(new MapEditorGrid.Entry
                 {

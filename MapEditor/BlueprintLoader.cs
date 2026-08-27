@@ -118,7 +118,8 @@ public class BlueprintLoader
                     continue;
                 }
                 yield return structureTool.PlaceAt(type, s.IsCustom,
-                    MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX, deferNav: true);
+                    MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
+                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough);
                 ApplySavedScale(structureTool.LastPlacedInstance, s.Scale);
             }
         }
@@ -204,6 +205,11 @@ public class BlueprintLoader
 
         doorTool?.SealDoorsWithoutNeighbours();
 
+        // After the collision rebuild, because the totem's buildable grid is cut from the room's
+        // finished outline - ask any earlier and it is cut from the room as it was before the
+        // blueprint's own ground was laid.
+        yield return RebuildBuildTotem(bp, structureTool);
+
         // Stops vanilla re-entry code re-rolling decorations/backdrops (see CustomRoomPatches).
         CustomRoomPatches.Mark(room);
 
@@ -243,6 +249,11 @@ public class BlueprintLoader
         if (bp.Lighting != null && bp.Lighting.Enabled) LightingTool.Apply(bp.Lighting);
         else { LightingTool.ForgetCurrentRoom(); LightingTool.ClearOverride(); }
 
+        // Everything the player will see is now in place, lit and playing its music. Anything still
+        // to come - the walk-in, the doors settling - is meant to be watched, so the cover comes off
+        // here rather than after it.
+        LevelPlayback.OnContentReady();
+
         yield return PlayerEntryRoutine(room, bp, doorTool, preferredEntryDirection);
 
         Plugin.Log.LogInfo($"MapEditor: blueprint '{bp.MapName}' loaded - " +
@@ -255,6 +266,43 @@ public class BlueprintLoader
         IsLoading = false;
     }
 
+    // The hub's build totem, and everything the player has built through it.
+    //
+    // The totem is part of the map: the author placed it, so it comes back with the rest of the
+    // furniture. What the player built is not - it belongs to their save slot, not to the map -
+    // so it is restored from our own file, and only when a hub is actually being played. Opening
+    // the same hub in the editor rebuilds the totem and leaves the buildings alone; the editor is
+    // about to sweep the room anyway.
+    private IEnumerator RebuildBuildTotem(CTNodeBlueprint bp, StructureTool structureTool)
+    {
+        HubBuildTotem.Forget();
+        if (bp.BuildTotem == null) yield break;
+
+        var playing = HubSession.Active && !HubSession.IsAuthoring;
+
+        // Before the totem is stood up, not after: opening the store retires the last hub's
+        // buildings, and that sweep would take this one's totem with it.
+        if (playing) HubStructureStore.Begin(HubSession.HubName ?? bp.MapName);
+
+        var totem = HubBuildTotem.Spawn(MapEditorSerialization.ToVector3(bp.BuildTotem.Position),
+            SceneRefs.ContentRoot);
+        if (totem == null) yield break;
+
+        structureTool?.AdoptTotem(totem);
+
+        // The region asks for its grid the moment it is given a brain, but the tiles it hands the
+        // placement loop are read a frame later; let the fill settle before anything is put on it.
+        yield return null;
+
+        if (!playing) yield break;
+
+        HubStructureStore.Restore();
+
+        // After the buildings, because laying a floor tile asks the grid which cell a world point
+        // falls in, and that grid is only finished once the region has been built on.
+        HubStructureStore.RestorePaths();
+    }
+
     // The clear tool preserves CustomTransform placements; a load must not duplicate them.
     private void ClearEditorContent()
     {
@@ -264,7 +312,7 @@ public class BlueprintLoader
         for (var i = root.childCount - 1; i >= 0; i--)
         {
             var child = root.GetChild(i).gameObject;
-            if (MapEditorProtection.IsProtected(child)) continue;
+            if (!MapEditorProtection.CanDelete(child)) continue;
             Object.Destroy(child);
         }
     }
@@ -437,7 +485,7 @@ public class BlueprintLoader
         {
             var child = composite.transform.GetChild(i);
             if (child == null) continue;
-            if (MapEditorProtection.IsProtected(child.gameObject)) continue;
+            if (!MapEditorProtection.CanDelete(child.gameObject)) continue;
             // Islands (including hidden door islands) are the terrain pass's business.
             if (child.GetComponent<IslandPiece>() != null) continue;
             if (child.GetComponentInChildren<Door>(true) != null) continue;
@@ -450,7 +498,7 @@ public class BlueprintLoader
         var cleared = 0;
         foreach (var unit in Object.FindObjectsOfType<UnitObject>())
         {
-            if (unit == null || MapEditorProtection.IsProtected(unit.gameObject)) continue;
+            if (unit == null || !MapEditorProtection.CanDelete(unit.gameObject)) continue;
             if (unit.health == null || unit.health.team != Health.Team.Team2) continue;
             Object.Destroy(unit.gameObject);
             cleared++;
@@ -467,7 +515,7 @@ public class BlueprintLoader
     {
         foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
         {
-            if (ctrl == null || MapEditorProtection.IsProtected(ctrl.gameObject)) continue;
+            if (ctrl == null || !MapEditorProtection.CanDelete(ctrl.gameObject)) continue;
             Object.Destroy(ctrl.gameObject);
         }
     }
