@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using COTL_API.CustomSkins;
 using COTL_API.Utility;
@@ -243,11 +243,9 @@ public class CultTweakerPanel : MonoBehaviour
         panel.sizeDelta = new Vector2(PanelWidth, -80f);
         panel.anchoredPosition = new Vector2(-16f, 0f);
 
-        var plate = panelGO.AddComponent<Image>();
-        plate.sprite = MapEditorUI.RoundedPlate;
-        plate.type = Image.Type.Sliced;
-        plate.pixelsPerUnitMultiplier = 1.6f;
-        plate.color = new Color(0f, 0f, 0f, 0.72f);
+        // The game's own plate, as the editors' panels wear - this is where they are opened
+        // from, so it should not be the one surface still in the mod's own colours.
+        MapEditor.VanillaChrome.Dress(panelGO.AddComponent<Image>());
 
         const float headerHeight = 44f;
 

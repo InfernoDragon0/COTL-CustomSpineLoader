@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using TMPro;
 using UnityEngine;
@@ -230,6 +230,10 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         layout.childControlHeight = true;
         layout.childForceExpandWidth = false;
         layout.childForceExpandHeight = true;
+
+        // A list row, though it is built straight into the panel rather than into a scroll
+        // box - so it says so itself, and its -/+/X wear the quiet plate the other lists' do.
+        row.AddComponent<MapEditorQuietArea>();
 
         var plate = row.AddComponent<UnityEngine.UI.Image>();
         plate.sprite = MapEditorUI.RoundedPlate;

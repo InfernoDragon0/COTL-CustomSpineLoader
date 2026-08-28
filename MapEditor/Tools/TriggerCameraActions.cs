@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using Lamb.UI;
 using UnityEngine;
@@ -126,15 +126,51 @@ public static class TriggerCameraActions
     public const string EffectChromatic = "Chromatic aberration";
     public const string EffectVignette = "Vignette";
     public const string EffectDesaturate = "Desaturate";
+    // No longer offered - shaking is its own action now, with a strength to choose. The name is
+    // kept because maps saved before that still name it here, and they still play.
     public const string EffectShake = "Camera shake";
     public const string EffectLetterboxOn = "Letterbox in";
     public const string EffectLetterboxOff = "Letterbox out";
 
     public static readonly string[] Effects =
     [
-        EffectChromatic, EffectVignette, EffectDesaturate, EffectShake,
+        EffectChromatic, EffectVignette, EffectDesaturate,
         EffectLetterboxOn, EffectLetterboxOff
     ];
+
+    // ---- shake ------------------------------------------------------------------------------
+
+    // Shaking used to be one entry in the effect list, at one strength the author could not argue
+    // with. It is its own action now, because a distant rumble and a hit that throws the screen
+    // around are the same call with different numbers - and the number was the missing half.
+    public static readonly string[] ShakeLabels =
+    [
+        "Rumble (faint)", "Light", "Medium", "Heavy", "Violent"
+    ];
+
+    private static readonly float[] ShakeStrengths = [0.12f, 0.25f, 0.45f, 0.75f, 1.2f];
+
+    public static float ShakeStrength(int index) =>
+        index >= 0 && index < ShakeStrengths.Length ? ShakeStrengths[index] : 0.45f;
+
+    // The game shakes between a floor and a ceiling rather than at one amplitude, which is what
+    // keeps it from reading as a vibration; the chosen strength is the ceiling.
+    public static IEnumerator Shake(float strength, float duration)
+    {
+        var seconds = duration > 0f ? duration : 1f;
+        var top = strength > 0f ? strength : 0.45f;
+
+        try
+        {
+            CameraManager.instance?.ShakeCameraForDuration(top * 0.45f, top, seconds);
+        }
+        catch (System.Exception e)
+        {
+            Warn("Camera shake", e);
+        }
+
+        yield return new WaitForSeconds(seconds);
+    }
 
     // The pulses run out and back over the action's duration, so a sequence never leaves the
     // screen stuck in an effect it forgot to undo. The letterbox is the exception - bars are a
@@ -157,9 +193,8 @@ public static class TriggerCameraActions
                 yield break;
 
             case EffectShake:
-                try { CameraManager.instance?.ShakeCameraForDuration(0.2f, 0.45f, seconds); }
-                catch (System.Exception e) { Warn(effect, e); }
-                yield return new WaitForSeconds(seconds);
+                // Through the same call the action uses, at the strength this always shook at.
+                yield return Shake(0.45f, seconds);
                 yield break;
         }
 

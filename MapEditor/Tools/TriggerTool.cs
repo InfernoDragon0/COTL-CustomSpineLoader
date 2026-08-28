@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -479,6 +479,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             TriggerActionType.CameraZoom,
             TriggerActionType.CameraZoomReset,
             TriggerActionType.CameraEffect,
+            TriggerActionType.CameraShake,
             TriggerActionType.PlayCutscene
         ],
         [
@@ -516,6 +517,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         TriggerActionType.CameraLookAtObject => "Look at object",
         TriggerActionType.CameraLookAtTrigger => "Look at trigger",
         TriggerActionType.CameraEffect => "Play camera effect",
+        TriggerActionType.CameraShake => "Camera shake",
         TriggerActionType.PlayCutscene => "Play cutscene",
         TriggerActionType.ShowCaption => "Caption (bottom right)",
         TriggerActionType.ShowTitleText => "Title (top of screen)",
@@ -541,6 +543,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Seconds,
         Zoom,
         Effect,
+        Shake,
         LookTrigger,
         Cutscene,
         CutsceneSkip,
@@ -954,6 +957,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 OpenTargets(TargetStage.Effect, TriggerCameraActions.Effects);
                 break;
 
+            case TriggerActionType.CameraShake:
+                OpenTargets(TargetStage.Shake, TriggerCameraActions.ShakeLabels);
+                break;
+
             case TriggerActionType.PlayCutscene:
             {
                 // Custom folder first: a custom video shadows a vanilla one of the same name.
@@ -1247,6 +1254,15 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 });
                 break;
 
+            case TargetStage.Shake:
+                // How hard is chosen here; how long is the next question, the same one every other
+                // timed action asks.
+                _pendingType = TriggerActionType.CameraShake;
+                _pendingTarget = value;
+                _pendingPosition = new Vector3(TriggerCameraActions.ShakeStrength(index), 0f, 0f);
+                OpenTargets(TargetStage.Seconds, SecondsLabels);
+                break;
+
             case TargetStage.Seconds:
                 FinishTimedAction(index >= 0 && index < SecondsValues.Length
                     ? SecondsValues[index]
@@ -1262,6 +1278,17 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         {
             case TriggerActionType.Wait:
                 AddAction(new TriggerAction { Type = TriggerActionType.Wait, Duration = seconds });
+                break;
+
+            case TriggerActionType.CameraShake:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.CameraShake,
+                    Target = _pendingTarget ?? "",
+                    Amount = _pendingPosition.x,
+                    Duration = seconds
+                });
+                _pendingTarget = null;
                 break;
 
             case TriggerActionType.CameraLookAtObject:

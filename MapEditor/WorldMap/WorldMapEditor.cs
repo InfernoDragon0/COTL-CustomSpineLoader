@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -337,11 +337,8 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         dockRect.sizeDelta = new Vector2(0f, DockHeight);
         dockRect.anchoredPosition = new Vector2(0f, 12f);
 
-        var dockPlate = _dockGO.AddComponent<Image>();
-        dockPlate.sprite = MapEditorUI.RoundedPlate;
-        dockPlate.type = Image.Type.Sliced;
-        dockPlate.pixelsPerUnitMultiplier = 1.6f;
-        dockPlate.color = new Color(0f, 0f, 0f, 0.72f);
+        // The game's own plate, as the room editor's dock wears; see VanillaChrome.
+        VanillaChrome.Dress(_dockGO.AddComponent<Image>());
 
         var dockLayout = _dockGO.AddComponent<HorizontalLayoutGroup>();
         dockLayout.childAlignment = TextAnchor.MiddleLeft;
@@ -368,11 +365,7 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         _optionsRect.sizeDelta = new Vector2(OptionsWidth, OptionsHeight);
         _optionsRect.anchoredPosition = new Vector2(-14f, -70f);
 
-        var optionsPlate = _optionsGO.AddComponent<Image>();
-        optionsPlate.sprite = MapEditorUI.RoundedPlate;
-        optionsPlate.type = Image.Type.Sliced;
-        optionsPlate.pixelsPerUnitMultiplier = 1.6f;
-        optionsPlate.color = new Color(0f, 0f, 0f, 0.72f);
+        VanillaChrome.Dress(_optionsGO.AddComponent<Image>());
 
         _blockers.Add(_optionsRect);
 
@@ -538,11 +531,7 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         rect.offsetMax = new Vector2(-388f, 12f + DockHeight + 8f);
         rect.sizeDelta = new Vector2(rect.sizeDelta.x, 40f);
 
-        var plate = _statusGO.AddComponent<Image>();
-        plate.sprite = MapEditorUI.RoundedPlate;
-        plate.type = Image.Type.Sliced;
-        plate.pixelsPerUnitMultiplier = 1.6f;
-        plate.color = new Color(0f, 0f, 0f, 0.72f);
+        VanillaChrome.Dress(_statusGO.AddComponent<Image>());
 
         var label = _ui.CreateLabel(_statusGO.transform, "", 18, TMPro.TextAlignmentOptions.Left);
         _statusText = label.GetComponent<TMPro.TMP_Text>();

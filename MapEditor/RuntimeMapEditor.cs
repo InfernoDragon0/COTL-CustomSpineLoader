@@ -925,7 +925,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
                         ? MapEditorUI.Accent
                         : new Color(1f, 0.76f, 0.3f);
             }
-            _statusPanel.color = new Color(0f, 0f, 0f, urgent ? 0.78f : 0.62f);
+            // Only the plain plate darkens for urgency; on the game's art the accent outline says
+            // it already, and washing the plate out would throw the design away.
+            _statusPanel.color = VanillaChrome.Ready
+                ? VanillaChrome.Tint
+                : new Color(0f, 0f, 0f, urgent ? 0.78f : 0.62f);
         }
     }
 
@@ -1061,7 +1065,15 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private const float ConfirmBottom = DockHeight + 20f + 46f + 12f;
 
     private const float ToolIconSize = 72f;
-    private const int DockPadding = 8;
+
+    // Wider than the icons strictly need. The plate behind them is the game's own art and its edges
+    // are torn rather than straight, so a margin that read as generous against a flat rounded
+    // rectangle reads as the icons running off the end of a plank.
+    private const int DockPadding = 14;
+
+    // Wider still at the ends. The plank's short edges are the most torn of the four, so the first
+    // and last icon need more room than the rows above and below them do.
+    private const int DockSidePadding = 24;
 
     private const float DockHeight = ToolIconSize + DockPadding * 2;
 
@@ -1078,7 +1090,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     {
         if (_dock == null || _dockContext == Context) return;
 
-        foreach (Transform child in _dock) Destroy(child.gameObject);
+        // Detached before being destroyed, and that is the whole point: Destroy defers to the end
+        // of the frame, so the old icons are still parented and still counted when the layout is
+        // rebuilt below. The dock recovered on the next frame's fitter pass, but the width read
+        // here did not - it went to the status bar, which was left near twice its size.
+        var stale = new List<GameObject>();
+        foreach (Transform child in _dock) stale.Add(child.gameObject);
+        foreach (var child in stale)
+        {
+            child.transform.SetParent(null, false);
+            Destroy(child);
+        }
+
         _toolRings.Clear();
 
         PopulateDock(_dock);
@@ -1099,7 +1122,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         _dock = dock;
 
         var layout = dock.gameObject.AddComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(DockPadding, DockPadding, DockPadding, DockPadding);
+        layout.padding = new RectOffset(DockSidePadding, DockSidePadding, DockPadding, DockPadding);
         layout.spacing = 6f;
         layout.childAlignment = TextAnchor.MiddleLeft;
         layout.childControlWidth = false;
@@ -1282,7 +1305,9 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         rt.sizeDelta = new Vector2(620f, 52f);
         rt.anchoredPosition = new Vector2(16f, -16f);
 
-        var label = _ui.CreateHeader(go.transform, TitleText, 34);
+        // Not CreateHeader: this is the editor's own title bar, not a section heading in a panel,
+        // and it is restyled below off the text component it hands back.
+        var label = _ui.CreateHeadingLabel(go.transform, TitleText, 34);
         var labelRt = label.GetComponent<RectTransform>();
         labelRt.anchorMin = Vector2.zero;
         labelRt.anchorMax = Vector2.one;
@@ -1376,11 +1401,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         rt.sizeDelta = size;
         rt.anchoredPosition = offset;
 
-        var img = go.AddComponent<Image>();
-        img.sprite = MapEditorUI.RoundedPlate;
-        img.type = Image.Type.Sliced;
-        img.pixelsPerUnitMultiplier = 1.6f;
-        img.color = new Color(0f, 0f, 0f, 0.62f);
+        // The game's own plate where it can be had, the mod's rounded one until then.
+        VanillaChrome.Dress(go.AddComponent<Image>());
 
         RegisterUiBlocker(rt);
         return rt;

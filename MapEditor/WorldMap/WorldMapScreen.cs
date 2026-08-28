@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -435,13 +435,15 @@ public class WorldMapScreen : MonoBehaviour
         rect.sizeDelta = new Vector2(560f, 96f);
         rect.anchoredPosition = new Vector2(0f, ConfirmBottom);
 
-        // The outer plate is the border; the fill sits inside it. Red, because every prompt that
-        // reaches this strip is a question that costs something to answer wrongly.
+        // The outer plate is the border; the fill sits inside it. Both are black now: the strip
+        // used to be outlined in red to say that answering it wrongly costs something, but the
+        // buttons inside it wear the game's red ribbon, and a red frame around a red button reads
+        // as one shape rather than a question and its answers.
         var border = _confirmRoot.AddComponent<Image>();
         border.sprite = MapEditorUI.RoundedPlate;
         border.type = Image.Type.Sliced;
         border.pixelsPerUnitMultiplier = 1.6f;
-        border.color = new Color(0.92f, 0.28f, 0.25f, 0.95f);
+        border.color = new Color(0f, 0f, 0f, 0.55f);
 
         var fill = new GameObject("Fill");
         fill.transform.SetParent(_confirmRoot.transform, false);
@@ -454,7 +456,7 @@ public class WorldMapScreen : MonoBehaviour
         plate.sprite = MapEditorUI.RoundedPlate;
         plate.type = Image.Type.Sliced;
         plate.pixelsPerUnitMultiplier = 1.6f;
-        plate.color = new Color(0f, 0f, 0f, 0.88f);
+        plate.color = new Color(0f, 0f, 0f, 0.82f);
         plate.raycastTarget = false;
 
         var label = _ui.CreateLabel(_confirmRoot.transform, "", 20, TextAlignmentOptions.Center);
@@ -470,7 +472,7 @@ public class WorldMapScreen : MonoBehaviour
             var action = _confirmAction;
             HideConfirm();
             action?.Invoke();
-        }, 34f);
+        }, 34f, MapEditorEmphasis.Quiet);
         _confirmRect = confirm.GetComponent<RectTransform>();
         _confirmRect.anchorMin = _confirmRect.anchorMax = new Vector2(0.5f, 0f);
         _confirmRect.pivot = new Vector2(1f, 0f);
@@ -491,7 +493,7 @@ public class WorldMapScreen : MonoBehaviour
         altRect.anchoredPosition = new Vector2(0f, 10f);
         _altButtonLabel = _altButton.GetComponentInChildren<TMP_Text>();
 
-        var cancel = _ui.CreateButton(_confirmRoot.transform, "Cancel", HideConfirm, 34f);
+        var cancel = _ui.CreateButton(_confirmRoot.transform, "Cancel", HideConfirm, 34f, MapEditorEmphasis.Quiet);
         _cancelRect = cancel.GetComponent<RectTransform>();
         _cancelRect.anchorMin = _cancelRect.anchorMax = new Vector2(0.5f, 0f);
         _cancelRect.pivot = new Vector2(0f, 0f);

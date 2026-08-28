@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -86,7 +86,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             DestroyPreview();
             _grid?.SetSelected(null);
             _editor.SetStatus("Selection cleared.");
-        });
+        }, emphasis: MapEditorEmphasis.Quiet);
     }
 
     private MapEditorDropdown _groupDropdown;

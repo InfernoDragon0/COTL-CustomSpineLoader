@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -412,7 +412,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
         var incoming = IncomingCount(_selected);
         Note(column, $"{incoming} link(s) in, {_selected.Children.Count} out.");
 
-        _ui.CreateButton(column, "Clear Links", ClearLinks);
+        _ui.CreateButton(column, "Clear Links", ClearLinks, emphasis: MapEditorEmphasis.Quiet);
     }
 
     private void BuildTypeChooser(RectTransform column, bool forPending)

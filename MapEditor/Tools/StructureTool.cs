@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using COTL_API.CustomStructures;
 using CustomSpineLoader.SpineLoaderHelper;
@@ -102,7 +102,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             _grid?.SetSelectedMany(null);
             _grid?.SetSelected(null);
             _editor.SetStatus("Selection cleared.");
-        });
+        }, emphasis: MapEditorEmphasis.Quiet);
     }
 
     // ---- randomised placement -------------------------------------------------------------------

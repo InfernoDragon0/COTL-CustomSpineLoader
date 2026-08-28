@@ -112,6 +112,7 @@ public class MapEditorDropdown
         PositionList(canvas, rt, height);
 
         var content = _ui.CreateScrollColumn(panel.transform, "OptionList", out _, spacing: 4f);
+        content.gameObject.AddComponent<MapEditorQuietArea>();
         for (var i = 0; i < _options.Count; i++)
         {
             var index = i;

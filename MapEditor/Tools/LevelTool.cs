@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -558,7 +558,7 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         _poolGrid.SetSelectedMany(room.NodePool);
 
-        _ui.CreateButton(column, "Clear Map Selection", ClearPool);
+        _ui.CreateButton(column, "Clear Map Selection", ClearPool, emphasis: MapEditorEmphasis.Quiet);
 
         _poolNote = _ui.CreateLabel(column, PoolNoteFor(room), 14, TextAlignmentOptions.Center);
         MapEditorUI.FitLabelHeight(_poolNote);

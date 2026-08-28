@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -37,13 +37,15 @@ public class MapEditorConfirm
         rect.sizeDelta = new Vector2(560f, 96f);
         rect.anchoredPosition = new Vector2(0f, bottom);
 
-        // The outer plate is the border, the fill sits inside it. Red, because every question that
-        // reaches this strip is one the author can answer wrongly and lose work to.
+        // The outer plate is the border; the fill sits inside it. Both are black now: the strip
+        // used to be outlined in red to say that answering it wrongly costs something, but the
+        // buttons inside it wear the game's red ribbon, and a red frame around a red button reads
+        // as one shape rather than a question and its answers.
         var border = _root.AddComponent<Image>();
         border.sprite = MapEditorUI.RoundedPlate;
         border.type = Image.Type.Sliced;
         border.pixelsPerUnitMultiplier = 1.6f;
-        border.color = new Color(0.92f, 0.28f, 0.25f, 0.95f);
+        border.color = new Color(0f, 0f, 0f, 0.55f);
 
         var fillRt = MapEditorUI.NewChild(_root.transform, "Fill", stretch: true);
         fillRt.offsetMin = new Vector2(3f, 3f);
@@ -53,7 +55,7 @@ public class MapEditorConfirm
         plate.sprite = MapEditorUI.RoundedPlate;
         plate.type = Image.Type.Sliced;
         plate.pixelsPerUnitMultiplier = 1.6f;
-        plate.color = new Color(0f, 0f, 0f, 0.88f);
+        plate.color = new Color(0f, 0f, 0f, 0.82f);
         plate.raycastTarget = false;
 
         var label = ui.CreateLabel(rect, "", 20, TextAlignmentOptions.Center);
@@ -83,7 +85,7 @@ public class MapEditorConfirm
             var action = _onAlt;
             Hide();
             action?.Invoke();
-        }, 34f);
+        }, 34f, MapEditorEmphasis.Quiet);
         var altRect = _altButton.GetComponent<RectTransform>();
         altRect.anchorMin = altRect.anchorMax = new Vector2(0.5f, 0f);
         altRect.pivot = new Vector2(0.5f, 0f);
@@ -91,7 +93,7 @@ public class MapEditorConfirm
         altRect.anchoredPosition = new Vector2(0f, 10f);
         _altLabel = _altButton.GetComponentInChildren<TMP_Text>();
 
-        var cancel = ui.CreateButton(rect, "Cancel", Hide, 34f);
+        var cancel = ui.CreateButton(rect, "Cancel", Hide, 34f, MapEditorEmphasis.Quiet);
         _cancelRect = cancel.GetComponent<RectTransform>();
         _cancelRect.anchorMin = _cancelRect.anchorMax = new Vector2(0.5f, 0f);
         _cancelRect.pivot = new Vector2(0f, 0f);

@@ -1,4 +1,4 @@
-using BepInEx;
+﻿using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using COTL_API.CustomEnemy;
@@ -55,6 +55,15 @@ namespace CustomSpineLoader
         public static ConfigEntry<string> SelectedSpineP2 { get; set; }
 
         public static ConfigEntry<bool> DebugDumpFollowerSpineAtlas { get; set; }
+
+        // The map editor's panels wear the game's own photo mode plate; see MapEditor/VanillaChrome.
+        public static ConfigEntry<bool> MapEditorVanillaPanelArt { get; set; }
+        public static ConfigEntry<string> MapEditorPanelPlate { get; set; }
+        public static ConfigEntry<string> MapEditorPanelSource { get; set; }
+        public static ConfigEntry<float> MapEditorPanelOpacity { get; set; }
+        public static ConfigEntry<string> MapEditorPanelCrop { get; set; }
+        public static ConfigEntry<bool> MapEditorVanillaWidgets { get; set; }
+        public static ConfigEntry<bool> MapEditorFullWeather { get; set; }
 
         public static ConfigEntry<bool> FleeceCyclingEnabled { get; set; }
 
@@ -153,6 +162,28 @@ namespace CustomSpineLoader
                 "If true, will dump the follower spine slots to a json file. May impact performance when enabled. Ensure followerSlots.json is not present before dumping.");
             FleeceCyclingEnabled = Config.Bind("Fleece", "FleeceCyclingEnabled", true, "Enable Fleece Cycling for all players.");
 
+            MapEditorVanillaPanelArt = Config.Bind(
+                "MapEditor", "VanillaPanelArt", true,
+                "Back the map editor's panels with the game's own photo mode plate instead of the mod's plain rounded one.");
+            MapEditorPanelPlate = Config.Bind(
+                "MapEditor", "PanelPlate", "",
+                "Which piece of that art to use, by sprite or object name. Empty picks the largest nine-sliced panel; everything the source prefab draws is listed in the log the first time the editor opens.");
+            MapEditorPanelSource = Config.Bind(
+                "MapEditor", "PanelSource", "",
+                "Which prefab that art comes from, by addressable key. Empty uses photo mode's take-photo overlay; its neighbours are 'Assets/UI/Menus/Photo Mode/Edit Photo Overlay.prefab' and 'Assets/UI/Menus/Photo Mode/Photo Gallery Menu.prefab'.");
+            MapEditorPanelOpacity = Config.Bind(
+                "MapEditor", "PanelOpacity", 0.82f,
+                "How solid the map editor's panels are. 1 is the art as the game draws it; lower lets the room show through.");
+            MapEditorPanelCrop = Config.Bind(
+                "MapEditor", "PanelCrop", "",
+                "Extra pixels to trim off that art, as left,bottom,right,top. Empty trims only the transparent padding the atlas records, which is usually all of it.");
+            MapEditorVanillaWidgets = Config.Bind(
+                "MapEditor", "VanillaWidgets", true,
+                "Use the game's own settings toggle and slider in the map editor's tool panels, scaled down to the editor's row height, instead of the mod's plain ones.");
+            MapEditorFullWeather = Config.Bind(
+                "MapEditor", "FullWeather", true,
+                "Offer every strength of every weather the game has art for, building the ones it does not ship (extreme wind, say) from the nearest one it does. The weather a player gets on a normal day is unaffected either way.");
+
             for (var i = 0; i < FleeceTransmog.Length; i++)
                 FleeceTransmog[i] = Config.Bind("Fleece", $"FleeceTransmogP{i + 1}",
                     FleeceCyclingEnabled.Value,
@@ -174,6 +205,10 @@ namespace CustomSpineLoader
             // The one arrival signal a RE-ACTIVATED room also fires - the generation hooks only
             // see a room's first build, which is why a revisited room's lighting went missing.
             MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.Tools.LightingTool.OnBiomeRoomChanged;
+
+            // And the weather the room asked for, for the same reason: a room walked back into is
+            // re-activated rather than rebuilt, so its blueprint never loads a second time.
+            MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.Tools.WeatherControl.OnBiomeRoomChanged;
 
             // Custom enemies (and so their corpses) belong to the room they spawned in; the
             // game's own teardown never sees them because COTL_API spawns at the scene root.
@@ -331,6 +366,9 @@ namespace CustomSpineLoader
             // The base's own room, in the same scene. Arriving there re-applies whatever this save
             // slot's author has added to it, whether or not they open the editor.
             MapEditor.BaseSession.OnSceneLoaded(scene);
+
+            // No map has asked this scene's weather controller for anything yet.
+            MapEditor.Tools.WeatherControl.Forget();
 
             if (scene.name == "Dungeon1")
             {

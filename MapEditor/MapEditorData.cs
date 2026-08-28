@@ -18,6 +18,7 @@ public class CTNodeBlueprint
     // Restart MusicEvent when it finishes; FMOD events loop only if authored to.
     public bool MusicLoop;
     public MapLightingData Lighting = new();
+    public MapWeatherData Weather = new();
     public List<MapShapeData> Shapes = [];
     public List<MapPropData> Props = [];
     public List<MapKeptData> KeptAuthored = [];
@@ -223,6 +224,23 @@ public class MapLightingData
     public float FogFar = 15f;
     public float FogHeight = 0.5f;
     public float FogSpread = 1f;
+}
+
+// The weather a map asks for. Dungeons and hubs only; the base is left to the game's own seasons.
+//
+// Kept by name rather than as the game's enums: a blueprint written today should still read on a
+// game that has added or renamed a weather, and an unknown name simply means no weather rather
+// than a broken file.
+[Serializable]
+public class MapWeatherData
+{
+    public bool Enabled;
+    public string Type = "";
+    public string Strength = "";
+
+    // Seconds to fade in over. The game's own biome override snaps, and so does this by default -
+    // a room you have just walked into should already be raining, not working up to it.
+    public float Transition;
 }
 
 [Serializable]

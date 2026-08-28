@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using MMBiomeGeneration;
@@ -21,7 +21,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     private const int HeaderSize = 19;
 
     // Slider + reader pairs, so a profile or loaded map can move the knobs.
-    private readonly List<(Slider slider, Func<float> read)> _sliders = [];
+    private readonly List<(MapEditorSlider slider, Func<float> read)> _sliders = [];
 
     private MapEditorDropdown _profileDropdown;
     private string _lastProfile;
@@ -62,7 +62,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         _profileDropdown = ui.CreateDropdown(panel, "Apply saved profile", LightingProfiles.Names(),
             (_, name) => ApplyProfile(name));
         ui.CreateButton(panel, "Save As Profile", SaveProfile);
-        ui.CreateButton(panel, "Delete Selected Profile", DeleteProfile);
+        ui.CreateButton(panel, "Delete Selected Profile", DeleteProfile, emphasis: MapEditorEmphasis.Quiet);
 
         ui.CreateHeader(panel, "- Ambient -", HeaderSize);
         ColourSliders(ui, panel, "Ambient", () => Data.Ambient);
@@ -84,14 +84,104 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         TrackedSlider(ui, panel, "Fog Height", 0f, 10f, () => Data.FogHeight, v => Data.FogHeight = v);
         TrackedSlider(ui, panel, "Fog Spread", 0f, 10f, () => Data.FogSpread, v => Data.FogSpread = v);
 
+        BuildWeather(ui, panel);
+
         _built = true;
+    }
+
+    // ---- weather ------------------------------------------------------------------------------
+
+    private MapWeatherData Weather => _editor.Map.Weather ??= new MapWeatherData();
+
+    // Hidden rather than skipped: panels are built once, before a base session has said so, and by
+    // the time the context is known this column already exists.
+    private readonly List<GameObject> _weatherRows = [];
+    private MapEditorDropdown _weatherType;
+    private MapEditorDropdown _weatherStrength;
+
+    private void BuildWeather(MapEditorUI ui, RectTransform panel)
+    {
+        if (!WeatherControl.Available) return;
+
+        _weatherRows.Add(ui.CreateHeader(panel, "- Weather -", HeaderSize));
+
+        _weatherRows.Add(ui.CreateToggle(panel, "Override weather", Weather.Enabled, on =>
+        {
+            Weather.Enabled = on;
+            if (on) WeatherControl.Apply(Weather);
+            else WeatherControl.Clear();
+
+            _editor.MarkEdited();
+            _editor.SetStatus(on
+                ? "This map sets its own weather."
+                : "Weather left to the biome.");
+        }));
+
+        _weatherType = ui.CreateDropdown(panel, "Weather", WeatherControl.Types(),
+            (_, name) => ChooseWeatherType(name));
+        _weatherRows.Add(_weatherType.Root);
+
+        _weatherStrength = ui.CreateDropdown(panel, "Strength", WeatherControl.StrengthsFor(Weather.Type),
+            (_, name) => ChooseWeatherStrength(name));
+        _weatherRows.Add(_weatherStrength.Root);
+    }
+
+    // Strength is not a free choice: the game keeps one set of weather per type and strength pair,
+    // and a pair it has no entry for produces nothing at all. Picking a type therefore re-offers
+    // only the strengths that type actually has, and takes the first as a starting point.
+    private void ChooseWeatherType(string name)
+    {
+        Weather.Type = name;
+
+        var strengths = WeatherControl.StrengthsFor(name);
+        _weatherStrength?.SetOptions(strengths);
+
+        Weather.Strength = strengths.Count > 0 ? strengths[0] : "";
+        _weatherStrength?.SetSelected(strengths.Count > 0 ? 0 : -1);
+
+        TouchWeather();
+    }
+
+    private void ChooseWeatherStrength(string name)
+    {
+        Weather.Strength = name;
+        TouchWeather();
+    }
+
+    private void TouchWeather()
+    {
+        Weather.Enabled = true;
+        WeatherControl.Apply(Weather);
+
+        _editor.MarkEdited();
+        _editor.SetStatus($"Weather set to {Weather.Type} ({Weather.Strength}).");
+    }
+
+    private void SyncWeather()
+    {
+        // The base keeps the game's own seasons and its shrine weather; a map file that sets the
+        // weather would be fighting them, and the writes it takes to show weather there land in the
+        // player's save. See WeatherControl.
+        var offer = RuntimeMapEditor.Context != EditorContext.Base;
+        foreach (var row in _weatherRows)
+            if (row != null) row.SetActive(offer);
+
+        if (!offer || _weatherType == null) return;
+
+        var types = WeatherControl.Types();
+        _weatherType.SetOptions(types);
+        _weatherType.SetSelected(types.IndexOf(Weather.Type ?? ""));
+
+        var strengths = WeatherControl.StrengthsFor(Weather.Type);
+        _weatherStrength.SetOptions(strengths);
+        _weatherStrength.SetSelected(strengths.IndexOf(Weather.Strength ?? ""));
     }
 
     private void TrackedSlider(MapEditorUI ui, RectTransform panel, string label, float min, float max,
         Func<float> read, Action<float> write)
     {
         var slider = ui.CreateSlider(panel, label, min, max, read(), v => { write(v); Touch(); })
-            .GetComponentInChildren<Slider>();
+            .GetComponent<MapEditorSlider>();
         _sliders.Add((slider, read));
     }
 
@@ -107,7 +197,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     private void SyncSliders()
     {
         foreach (var (slider, read) in _sliders)
-            if (slider != null) slider.SetValueWithoutNotify(read());
+            if (slider != null) slider.SetValue(read(), notify: false);
     }
 
     // ---- profiles -----------------------------------------------------------------------------
@@ -182,6 +272,7 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
         // Map loads and the trigger tool can change these while the tool is closed.
         SyncSliders();
         RefreshProfileOptions();
+        SyncWeather();
 
         _editor.SetStatus("Drag a slider to take the room's lighting off the biome.");
     }
@@ -509,5 +600,6 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     {
         // Already edited live on the blueprint; hook guards against a refactor dropping it.
         map.Lighting = Data;
+        map.Weather = Weather;
     }
 }

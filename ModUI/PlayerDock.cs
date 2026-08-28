@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using COTL_API.CustomSkins;
 using CustomSpineLoader.MapEditor;
 using CustomSpineLoader.SpineLoaderHelper;
@@ -109,7 +109,11 @@ public class PlayerDock
         var rect = card.AddComponent<RectTransform>();
         rect.sizeDelta = new Vector2(CardWidth, 0f);
 
-        Plate(rect, CardPlate);
+        // The card is the outermost surface a player's controls sit on, so it wears the
+        // game's plate; the boxes nested inside it stay plain, or it is planks on planks.
+        var cardPlate = card.AddComponent<Image>();
+        MapEditor.VanillaChrome.Dress(cardPlate);
+        cardPlate.raycastTarget = false;
 
         var layout = card.AddComponent<VerticalLayoutGroup>();
         layout.childAlignment = TextAnchor.UpperCenter;

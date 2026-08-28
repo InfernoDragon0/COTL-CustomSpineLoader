@@ -161,6 +161,50 @@ public class MapEditorUI
         return image;
     }
 
+    // Softer than the ribbon the pause menu paints, which is the cult red at full strength: this
+    // one sits under a dozen buttons in a panel rather than one highlighted line in a menu, and
+    // that much red at that many places reads as a warning rather than a button.
+    private static readonly Color RibbonIdle = new(0.20f, 0.17f, 0.16f, 0.85f);
+    private static readonly Color RibbonHover = new(0.55f, 0.33f, 0.28f, 0.95f);
+
+    // Grey art, so these are near enough its own shades: a row in a list should read as part of the
+    // list, not as a dozen things asking to be pressed.
+    private static readonly Color QuietIdle = new(0.42f, 0.41f, 0.39f, 0.85f);
+    private static readonly Color QuietHover = new(0.82f, 0.80f, 0.76f, 0.95f);
+
+    // The pause menu's button art where it can be had, the mod's rounded plate until then. Inside a
+    // list it is the grey cut of the same ribbon.
+    private static Image AddRibbonPlate(GameObject go, MapEditorEmphasis emphasis,
+        out Color idle, out Color hover)
+    {
+        var source = VanillaWidgets.Ribbon;
+        if (source == null || source.sprite == null)
+        {
+            idle = PlateIdle;
+            hover = PlateHover;
+            return AddPlate(go, PlateIdle);
+        }
+
+        // Either the caller says this is not the thing to reach for, or it is a row in a list and
+        // nothing in a list is.
+        var quiet = emphasis == MapEditorEmphasis.Quiet ||
+                    go.GetComponentInParent<MapEditorQuietArea>() != null
+            ? VanillaWidgets.QuietRibbon
+            : null;
+
+        idle = quiet != null ? QuietIdle : RibbonIdle;
+        hover = quiet != null ? QuietHover : RibbonHover;
+
+        var image = go.AddComponent<Image>();
+        image.sprite = quiet != null ? quiet : source.sprite;
+        image.type = source.type;
+        image.pixelsPerUnitMultiplier = source.pixelsPerUnitMultiplier > 0f
+            ? source.pixelsPerUnitMultiplier
+            : 1f;
+        image.color = idle;
+        return image;
+    }
+
     private static Image AddPlate(GameObject go, Color colour)
     {
         var image = go.AddComponent<Image>();
@@ -219,7 +263,10 @@ public class MapEditorUI
 
             try
             {
-                _cachedFont = FontHelpers.UIFont ?? FontHelpers.PauseMenu ?? FontHelpers.StartMenu;
+                // The settings rows' own face first, so the editor's writing matches the widgets
+                // borrowed from them rather than sitting beside them in a different hand.
+                _cachedFont = VanillaWidgets.RowFont
+                              ?? FontHelpers.UIFont ?? FontHelpers.PauseMenu ?? FontHelpers.StartMenu;
             }
             catch
             {
@@ -237,6 +284,30 @@ public class MapEditorUI
             }
 
             return _cachedFont;
+        }
+    }
+
+    private static TMP_FontAsset _cachedButtonFont;
+
+    // What the game writes its own menu buttons in - the pause menu's face. Kept apart from the
+    // panel's writing on purpose: the two are different faces in the game and reading them as one
+    // would flatten the difference between a row and a thing you press.
+    internal static TMP_FontAsset ButtonFont
+    {
+        get
+        {
+            if (_cachedButtonFont != null) return _cachedButtonFont;
+
+            try
+            {
+                _cachedButtonFont = FontHelpers.PauseMenu ?? FontHelpers.StartMenu;
+            }
+            catch
+            {
+                _cachedButtonFont = null;
+            }
+
+            return _cachedButtonFont != null ? _cachedButtonFont : GameFont;
         }
     }
 
@@ -285,6 +356,7 @@ public class MapEditorUI
         tmp.color = Color.white;
         tmp.enableWordWrapping = true;
         tmp.overflowMode = TextOverflowModes.Overflow;
+        tmp.fontStyle = FontStyles.Normal;
 
         var font = GameFont;
         if (font != null) tmp.font = font;
@@ -341,6 +413,16 @@ public class MapEditorUI
     // Section heading in the game's heading font.
     public GameObject CreateHeader(Transform parent, string text, int size = 24)
     {
+        var borrowed = VanillaWidgets.CreateHeader(parent, text, size, size + 14f);
+        if (borrowed != null) return borrowed;
+
+        return CreateHeadingLabel(parent, text, size);
+    }
+
+    // The editor's own heading, drawn rather than borrowed. The borrowed one keeps its writing on a
+    // child, so anything that wants the text component itself asks for this.
+    public GameObject CreateHeadingLabel(Transform parent, string text, int size)
+    {
         var go = CreateLabel(parent, text, size, TextAlignmentOptions.Center);
         var tmp = go.GetComponent<TMP_Text>();
 
@@ -354,7 +436,8 @@ public class MapEditorUI
 
     // ---- buttons ----------------------------------------------------------------------------
 
-    public GameObject CreateButton(Transform parent, string text, Action onClick, float height = 36f)
+    public GameObject CreateButton(Transform parent, string text, Action onClick, float height = 36f,
+        MapEditorEmphasis emphasis = MapEditorEmphasis.Action)
     {
         var go = new GameObject("Btn_" + text);
         go.transform.SetParent(parent, false);
@@ -362,10 +445,10 @@ public class MapEditorUI
         rt.sizeDelta = new Vector2(190, height);
         ApplyRowLayout(go, height);
 
-        var plate = AddPlate(go, PlateIdle);
+        var plate = AddRibbonPlate(go, emphasis, out var idle, out var hover);
 
         AttachButton(go, plate, onClick);
-        AddHover(go, plate, PlateIdle, PlateHover, null);
+        AddHover(go, plate, idle, hover, null);
         CreateButtonLabel(go.transform, text, height >= 32f ? 19 : 16);
         return go;
     }
@@ -429,6 +512,11 @@ public class MapEditorUI
     private void CreateButtonLabel(Transform parent, string text, int size = 19)
     {
         var label = CreateLabel(parent, text, size, TextAlignmentOptions.Center);
+
+        // A button is not a settings row: it keeps the menu face the game writes its own buttons
+        // in, which is a heavier one than the panel's writing.
+        var face = ButtonFont;
+        if (face != null) label.GetComponent<TMP_Text>().font = face;
         var rt = label.GetComponent<RectTransform>();
         rt.anchorMin = Vector2.zero;
         rt.anchorMax = Vector2.one;
@@ -444,6 +532,9 @@ public class MapEditorUI
 
     public GameObject CreateSlider(Transform parent, string label, float min, float max, float initial, Action<float> onChanged)
     {
+        var borrowed = VanillaWidgets.CreateSlider(parent, label, min, max, initial, onChanged, RowHeight);
+        if (borrowed != null) return borrowed;
+
         var row = new GameObject("Slider_" + label);
         row.transform.SetParent(parent, false);
         var rowRt = row.AddComponent<RectTransform>();
@@ -505,11 +596,15 @@ public class MapEditorUI
         slider.minValue = min;
         slider.maxValue = max;
         slider.SetValueWithoutNotify(initial);
-        slider.onValueChanged.AddListener(v =>
-        {
-            if (readoutText != null) readoutText.text = v.ToString("0.##");
-            onChanged?.Invoke(v);
-        });
+
+        // The same handle tools reach for on the game's row, so neither of them has to know which
+        // one it got.
+        var state = row.AddComponent<MapEditorSlider>();
+        state.Slider = slider;
+        state.Readout = readoutText;
+        state.OnValueChanged = onChanged;
+
+        slider.onValueChanged.AddListener(state.Raw);
 
         return row;
     }
@@ -637,6 +732,9 @@ public class MapEditorUI
 
     public GameObject CreateToggle(Transform parent, string label, bool initial, Action<bool> onChanged)
     {
+        var borrowed = VanillaWidgets.CreateToggle(parent, label, initial, onChanged, RowHeight);
+        if (borrowed != null) return borrowed;
+
         var row = new GameObject("Toggle_" + label);
         row.transform.SetParent(parent, false);
         var rowRt = row.AddComponent<RectTransform>();
@@ -862,16 +960,35 @@ public class MapEditorUI
         arrowRt.sizeDelta = new Vector2(44f, -8f);
         arrowRt.anchoredPosition = new Vector2(-4f, 0f);
 
-        var arrowPlate = AddPlate(arrowPanel, Accent);
-        arrowPlate.raycastTarget = false;
+        // The game's own caret where it can be had: a bare triangle, no plate behind it, which is
+        // how the settings menu ends a dropdown.
+        //
+        // The fallback is the plain accent tile this used to be. It used to carry a typed arrow as
+        // well, which never drew a thing - the game's font has no glyph at that code point - so
+        // what stood here was always just the square.
+        var caret = VanillaWidgets.DropdownArrow;
+        if (caret != null)
+        {
+            var glyph = new GameObject("Caret");
+            glyph.transform.SetParent(arrowPanel.transform, false);
 
-        var arrow = CreateLabel(arrowPanel.transform, "▼", 20, TextAlignmentOptions.Center);
-        var glyphRt = arrow.GetComponent<RectTransform>();
-        glyphRt.anchorMin = Vector2.zero;
-        glyphRt.anchorMax = Vector2.one;
-        glyphRt.offsetMin = Vector2.zero;
-        glyphRt.offsetMax = Vector2.zero;
-        arrow.GetComponent<TMP_Text>().raycastTarget = false;
+            var caretRt = glyph.AddComponent<RectTransform>();
+            caretRt.anchorMin = new Vector2(0.5f, 0.5f);
+            caretRt.anchorMax = new Vector2(0.5f, 0.5f);
+            caretRt.pivot = new Vector2(0.5f, 0.5f);
+            caretRt.sizeDelta = new Vector2(22f, 22f);
+            caretRt.anchoredPosition = Vector2.zero;
+
+            var caretImage = glyph.AddComponent<Image>();
+            caretImage.sprite = caret;
+            caretImage.preserveAspect = true;
+            caretImage.color = new Color(0.98f, 0.94f, 0.85f);
+            caretImage.raycastTarget = false;
+        }
+        else
+        {
+            AddPlate(arrowPanel, Accent).raycastTarget = false;
+        }
 
         var dropdown = new MapEditorDropdown(this, row, rowRt, labelText, caption, onSelected);
         dropdown.SetOptions(options);
@@ -907,6 +1024,7 @@ public class MapEditorUI
         float rowHeight = 30f, float spacing = 3f)
     {
         var content = CreateScrollColumn(parent, name, out var root, spacing);
+        content.gameObject.AddComponent<MapEditorQuietArea>();
         return new MapEditorScrollBox(this, content, root, maxHeight, rowHeight, spacing);
     }
 
@@ -1131,7 +1249,10 @@ public class MapEditorUI
 public class MapEditorToggle : MonoBehaviour
 {
     public Action<bool> OnValueChanged;
+
+    // The editor's own check box, or the game's settings toggle. Exactly one of them.
     public Image Fill;
+    public Lamb.UI.MMToggle Vanilla;
 
     private bool _value;
 
@@ -1148,8 +1269,29 @@ public class MapEditorToggle : MonoBehaviour
         if (Fill != null)
             Fill.color = value ? MapEditorUI.SliderFill : new Color(0.05f, 0.05f, 0.04f, 1f);
 
+        // Its setter animates on a change and stays quiet on a match, and it never calls back - so
+        // a value the player set on the control itself lands here without bouncing.
+        if (Vanilla != null) Vanilla.Value = value;
+
         if (notify) OnValueChanged?.Invoke(value);
     }
+}
+
+// How loudly a button asks to be pressed.
+//
+// Action is the thing the panel is for - place this, save that. Quiet is everything that undoes,
+// clears or backs out: still one click away, but not what the eye should land on first. A panel
+// where every button is accented has no accent at all.
+public enum MapEditorEmphasis
+{
+    Action,
+    Quiet
+}
+
+// Marks a container whose buttons are rows in a list rather than things to press: they wear the
+// quiet cut of the button art, so a list of twenty does not read as twenty invitations.
+public class MapEditorQuietArea : MonoBehaviour
+{
 }
 
 // Brightens a plate under the cursor and feeds the status bar (the editor has no tooltips).

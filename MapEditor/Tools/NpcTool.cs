@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -97,7 +97,7 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             DestroyPreview();
             _grid?.SetSelected(null);
             _editor.SetStatus("Selection cleared.");
-        });
+        }, emphasis: MapEditorEmphasis.Quiet);
     }
 
     private MapEditorSearchRow _search;

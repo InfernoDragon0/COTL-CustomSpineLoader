@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.MapEditor.Npc;
@@ -36,6 +36,10 @@ public enum TriggerActionType
 
     // Target names one of TriggerCameraActions.Effects; Duration is how long it runs.
     CameraEffect,
+
+    // Amount is how hard, Duration how long. The camera effect list has a shake of its own, but at
+    // one fixed strength; this is the one to reach for when the strength is the point.
+    CameraShake,
 
     // Loop doubles as "skippable": a cutscene has nothing to loop.
     PlayCutscene,
@@ -109,6 +113,7 @@ public class TriggerAction
         TriggerActionType.CameraLookAtTrigger =>
             $"Camera looks at trigger {Target} ({Duration:0.#}s)",
         TriggerActionType.CameraEffect => $"Effect: {Target} ({Duration:0.#}s)",
+        TriggerActionType.CameraShake => $"Shake: {Target} ({Duration:0.#}s)",
         TriggerActionType.PlayCutscene =>
             $"Cutscene: {Target}" + (Loop ? " (skippable)" : ""),
         TriggerActionType.ShowCaption => $"Caption: {Quote(Target)}{SubtextNote()}",
@@ -256,6 +261,10 @@ public static class TriggerActions
 
             case TriggerActionType.CameraEffect:
                 yield return TriggerCameraActions.PlayEffect(action.Target, action.Duration);
+                break;
+
+            case TriggerActionType.CameraShake:
+                yield return TriggerCameraActions.Shake(action.Amount, action.Duration);
                 break;
 
             case TriggerActionType.PlayCutscene:

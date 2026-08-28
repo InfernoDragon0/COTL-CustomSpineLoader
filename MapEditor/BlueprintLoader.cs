@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using CustomSpineLoader.SpineLoaderHelper;
 using CustomSpineLoader.MapEditor.Tools;
@@ -248,6 +248,10 @@ public class BlueprintLoader
         // Lighting/fog are values, not objects; a blueprint that never set them leaves the biome alone.
         if (bp.Lighting != null && bp.Lighting.Enabled) LightingTool.Apply(bp.Lighting);
         else { LightingTool.ForgetCurrentRoom(); LightingTool.ClearOverride(); }
+
+        // Weather is the same idea and the same rule: a blueprint that never asked for any leaves
+        // the room to the biome, which is what the game would do anyway.
+        WeatherControl.ForRoom(bp.Weather);
 
         // Everything the player will see is now in place, lit and playing its music. Anything still
         // to come - the walk-in, the doors settling - is meant to be watched, so the cover comes off
