@@ -15,7 +15,6 @@ public class CTNodeBlueprint
     public string SourceRoom = "";
     public bool UseVanillaFloorCollision = true;
     public string MusicEvent = "";   // FMOD event path (event:/music/...); empty = vanilla music
-    // Restart MusicEvent when it finishes; FMOD events loop only if authored to.
     public bool MusicLoop;
     public MapLightingData Lighting = new();
     public MapWeatherData Weather = new();
@@ -29,8 +28,6 @@ public class CTNodeBlueprint
     public List<MapTriggerData> Triggers = [];
     public List<MapPodiumData> Podiums = [];
 
-    // Where the hub's build totem stands, if the author placed one. Null means no totem, which is
-    // every map made before this existed and every map that simply does not want one.
     public MapTotemData BuildTotem;
 }
 
@@ -50,10 +47,6 @@ public class MapShapeData
     public int ColliderDetail = 16;
     public float ColliderOffset;
 
-    // Order in layer - what actually stacks sprite shapes, since Z barely reaches the sorting at
-    // all. Nullable so a map saved before this existed says nothing rather than saying zero: a
-    // rebuilt shape then keeps the order it inherits from the room's template, which is what those
-    // maps have always looked like.
     public int? SortingOrder;
 
     public List<MapShapePointData> Points = [];
@@ -79,12 +72,10 @@ public class MapKeptData
     public SerializableVector3 Position;
     public float RotationZ;
 
-    // Y flips a prop in this game's fixed view; Z tips it over. Both stored so vanilla scenery round-trips.
     public float RotationY;
     public SerializableVector3 Scale;
 }
 
-// One snapshotted scene object, resolved back to the prefab it was spawned from.
 [Serializable]
 public class MapPropData
 {
@@ -96,7 +87,6 @@ public class MapPropData
     public SerializableVector3 Position;
     public float RotationZ;
 
-    // Y flips a prop in this game's fixed view; Z tips it over. Both stored so vanilla scenery round-trips.
     public float RotationY;
     public SerializableVector3 Scale;
 }
@@ -110,18 +100,12 @@ public class MapStructureData
     public float Rotation;
     public bool FlipX;
 
-    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 
-    // Two separate looks, borrowed from the crystal tree. SeeThrough is the player showing through
-    // it; FogThrough is the weather passing through it. Off on every blueprint written before they
-    // existed, which is the same as those maps have always looked.
     public bool SeeThrough;
     public bool FogThrough;
 }
 
-// Door-to-next-node routing is NOT stored here: which blueprint a door leads to is level-scoped
-// data and will live in the future CTLevelBlueprint.
 [Serializable]
 public class MapDoorData
 {
@@ -129,7 +113,6 @@ public class MapDoorData
     public SerializableVector3 Position;
     public float RotationZ;
 
-    // Y flips a prop in this game's fixed view; Z tips it over. Both stored so vanilla scenery round-trips.
     public float RotationY;
 }
 
@@ -140,7 +123,6 @@ public class MapEnemyData
     public bool IsCustom;
     public SerializableVector3 Position;
 
-    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 }
 
@@ -151,12 +133,9 @@ public class MapNpcData
     public bool IsCustom;
     public SerializableVector3 Position;
 
-    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 }
 
-// A box the player can step into, and the sequence of actions entering it plays. Id is how a
-// level (or another trigger) refers to this one - a Move action targets a trigger by Id.
 [Serializable]
 public class MapTriggerData
 {
@@ -167,44 +146,29 @@ public class MapTriggerData
     public SerializableVector3 Position;   // centre
     public float Width = 4f;
     public float Height = 3f;
-    // Fire once per room visit, rather than every time the player walks back in.
     public bool Once = true;
 
-    // Played in order, top to bottom.
     public List<MapTriggerActionData> Actions = [];
 
-    // Players are frozen for the whole sequence except while an action that needs their input
-    // (a conversation) is running.
     public bool LockPlayerControl = true;
 }
 
 [Serializable]
 public class MapTriggerActionData
 {
-    // TriggerActionType name. Unknown values are dropped on load with a warning rather than
-    // throwing, so a blueprint from a newer version still opens.
     public string Type = "";
 
-    // Trigger id, object path, NPC internal name or animation name, depending on Type.
     public string Target = "";
 
-    // Where the object stood when the action was authored. Move actions fall back to this when
-    // the object cannot be resolved, so a move still lands somewhere sensible.
     public SerializableVector3 Position;
 
-    // Radius of the ring players settle into around the target. Ignored for a single player.
     public float Spread = 1.3f;
 
-    // Animation actions: loop for Duration seconds instead of playing once.
     public bool Loop;
     public float Duration;
 
-    // A second number the action needs: a camera zoom, so far. Duration is already spoken for by
-    // waits, holds and fades.
     public float Amount;
 
-    // The smaller line under a screen text's title. Empty is legitimate - a title on its own is
-    // a perfectly good caption.
     public string Subtext = "";
 }
 
@@ -226,11 +190,6 @@ public class MapLightingData
     public float FogSpread = 1f;
 }
 
-// The weather a map asks for. Dungeons and hubs only; the base is left to the game's own seasons.
-//
-// Kept by name rather than as the game's enums: a blueprint written today should still read on a
-// game that has added or renamed a weather, and an unknown name simply means no weather rather
-// than a broken file.
 [Serializable]
 public class MapWeatherData
 {
@@ -238,8 +197,6 @@ public class MapWeatherData
     public string Type = "";
     public string Strength = "";
 
-    // Seconds to fade in over. The game's own biome override snaps, and so does this by default -
-    // a room you have just walked into should already be raining, not working up to it.
     public float Transition;
 }
 
@@ -259,15 +216,11 @@ public class MapPodiumData
 {
     public SerializableVector3 Position;
     public string Type = "Random";   // Interaction_WeaponSelectionPodium.Types name
-    // true = vanilla choose-one-of-N (equipping disables the room's other podiums);
-    // false = only the equipped podium is consumed, the rest stay usable.
     public bool ClearAllOnEquip = true;
 
-    // World scale at save time; null on older blueprints, so readers treat null as "leave it".
     public SerializableVector3 Scale;
 }
 
-// Node blueprints live as flat files: CustomNodeBlueprints/<mapname>.json.
 public static class MapEditorSerialization
 {
     public const string FolderName = "CustomNodeBlueprints";
@@ -289,11 +242,8 @@ public static class MapEditorSerialization
 
     public static string PathFor(string mapName) => Path.Combine(RootPath, Sanitize(mapName) + ".json");
 
-    // Ours only: this answers "would saving overwrite something of mine", which a blueprint shipped
-    // by another mod is not - saving under that name writes our own copy, it does not touch theirs.
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
 
-    // Ours or any other mod's (see ModContentPaths): "is there a blueprint by this name to load".
     public static bool Available(string mapName) => ReadPathFor(mapName) != null;
 
     private static string ReadPathFor(string mapName) =>
@@ -387,12 +337,6 @@ public static class MapEditorSerialization
         return results;
     }
 
-    // The saved blueprints by name, without parsing a single one of them.
-    //
-    // Save writes to PathFor(MapName) after sanitising it, so the file name IS the map name. A
-    // picker or a browser that only needs names therefore has no business deserialising a folder of
-    // rooms to read them back out - a blueprint carries every shape, prop, structure and enemy in
-    // its room, and that is a lot of json to parse for a string that was already on the file.
     public static List<string> SavedNames()
     {
         var names = new List<string>();
@@ -423,7 +367,6 @@ public static class MapEditorSerialization
         return results.Count > 0 ? results[0] : null;
     }
 
-    // The save-time screenshot written next to the json; null when the map predates snapshots.
     public static string SnapshotPathFor(string mapName) =>
         APIHelper.ModContentPaths.FindFile(FolderName, Sanitize(mapName) + ".png");
 

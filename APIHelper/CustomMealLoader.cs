@@ -53,22 +53,16 @@ public class CustomMealLoader : Loader<CustomMealConfig>
 [Serializable]
 public class CustomMealConfig : CustomItemConfig
 {
-    // 0..3
     public int SatiationLevel = 0;
-    // 0.0..1.0
     public float TummyRating = 0f;
-    // BAD, NORMAL, GOOD
     public string MealQuality = "NORMAL";
     public bool MealSafeToEat = true;
 
-    // Recipe represented as dictionary: item internal name -> quantity
     public Dictionary<string, int> Recipe = [];
 
-    // Meal effects mapping (effect name -> chance percent)
     public Dictionary<string, int> MealEffectsDictionary = [];
 }
 
-// Minimal custom meal implementation that reads values from config.
 public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, string spritePath) : CustomMeal
 {
     private readonly string _internalName = internalName;
@@ -87,8 +81,6 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
     private readonly string _description = cfg.Description ?? "This is a custom meal created with CultTweaker.";
 
     public override string InternalName => _internalName;
-    // Cached: these getters are read on every UI redraw, and each call used to decode the
-    // PNG from disk into a fresh texture that nothing ever destroyed.
     private Sprite _cachedSprite;
     private Sprite CachedSprite => _cachedSprite ??= TextureHelper.CreateSpriteFromPath(_spritePath);
 
@@ -118,8 +110,6 @@ public class CultTweakerCustomMeal(string internalName, CustomMealConfig cfg, st
         }
     }
 
-    // The parsed lists are cached for the same reason as the sprite: the cooking UI reads
-    // these repeatedly, and the enum parsing and list building are the same every time.
     private List<List<InventoryItem>> _cachedRecipe;
     private CookingData.MealEffect[] _cachedEffects;
 

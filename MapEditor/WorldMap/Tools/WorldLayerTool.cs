@@ -1,11 +1,10 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.IO;
 using TMPro;
 using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.WorldMap.Tools;
 
-// The map's art: sprite and spine layers, added from the map's folder, dragged on the canvas.
 public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 {
     public IEnumerable<(string Key, string Action)> Shortcuts =>
@@ -24,8 +23,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
     private Vector2 _dragStartPointer;
     private Vector2 _dragStartPosition;
 
-    // Corner-node resize, the room editor's gesture: the scale follows how far the pointer moves
-    // from the layer's centre relative to where the grab started.
     private const float MinScale = 0.05f;
     private const float MaxScale = 4f;
 
@@ -34,7 +31,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
     private float _scaleStartDistance;
     private float _scaleStartValue;
 
-    // Rotation, by the other corner: the layer turns with the pointer around its own centre.
     private bool _rotating;
     private Vector2 _rotateCentre;
     private float _rotateStartAngle;
@@ -62,8 +58,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 
         ui.CreateButton(panel, "Refresh art list", () =>
         {
-            // Failures are remembered so a missing file is not re-read every rebuild; a refresh is
-            // what clears that, so a file dropped in (or fixed) since the panel was built is seen.
             WorldMapAssets.ForgetFailures();
 
             var sprites = ListPngs(map.MapName).Count;
@@ -141,10 +135,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 
     // ---- adding art ---------------------------------------------------------------------------
 
-    // Two steps rather than one dropdown per kind, the way the trigger tool picks an action and
-    // then its target: what kind of layer, then which file. The second list is filled from the
-    // first pick and stays filled across panel rebuilds, so adding two sprites is two clicks the
-    // second time.
     private static readonly string[] AddKinds = ["Sprite", "Spine"];
 
     private string _addKind;
@@ -171,7 +161,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         if (_addKind != null)
             kindPicker.SetSelected(System.Array.IndexOf(AddKinds, _addKind));
 
-        // Listed on every build - files can be dropped into the folder mid-session.
         var assets = _addKind != null ? AssetsFor(map.MapName, _addKind) : [];
 
         _addAssetPicker = ui.CreateDropdown(panel, "Select Art", assets, (index, value) =>
@@ -194,8 +183,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 
     private const float RowHeight = 30f;
 
-    // Front at the top, the way a layer stack is usually read: "+" brings a layer forward and
-    // moves its row up, "X" deletes it, and the row itself selects.
     private void BuildLayerList(RectTransform panel, MapEditorUI ui)
     {
         var map = _editor.Map;
@@ -231,8 +218,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         layout.childForceExpandWidth = false;
         layout.childForceExpandHeight = true;
 
-        // A list row, though it is built straight into the panel rather than into a scroll
-        // box - so it says so itself, and its -/+/X wear the quiet plate the other lists' do.
         row.AddComponent<MapEditorQuietArea>();
 
         var plate = row.AddComponent<UnityEngine.UI.Image>();
@@ -277,7 +262,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
     {
         var button = ui.CreateButton(row.transform, text, onClick, RowHeight - 4f);
 
-        // CreateButton flexes to fill a column; here that would push the label out of the row.
         var element = button.GetComponent<UnityEngine.UI.LayoutElement>();
         element.preferredWidth = 30f;
         element.minWidth = 30f;
@@ -303,7 +287,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
-        // Sort orders are renumbered from the list, so authored gaps and ties cannot stall a move.
         var before = new List<(CTWorldMapLayer layer, int sort)>(ordered.Count);
         foreach (var entry in ordered) before.Add((entry, entry.SortOrder));
 
@@ -350,15 +333,11 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
     {
         if (_editor.Map == null) return;
 
-        // A drag whose release was never seen - a modal dialog stops this update for a few frames -
-        // would otherwise resume against a stale anchor and fling the layer at the next press.
         if (_dragging && !Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0)) _dragging = false;
 
         if (HandleScaleDrag()) return;
         if (HandleRotateDrag()) return;
 
-        // The same key the room editor deletes a selection with; the list's X buttons stay, since
-        // they delete a layer that is not the selected one.
         if (Input.GetKeyDown(KeyCode.Delete))
         {
             var doomed = SelectedLayer();
@@ -367,9 +346,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
-        // Right click ignores the selection's own priority and takes the front-most layer here.
-        // Without it a backdrop, once selected, is under the cursor everywhere and left click can
-        // never reach anything in front of it.
         if (Input.GetMouseButtonDown(1) && !_editor.PointerOverEditorUi())
         {
             var front = HitLayer(preferSelected: false);
@@ -386,8 +362,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         {
             var hit = HitLayer();
 
-            // Ctrl-click clones what is under the cursor and drags the copy off it, the way the
-            // room editor's select tool clones an object.
             if (hit != null && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
                 hit = CloneLayer(hit);
 
@@ -419,7 +393,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             selected.Position.X = target.x;
             selected.Position.Y = target.y;
 
-            // Moved by reference during the drag; the full redraw waits for the release.
             if (_editor.Screen.LayerRects.TryGetValue(selected.Id, out var rect) && rect != null)
                 rect.anchoredPosition = target;
         }
@@ -444,8 +417,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         }
     }
 
-    // True while the yellow corner node owns the mouse. The layer follows the pointer's angle
-    // around its own centre, so the grab point stays under the cursor as it swings.
     private bool HandleRotateDrag()
     {
         var handle = _editor.Screen != null ? _editor.Screen.LayerRotateHandle : null;
@@ -505,7 +476,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         return Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
     }
 
-    // True while the corner node owns the mouse, so the caller skips selecting and dragging.
     private bool HandleScaleDrag()
     {
         var handle = _editor.Screen != null ? _editor.Screen.LayerHandle : null;
@@ -525,7 +495,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             return true;
         }
 
-        // The release can be missed while a modal is up; the drag must not survive it.
         if (selected == null || (!Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0)))
         {
             _scaling = false;
@@ -572,8 +541,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         _editor.Screen?.HighlightLayer(layerId);
     }
 
-    // A copy of a layer, one step in front of everything, ready to be dragged off the original.
-    // Copied through JSON so a field added to the layer later is carried without editing this.
     private CTWorldMapLayer CloneLayer(CTWorldMapLayer source)
     {
         var map = _editor.Map;
@@ -609,16 +576,11 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             return true;
         });
 
-        // Drawn before the drag begins: the drag moves the new rect by reference.
         _editor.RebuildAll();
         _editor.SetStatus($"Cloned '{source.Id}' as '{copy.Id}'. Drag to place it.");
         return copy;
     }
 
-    // The front-most layer under the cursor, so clicking a stack picks what the eye sees - except
-    // for the selected one, which wins wherever it sits, so a layer behind others stays draggable.
-    // preferSelected false is the right-click pick: pure front-most, which is the way back out when
-    // the selection is a backdrop the cursor is always inside.
     private CTWorldMapLayer HitLayer(bool preferSelected = true)
     {
         CTWorldMapLayer best = null;
@@ -643,7 +605,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
 
     private static bool ContainsPointer(RectTransform rect, CTWorldMapLayer layer)
     {
-        // On a screen-space overlay canvas world corners are already screen pixels.
         rect.GetWorldCorners(Corners);
 
         var min = (Vector2)Corners[0];
@@ -654,9 +615,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
             max = Vector2.Max(max, Corners[i]);
         }
 
-        // A spine layer's rect says nothing about what it draws, and scaled to skeleton units it
-        // can be a pixel across - so the grab area never shrinks below something clickable. Half
-        // of the selection frame's own floor, so what is outlined is exactly what can be grabbed.
         var minHalf = WorldMapSelectionFrame.MinFor(layer) * 0.5f;
 
         var centre = (min + max) * 0.5f;
@@ -759,8 +717,6 @@ public class WorldLayerTool : IMapEditorTool, IMapEditorShortcuts
         label.GetComponent<TMP_Text>().color = new Color(1f, 1f, 1f, 0.7f);
     }
 
-    // A caption above a dropdown: the widget shows its current value once one is picked, and then
-    // nothing on it says what it sets.
     private static void Label(MapEditorUI ui, Transform parent, string text)
     {
         var label = ui.CreateLabel(parent, text, 14);

@@ -13,9 +13,6 @@ public class CustomDungeonManager
     {
         var guid = TypeManager.GetModIdFromCallstack(Assembly.GetCallingAssembly());
 
-        // The minted value is keyed by this name, so dungeons that share a Location seed - every
-        // json dungeon does - need their InternalName to tell them apart. Without it the second
-        // one mints the first one's value and the Add below throws.
         var key = string.IsNullOrEmpty(customDungeon.InternalName)
             ? customDungeon.Location.ToString()
             : customDungeon.InternalName;

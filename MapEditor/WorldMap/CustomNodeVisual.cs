@@ -6,10 +6,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// Drives a stripped clone of a vanilla DLC map node. The state visuals mirror the game's own
-// DungeonMapIconContent - same images, materials and colours - because the art is built around
-// them: the outline material carries the glow, and the icon tint is what separates a beaten node
-// from a fresh one.
 internal class CustomNodeVisual : MonoBehaviour
 {
     private Image _icon;
@@ -36,18 +32,14 @@ internal class CustomNodeVisual : MonoBehaviour
     private bool _pulse;
     private float _targetScale = 1f;
 
-    // What the state pass last asked for, so dropping the selection can put it back.
     private WorldNodeState _lastState = WorldNodeState.Selectable;
     private bool _lastAffordable;
     private bool _editView;
-    // The editor's mark on this node, if any: red for the selection, green for a gate member.
     private Color? _mark;
     private bool _markEmphasised;
 
     public float IconSize { get; private set; } = 96f;
 
-    // Built while the clone is still inactive: the references come off the vanilla component, which
-    // is then destroyed along with the rest of the logic.
     public static CustomNodeVisual Attach(GameObject clone, string nodeType)
     {
         if (clone == null) return null;
@@ -99,8 +91,6 @@ internal class CustomNodeVisual : MonoBehaviour
         visual._keyOrLock = string.Equals(nodeType, "Key", StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(nodeType, "Lock", StringComparison.OrdinalIgnoreCase);
 
-        // Vanilla leaves these types their authored colour; tinting a lock or the home node green
-        // reads as a bug rather than as progress.
         visual._keepIconColour = visual._keyOrLock ||
                                  string.Equals(nodeType, "Base", StringComparison.OrdinalIgnoreCase);
 
@@ -111,8 +101,6 @@ internal class CustomNodeVisual : MonoBehaviour
         return visual;
     }
 
-    // The "you are here" pin and the quest alert are hidden by the vanilla node's own Start, which
-    // is one of the scripts being stripped - without this they show on every node.
     private static void HideMenuFurniture(GameObject clone)
     {
         var icon = clone.GetComponentInChildren<WorldMapIcon>(true);
@@ -127,7 +115,6 @@ internal class CustomNodeVisual : MonoBehaviour
         if (go != null) go.SetActive(false);
     }
 
-    // An authored png replaces the vanilla icon; the outline, ring and glow stay.
     public void SetIcon(Sprite sprite)
     {
         if (sprite == null || _icon == null) return;
@@ -173,7 +160,6 @@ internal class CustomNodeVisual : MonoBehaviour
                 _icon.color = UIAdventureMapOverlayController.LockedColourLight;
                 if (_lockedFill != null) _lockedFill.enabled = true;
 
-                // An affordable lock is worth looking at; an unaffordable one is scenery.
                 if (lockAffordable) _pulse = true;
                 break;
         }
@@ -181,8 +167,6 @@ internal class CustomNodeVisual : MonoBehaviour
         if (_mark.HasValue) PaintMark();
     }
 
-    // The editor's marks, worn on the node's own outline: red for the selection, green for the
-    // nodes it is gated on. Null takes the mark off and puts the state's own look back.
     public void SetMark(Color? colour, bool emphasised = false)
     {
         if (Nullable.Equals(_mark, colour) && _markEmphasised == emphasised) return;
@@ -198,9 +182,6 @@ internal class CustomNodeVisual : MonoBehaviour
     {
         if (_imageOutline == null || !_mark.HasValue) return;
 
-        // The vanilla "selected" outline material carries its own warm tint, which multiplies with
-        // whatever colour is set on top - green through it came out a dark red. Only the selection
-        // wears it; every other mark goes on the plain outline, where the tint reads true.
         var material = _markEmphasised ? _selectedOutline : _unselectedOutline ?? _normalOutline;
         if (material != null) _imageOutline.material = material;
 
@@ -209,7 +190,6 @@ internal class CustomNodeVisual : MonoBehaviour
         _imageOutline.color = _mark.Value;
     }
 
-    // Editor view: every node drawn as though it were reachable, so placement is what is judged.
     public void ApplyEditView()
     {
         if (_icon == null) return;
@@ -246,7 +226,6 @@ internal class CustomNodeVisual : MonoBehaviour
         if (_notification != null) _notification.SetActive(false);
         if (_portalEffect != null) _portalEffect.SetActive(false);
 
-        // The key and lock styles carry a second outline that is only theirs.
         if (_iconOutline != null) _iconOutline.gameObject.SetActive(_keyOrLock);
 
         if (_group != null) _group.alpha = 1f;
@@ -278,7 +257,6 @@ internal class CustomNodeVisual : MonoBehaviour
 
     private void Update()
     {
-        // Unscaled throughout: the map holds the world at timeScale 0.
         if (_pulse && _icon != null)
         {
             var wave = Mathf.PingPong(Time.unscaledTime, 0.5f) / 0.5f;

@@ -26,17 +26,14 @@ public class CTPodiumBehavior : MonoBehaviour
             if (_podium == null) return;
         }
 
-        // This podium was the one used (or is a spent relic podium): it stays consumed.
         if (_podium.WeaponTaken || _podium.activated) return;
 
-        // Untouched and still lit: nothing to do.
         if (_podium.Interactable && _podium.enabled &&
             (_podium.podiumOn == null || _podium.podiumOn.activeSelf)) return;
 
         Restore();
     }
 
-    // The exact inverse of vanilla's disable-others block.
     private void Restore()
     {
         _podium.enabled = true;
@@ -94,8 +91,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             __instance.otherWeaponOptions = new Interaction_WeaponSelectionPodium[0];
         }
 
-        // A finalizer rather than a postfix: postfixes are skipped when the original throws,
-        // and that would leave the podium permanently stripped of its sibling options.
         private static void Finalizer(Interaction_WeaponSelectionPodium __instance, SwapState __state)
         {
             if (__state != null) __instance.otherWeaponOptions = __state.Original;
@@ -121,8 +116,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
-        // Four types, always armed: a podium type is never "nothing", so a dropdown that starts
-        // on Random says more than four buttons plus a Clear that only turned placement off.
         _typeDropdown = ui.CreateDropdown(panel, "Podium type", Types, (index, type) =>
         {
             if (index < 0 || index >= Types.Length) return;
@@ -150,8 +143,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
 
     public void OnEnter()
     {
-        // Re-assert on entry: a blueprint load (or a fresh room) brings in podiums that never
-        // saw the toggle, and its value should describe the whole room while the tool is open.
         ApplyBehaviorToRoom(_clearAllOnEquip, onlyUnmarked: true);
 
         if (_typeDropdown != null && _typeDropdown.SelectedIndex < 0)
@@ -185,7 +176,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         SpawnPodium(_editor.MouseWorld(), _type, _clearAllOnEquip);
     }
 
-    // Same cursor ghost treatment as the enemy tool.
     private void UpdatePreview()
     {
         if (_preview != null)
@@ -197,8 +187,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         var template = AcquireTemplate();
         if (template == null) return;
 
-        // Scripts run so the podium initializes its runtime-assigned materials (a dead script
-        // leaves a pink error mesh); the self-destroy flag is cleared before anything wakes.
         _preview = MapEditorGhost.Create(template, _editor.transform, "CultTweaker_PodiumPreview",
             disableBehaviours: false, beforeWake: g =>
             {
@@ -241,7 +229,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return count;
     }
 
-    // The room snapshot skips objects this tool already serializes.
     public bool IsTracked(GameObject go)
     {
         foreach (var placed in _placed)
@@ -249,10 +236,8 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return false;
     }
 
-    // The loader wipes the room; everything tracked here is gone.
     public void ResetTracking() => _placed.Clear();
 
-    // Also the loader's entry point: self-registers, so load then save round-trips.
     public GameObject SpawnPodium(Vector3 position, string typeName, bool clearAllOnEquip = true)
     {
         var template = AcquireTemplate();
@@ -280,7 +265,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             return null;
         }
 
-        // Defeats the first-room-only self-destroy in OnEnableInteraction; no Harmony needed.
         podium.RemoveIfNotFirstLayer = false;
         podium.WeaponTaken = false;
         podium.Type = ResolveType(typeName);
@@ -302,8 +286,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return go;
     }
 
-    // Curse podiums destroy themselves when spells are disabled, so they are downgraded rather
-    // than silently vanishing.
     private static Interaction_WeaponSelectionPodium.Types ResolveType(string typeName)
     {
         if (!System.Enum.TryParse<Interaction_WeaponSelectionPodium.Types>(typeName, out var type))
@@ -319,13 +301,10 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return type;
     }
 
-    // Must run while the scene is still intact, so the loader calls it in its capture phase.
     public GameObject AcquireTemplate()
     {
         if (_template != null) return _template;
 
-        // A loaded chest asset carries the podium prefab as a serialized addressable reference;
-        // the getter blocking-loads it. A raw prefab has never run Awake, which is ideal.
         foreach (var chest in Resources.FindObjectsOfTypeAll<Interaction_Chest>())
         {
             try
@@ -338,11 +317,9 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             }
             catch (System.Exception)
             {
-                // This chest's reference is unset or failed to load; try the next.
             }
         }
 
-        // Fallback: clone a live podium (the entrance room has them) into the inactive holder.
         foreach (var podium in Resources.FindObjectsOfTypeAll<Interaction_WeaponSelectionPodium>())
         {
             if (podium == null || !podium.gameObject.scene.IsValid()) continue;
@@ -358,7 +335,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return null;
     }
 
-    // Inactive parent = instantiated children never run Awake/OnEnable until released.
     private GameObject Holder()
     {
         if (_holder != null) return _holder;
@@ -368,8 +344,6 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return _holder;
     }
 
-    // The instance the last placement produced, so a loader can finish setting it up without
-    // every spawn routine having to hand one back.
     public GameObject LastPlacedInstance =>
         _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
 
@@ -383,11 +357,7 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             {
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
                 Scale = MapEditorSerialization.V3(placed.Instance.transform.lossyScale),
-                // The originally chosen type, not the post-roll runtime value, so Random
-                // round-trips as Random.
                 Type = placed.SavedType,
-                // The live marker is the truth: the toggle rewrites it on every podium in the
-                // room, including ones placed before it was flipped.
                 ClearAllOnEquip = LiveClearAll(placed.Instance, placed.ClearAllOnEquip)
             });
         }

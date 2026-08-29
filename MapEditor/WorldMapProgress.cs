@@ -6,7 +6,6 @@ using Newtonsoft.Json;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Which world map nodes each save slot has completed. Never written into the game's save.
 public class WorldMapProgressData
 {
     public Dictionary<string, WorldMapRecord> Maps = new(StringComparer.OrdinalIgnoreCase);
@@ -17,7 +16,6 @@ public class WorldMapRecord
     public List<string> CompletedNodes = [];
     public List<string> OpenedLocks = [];
 
-    // Key nodes already cashed in - a key grants once per node.
     public List<string> KeyNodesBanked = [];
 
     public int KeysHeld;
@@ -34,7 +32,6 @@ public static class WorldMapProgress
     private static WorldMapProgressData _data;
     private static int _loadedSlot = -1;
 
-    // The run the world map screen launched; only its success may complete a node.
     private static string _pendingMap;
     private static string _pendingNode;
 
@@ -61,7 +58,6 @@ public static class WorldMapProgress
         var record = For(map.MapName);
         if (!record.IsCompleted(nodeId)) record.CompletedNodes.Add(nodeId);
 
-        // Banked on completion, not at click time.
         var node = map.FindNode(nodeId);
         if (node != null && node.IsKey && node.KeysGranted > 0 &&
             !record.KeyNodesBanked.Contains(nodeId, StringComparer.OrdinalIgnoreCase))
@@ -89,7 +85,6 @@ public static class WorldMapProgress
         Save();
     }
 
-    // Debug/editor helper: this slot starts the map over.
     public static void WipeMap(string mapName)
     {
         if (string.IsNullOrEmpty(mapName)) return;
@@ -98,7 +93,6 @@ public static class WorldMapProgress
 
     // ---- pending-run tracking ---------------------------------------------------------------
 
-    // Must be called AFTER EnterDungeon() returns - the entry's own AbortTracking would eat it.
     public static void BeginTracking(string mapName, string nodeId)
     {
         _pendingMap = mapName;
@@ -106,14 +100,12 @@ public static class WorldMapProgress
         Plugin.Log.LogInfo($"World map '{mapName}': entering node '{nodeId}'.");
     }
 
-    // First thing every custom dungeon entry does: runs not entered via the map complete nothing.
     public static void AbortTracking()
     {
         _pendingMap = null;
         _pendingNode = null;
     }
 
-    // Called from the success-only exit path (CustomDungeon.ExitDoor); death never reaches it.
     public static void NotifyRunSucceeded()
     {
         if (_pendingMap == null || _pendingNode == null) return;
@@ -143,7 +135,6 @@ public static class WorldMapProgress
 
     // ---- storage ----------------------------------------------------------------------------
 
-    // Slot checked on every read - there is no reliable "another save was loaded" hook.
     private static WorldMapProgressData Data()
     {
         if (_data != null && _loadedSlot == SaveAndLoad.SAVE_SLOT) return _data;
@@ -170,7 +161,6 @@ public static class WorldMapProgress
         }
     }
 
-    // Written on every change so a crash cannot cost a beaten run.
     private static void Save()
     {
         try

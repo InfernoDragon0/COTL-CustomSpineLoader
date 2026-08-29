@@ -3,9 +3,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// A link on the map. Where the vanilla DLC map art loaded this is a clone of the game's own
-// connection - four authored line renderers, one per state; otherwise it is one stretched, rotated
-// Image with a rounded plate sprite.
 public static class WorldMapLine
 {
     public const float Thickness = 4f;
@@ -28,7 +25,6 @@ public static class WorldMapLine
         image.pixelsPerUnitMultiplier = 4f;
         image.color = DimColour;
 
-        // A raycast-catching line would shadow the nodes under it.
         image.raycastTarget = false;
 
         var rect = go.GetComponent<RectTransform>();
@@ -56,8 +52,6 @@ public static class WorldMapLine
         var rect = clone.transform as RectTransform;
         if (rect == null) rect = clone.AddComponent<RectTransform>();
 
-        // Endpoints are handed over as node anchored positions, so the link's own origin has to sit
-        // on the container's centre exactly like the nodes' does.
         rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = Vector2.zero;
@@ -83,7 +77,6 @@ public static class WorldMapLine
         line.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg);
     }
 
-    // Shows or hides the link and dresses it for the states at its two ends.
     public static void SetLinkState(RectTransform line, WorldNodeState from, WorldNodeState to)
     {
         if (line == null) return;

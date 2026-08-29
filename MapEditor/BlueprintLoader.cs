@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using CustomSpineLoader.SpineLoaderHelper;
 using CustomSpineLoader.MapEditor.Tools;
@@ -16,7 +16,6 @@ public class BlueprintLoader
 
     public bool IsLoading { get; private set; }
 
-    // Per-load tallies, reported at the end of the load.
     private int _propsSpawned;
     private int _propsFailed;
 
@@ -25,7 +24,6 @@ public class BlueprintLoader
         _editor = editor;
     }
 
-    // preferredEntryDirection (level playback): enter through that door if the blueprint has one.
     public void Load(CTNodeBlueprint bp, string preferredEntryDirection = null)
     {
         if (bp == null || IsLoading) return;
@@ -78,10 +76,8 @@ public class BlueprintLoader
         triggerTool?.ResetTracking();
         podiumTool?.ResetTracking();
 
-        // Everything the undo stack referred to has just been destroyed.
         _editor.History.Clear();
 
-        // Destroy defers to end of frame; rebuilding alongside doomed objects corrupts the bake.
         yield return null;
 
         RestoreKeptAuthored(keptObjects, room);
@@ -97,7 +93,6 @@ public class BlueprintLoader
             if (ctrl != null) rebuiltShapes.Add(ctrl);
         }
 
-        // Mesh generation is deferred; bake against the real outlines one frame later.
         yield return null;
         foreach (var ctrl in rebuiltShapes)
             shapeTool?.FinalizeLoadedShape(ctrl);
@@ -146,14 +141,12 @@ public class BlueprintLoader
 
                 door.transform.eulerAngles = new Vector3(0f, 0f, d.RotationZ);
 
-                // Pad placement depends on the final door position, so it comes last.
                 doorTool.RefreshPad(door, deferCollision: true);
                 DoorTool.RefreshMovementAnchors(door);
             }
 
             doorTool.RemoveDoorsNotIn(wanted);
 
-            // A door moved out of its culling area is deactivated the moment culling resumes.
             _editor.KeepCullingSuspended = true;
         }
 
@@ -205,15 +198,10 @@ public class BlueprintLoader
 
         doorTool?.SealDoorsWithoutNeighbours();
 
-        // After the collision rebuild, because the totem's buildable grid is cut from the room's
-        // finished outline - ask any earlier and it is cut from the room as it was before the
-        // blueprint's own ground was laid.
         yield return RebuildBuildTotem(bp, structureTool);
 
-        // Stops vanilla re-entry code re-rolling decorations/backdrops (see CustomRoomPatches).
         CustomRoomPatches.Mark(room);
 
-        // The backdrop is derived state: never saved, cleared above, recreated exactly once here.
         try
         {
             if (!CustomRoomPatches.HasBackSprite(room)) room.CreateBackgroundSpriteShape();
@@ -224,7 +212,6 @@ public class BlueprintLoader
         }
 
         // ---- Phase 9: hand over and walk the player in -------------------------------------
-        // No editor visual may survive into play.
         for (var overlay = GameObject.Find("MapEditor_CollisionOverlay"); overlay != null;
              overlay = GameObject.Find("MapEditor_CollisionOverlay"))
             Object.DestroyImmediate(overlay);
@@ -245,17 +232,11 @@ public class BlueprintLoader
         }
         _editor.SetMusicLoop(bp.MusicLoop && !string.IsNullOrEmpty(bp.MusicEvent) ? bp.MusicEvent : null);
 
-        // Lighting/fog are values, not objects; a blueprint that never set them leaves the biome alone.
         if (bp.Lighting != null && bp.Lighting.Enabled) LightingTool.Apply(bp.Lighting);
         else { LightingTool.ForgetCurrentRoom(); LightingTool.ClearOverride(); }
 
-        // Weather is the same idea and the same rule: a blueprint that never asked for any leaves
-        // the room to the biome, which is what the game would do anyway.
         WeatherControl.ForRoom(bp.Weather);
 
-        // Everything the player will see is now in place, lit and playing its music. Anything still
-        // to come - the walk-in, the doors settling - is meant to be watched, so the cover comes off
-        // here rather than after it.
         LevelPlayback.OnContentReady();
 
         yield return PlayerEntryRoutine(room, bp, doorTool, preferredEntryDirection);
@@ -264,19 +245,10 @@ public class BlueprintLoader
                            $"{_propsSpawned}/{bp.Props.Count} prop(s) rebuilt" +
                            (_propsFailed > 0 ? $", {_propsFailed} FAILED (see warnings above)" : "") + ".");
 
-        // The room is now exactly what the file says, so closing the editor has nothing to lose -
-        // even though clearing and rebuilding it changed a great deal along the way.
         _editor.MarkSaved();
         IsLoading = false;
     }
 
-    // The hub's build totem, and everything the player has built through it.
-    //
-    // The totem is part of the map: the author placed it, so it comes back with the rest of the
-    // furniture. What the player built is not - it belongs to their save slot, not to the map -
-    // so it is restored from our own file, and only when a hub is actually being played. Opening
-    // the same hub in the editor rebuilds the totem and leaves the buildings alone; the editor is
-    // about to sweep the room anyway.
     private IEnumerator RebuildBuildTotem(CTNodeBlueprint bp, StructureTool structureTool)
     {
         HubBuildTotem.Forget();
@@ -284,8 +256,6 @@ public class BlueprintLoader
 
         var playing = HubSession.Active && !HubSession.IsAuthoring;
 
-        // Before the totem is stood up, not after: opening the store retires the last hub's
-        // buildings, and that sweep would take this one's totem with it.
         if (playing) HubStructureStore.Begin(HubSession.HubName ?? bp.MapName);
 
         var totem = HubBuildTotem.Spawn(MapEditorSerialization.ToVector3(bp.BuildTotem.Position),
@@ -294,20 +264,15 @@ public class BlueprintLoader
 
         structureTool?.AdoptTotem(totem);
 
-        // The region asks for its grid the moment it is given a brain, but the tiles it hands the
-        // placement loop are read a frame later; let the fill settle before anything is put on it.
         yield return null;
 
         if (!playing) yield break;
 
         HubStructureStore.Restore();
 
-        // After the buildings, because laying a floor tile asks the grid which cell a world point
-        // falls in, and that grid is only finished once the region has been built on.
         HubStructureStore.RestorePaths();
     }
 
-    // The clear tool preserves CustomTransform placements; a load must not duplicate them.
     private void ClearEditorContent()
     {
         var root = SceneRefs.ContentRoot;
@@ -353,7 +318,6 @@ public class BlueprintLoader
             var parent = ParentFor(data.Parent, room);
             var child = parent != null ? parent.Find(data.Name) : null;
 
-            // A previous load may have parked it (deactivated) rather than restored it.
             if (child == null) child = KeepHolder.Find(data.Name);
 
             if (child == null)
@@ -396,7 +360,6 @@ public class BlueprintLoader
                 if (pool != null && pool.spawnedObjects.ContainsKey(child.gameObject)) continue;
                 if (MapEditorProtection.IsProtected(child.gameObject)) continue;
                 if (child.GetComponentInChildren<Door>(true) != null) continue;
-                // Old terrain visuals die with the terrain; parking them would hoard geometry.
                 if (child.GetComponentInChildren<SpriteShapeController>(true) != null) continue;
 
                 child.SetParent(KeepHolder, true);
@@ -416,7 +379,6 @@ public class BlueprintLoader
             if (k.Transform == null) continue;
 
             k.Transform.SetParent(k.OriginalParent != null ? k.OriginalParent : room.transform, true);
-            // A previous load may have parked it deactivated.
             k.Transform.gameObject.SetActive(true);
             k.Transform.position = MapEditorSerialization.ToVector3(k.Data.Position);
             k.Transform.eulerAngles = new Vector3(0f, k.Data.RotationY, k.Data.RotationZ);
@@ -468,7 +430,6 @@ public class BlueprintLoader
 
             var parent = ParentFor(data.Parent, room) ?? room.transform;
             var copy = Object.Instantiate(source.gameObject, parent);
-            // Strip Instantiate's "(Clone)" or the next save treats this as a runtime spawn.
             copy.name = data.Name;
             copy.transform.position = MapEditorSerialization.ToVector3(data.Position);
             copy.transform.eulerAngles = new Vector3(0f, data.RotationY, data.RotationZ);
@@ -490,7 +451,6 @@ public class BlueprintLoader
             var child = composite.transform.GetChild(i);
             if (child == null) continue;
             if (!MapEditorProtection.CanDelete(child.gameObject)) continue;
-            // Islands (including hidden door islands) are the terrain pass's business.
             if (child.GetComponent<IslandPiece>() != null) continue;
             if (child.GetComponentInChildren<Door>(true) != null) continue;
             Object.Destroy(child.gameObject);
@@ -509,12 +469,10 @@ public class BlueprintLoader
         }
         if (cleared > 0) Plugin.Log.LogInfo($"MapEditor: cleared {cleared} enemy(ies) before load.");
 
-        // HP bars are siblings of their unit and survive it; ShowHPBar re-instantiates on demand.
         foreach (var bar in Object.FindObjectsOfType<HPBar>())
             if (bar != null) Object.Destroy(bar.gameObject);
     }
 
-    // Authored shapes under RoomTransform are not island pieces; the terrain pass misses them.
     private static void ClearStrayShapes()
     {
         foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
@@ -594,14 +552,12 @@ public class BlueprintLoader
             }
         }
 
-        // Addressable loads complete over several frames; frames still advance under pause.
         var deadline = Time.unscaledTime + 10f;
         while (pending > 0 && Time.unscaledTime < deadline) yield return null;
         if (pending > 0)
             Plugin.Log.LogWarning($"MapEditor: {pending} prop(s) still loading after timeout; they may appear late.");
     }
 
-    // Null = pre-resize blueprint, zero X = degenerate; both leave the spawn as it came.
     private static void ApplySavedScale(GameObject go, SerializableVector3 scale)
     {
         if (go == null || scale == null || scale.X == 0f) return;
@@ -610,13 +566,11 @@ public class BlueprintLoader
 
     private static void ApplyPropTransform(GameObject go, MapPropData prop, GenerateRoom room)
     {
-        // ObjectPool positions relative to the parent; the blueprint stores world coordinates.
         go.transform.position = MapEditorSerialization.ToVector3(prop.Position);
         go.transform.eulerAngles = new Vector3(0f, prop.RotationY, prop.RotationZ);
         if (prop.Scale != null && prop.Scale.X != 0f)
             go.transform.localScale = MapEditorSerialization.ToVector3(prop.Scale);
 
-        // Re-register with the generator or composite maintenance/vanilla-floor miss the piece.
         var piece = go.GetComponent<IslandPiece>();
         if (piece != null && room != null && room.Pieces != null && !room.Pieces.Contains(piece))
             room.Pieces.Add(piece);
@@ -649,7 +603,6 @@ public class BlueprintLoader
             room.GeneratedPathing = true;
         }
 
-        // Each disconnected floor region is its own composite path; the player cannot cross.
         var composite = SceneRefs.RoomComposite;
         if (composite != null)
         {
@@ -678,7 +631,6 @@ public class BlueprintLoader
             if (collider == null || collider is CompositeCollider2D) continue;
             if (!collider.enabled || collider.isTrigger || collider.usedByComposite) continue;
 
-            // Floor geometry: shapes and island slabs belong in the union.
             var isFloor = collider.GetComponent<SpriteShapeController>() != null ||
                           collider.GetComponentInParent<IslandPiece>() != null;
             if (isFloor)
@@ -743,7 +695,6 @@ public class BlueprintLoader
                 yield break;
             }
 
-            // Pads redraw their art next frame; their collision is ready immediately.
             yield return null;
             doorTool.FinalizeAllPads();
             yield return RebuildCollisionAndWait(room);
@@ -806,7 +757,6 @@ public class BlueprintLoader
             yield break;
         }
 
-        // Belt and braces: phase 8 already waited for this.
         var deadline = Time.unscaledTime + 8f;
         while (room != null && !room.GeneratedPathing && Time.unscaledTime < deadline) yield return null;
 
@@ -819,7 +769,6 @@ public class BlueprintLoader
         player.transform.position = start;
         player.state.facingAngle = Vector3.Angle(Vector3.right, dir);
 
-        // Vanilla walk-in distance, snapped so a short authored floor never wedges the player.
         var target = SnapToWalkable(doorway + dir * 7.3f) ?? start;
 
         door.Used = true;
@@ -827,10 +776,8 @@ public class BlueprintLoader
         player.GoToAndStop(target, null, IdleOnEnd: true, DisableCollider: true,
             GoToCallback: () =>
             {
-                // Door.OnTriggerEnter2D left player colliders off; restore them as vanilla does.
                 PlayerFarming.SetCollidersActive(collidersActive: true);
 
-                // Vanilla hand-off: an Entrance-typed door turns solid so it cannot soft-lock.
                 try
                 {
                     door.PlayerFinishedEnteringDoor();
@@ -847,7 +794,6 @@ public class BlueprintLoader
             maxDuration: -1f, forcePositionOnTimeout: true);
     }
 
-    // Re-arms the entry door once the player has demonstrably stepped away from the doorway.
     private static IEnumerator ReleaseDoorAfterEntry(Door door)
     {
         yield return new WaitForSeconds(1f);
@@ -856,7 +802,6 @@ public class BlueprintLoader
 
     private static IEnumerator FinishArrival()
     {
-        // Vanilla routes this through DelayEndConversation's 0.3s wait.
         yield return new WaitForSeconds(0.3f);
 
         var manager = GameManager.GetInstance();
@@ -864,7 +809,6 @@ public class BlueprintLoader
         {
             try
             {
-                // SetPlayerToIdle: false, as vanilla - IdleOnEnd already restored the state.
                 manager.OnConversationEnd(SetPlayerToIdle: false);
                 manager.CameraSetOffset(Vector3.zero);
                 manager.AddPlayerToCamera();
@@ -875,7 +819,6 @@ public class BlueprintLoader
             }
         }
 
-        // Rebinds the input maps; without it only movement survives the entry.
         try
         {
             PlayerFarming.ResetMainPlayer();
@@ -886,7 +829,6 @@ public class BlueprintLoader
             Plugin.Log.LogWarning("MapEditor: player input hand-off failed: " + e.Message);
         }
 
-        // Vanilla's DelayActivateRoom: the room only counts as entered once the arrival ends.
         yield return new WaitForSeconds(0.5f);
         var biome = BiomeGenerator.Instance;
         if (biome != null && biome.CurrentRoom != null) biome.CurrentRoom.Active = true;
@@ -905,7 +847,6 @@ public class BlueprintLoader
 
     private static Door PickEntryDoor(CTNodeBlueprint bp, DoorTool doorTool, string preferredDirection)
     {
-        // Level playback enters through the side opposite the door just used, when it exists.
         if (preferredDirection != null && doorTool != null &&
             bp.Doors.Exists(d => d.Direction == preferredDirection))
         {
@@ -924,7 +865,6 @@ public class BlueprintLoader
         }
         catch (System.Exception)
         {
-            // Some rooms have no entrance-typed door at all.
         }
 
         if (entrance != null && bp.Doors.Exists(d => d.Direction == entrance.direction.ToString()))

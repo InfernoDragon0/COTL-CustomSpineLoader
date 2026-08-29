@@ -10,22 +10,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.ModUI.MenuEditor;
 
-// The main menu's editor: the mod's usual dock, options panel and status bar, on a canvas of its
-// own over the title screen.
-//
-// It is a third IMapEditorHost rather than a variant of either existing one. What it shares with
-// them is the toolkit; what it does not share is everything the other two are built around - there
-// is no room, no simulation to pause, no player, and no world to click on.
-//
-// Two things here that neither of the others needs:
-//
-//   Time.timeScale is left alone. The menu's intro is driven by scaled waits and a scaled animator,
-//   and the load menu's transitions are too - freezing the clock would strand the screen.
-//
-//   The camera is not taken. It belongs to UIMainMenuController and drifts with the mouse under
-//   CameraSubtleMovementOnInput; the drift is stopped with that component's own blockMovement
-//   flag, never by disabling it, because its OnEnable re-reads the rest position from wherever the
-//   camera happens to be standing and would walk the menu sideways a little on every visit.
 public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 {
     public static MainMenuEditor Instance { get; private set; }
@@ -33,7 +17,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
     private bool _open;
 
-    // The preset being edited. Applied live, so the menu underneath is the preview.
     public CTMenuPreset Preset { get; private set; }
     private string _savedJson = "";
 
@@ -43,7 +26,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
     private readonly MapEditorUI _ui = new();
     private readonly List<IMapEditorTool> _tools = [];
     private readonly List<(IMapEditorTool tool, GameObject columnRoot, RectTransform content, Image ring)> _panels = [];
-    private readonly List<RectTransform> _blockers = [];
     private IMapEditorTool _activeTool;
 
     private GameObject _canvasGO;
@@ -66,7 +48,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
     private float _nextErrorAt;
     private int _optionsRebuildFrames;
 
-    // What the menu was doing before we took it.
     private bool _cursorWasVisible;
     private CursorLockMode _cursorLock;
     private bool _driftWasBlocked;
@@ -104,8 +85,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
             return;
         }
 
-        // The other two screens share the pause and the screen with each other; neither of them
-        // opens here, but saying so out loud keeps the three symmetrical.
         if (RuntimeMapEditor.Active is { IsEditing: true }) return;
         if (CultTweakerPanel.Active is { IsOpen: true }) return;
 
@@ -119,8 +98,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         TakeInput();
         BuildUi();
 
-        // Presets first, and so selected first: which menu is being worn is the question the editor
-        // opens on, and the three that dress it only mean anything once that is answered.
         _tools.Clear();
         _tools.Add(new Tools.MenuPresetTool(this));
         _tools.Add(new Tools.MenuLookTool(this));
@@ -133,9 +110,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         SetStatus($"Editing '{Preset.ShownName}'. Esc closes.");
     }
 
-    // The preset named in the config if there is one, else a fresh one under a free name. Loaded
-    // rather than shared with the applier's copy: edits should not reach the config's preset until
-    // they are saved.
     private CTMenuPreset LoadWorkingCopy()
     {
         var name = Plugin.MainMenuPreset?.Value ?? "";
@@ -174,7 +148,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         ModalOpen = false;
         _ui.CloseTransientUi();
 
-        // The menu goes back to the preset the player actually chose, not the one being edited.
         MenuPresetApplier.LoadConfigured();
         MenuPresetApplier.RevertAll();
         MenuPresetApplier.ApplyAll();
@@ -194,13 +167,11 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         _hoverMessage = null;
         _confirm = null;
         _panels.Clear();
-        _blockers.Clear();
         _tools.Clear();
 
         ReleaseInput();
     }
 
-    // A scene load underneath us: the menu we were editing no longer exists.
     public void ForceClose()
     {
         if (!_open) return;
@@ -214,7 +185,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
     private void TakeInput()
     {
-        // The game's own idiom, the one the intro uses while it holds the screen.
         var navigator = MonoSingleton<UINavigatorNew>.Instance;
         if (navigator != null)
         {
@@ -222,7 +192,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
             navigator.LockNavigation = true;
         }
 
-        // Without this a click that misses a panel lands on Quit.
         var group = MenuSceneRefs.Menu != null ? MenuSceneRefs.Menu.GetComponent<CanvasGroup>() : null;
         if (group != null)
         {
@@ -230,8 +199,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
             group.interactable = false;
         }
 
-        // This is the most gamepad-likely screen in the game, and the menu hides the cursor when it
-        // sees a controller. An editor nobody can point at is not an editor.
         _cursorWasVisible = Cursor.visible;
         _cursorLock = Cursor.lockState;
         Cursor.visible = true;
@@ -270,10 +237,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
     // ---- IMapEditorHost -----------------------------------------------------------------------------
 
-    // The name dialog is one of the game's own menus, and it is driven by the same navigator this
-    // editor switched off to stop clicks reaching Quit. Holding that lock through a modal would
-    // give the player a text box they cannot type into, so the lock is lifted for as long as one
-    // is up and taken back when it closes.
     public bool ModalOpen
     {
         get => _modalOpen;
@@ -316,13 +279,8 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         Paint(_statusMessage, _statusSeverity);
     }
 
-    public void RegisterUiBlocker(RectTransform rect)
-    {
-        if (rect != null) _blockers.Add(rect);
-    }
+    public void RegisterUiBlocker(RectTransform rect) { }
 
-    // Nothing behind these panels is clickable while the editor is up, so there is no world to
-    // shut out - but the contract says a widget press is not also a press on whatever is under it.
     public void BlockWorldClicks() { }
 
     public void RequestOptionsResize() => _optionsRebuildFrames = 3;
@@ -356,14 +314,11 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
         _savedJson = CTMenuPresetSerialization.ToJson(Preset);
 
-        // Saving is also what makes a preset the one the menu wears: an editor that saved to a file
-        // nothing reads would be a strange thing to ship.
         if (Plugin.MainMenuPreset != null) Plugin.MainMenuPreset.Value = Preset.PresetName;
 
         SetStatus($"Saved '{Preset.ShownName}'. It is now the menu's preset.", StatusSeverity.Success);
     }
 
-    // What the tools call after changing anything: the menu under the panels is the preview.
     public void Refresh()
     {
         MenuPresetApplier.Use(Preset);
@@ -417,7 +372,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         }
         catch (Exception e)
         {
-            // Once per interval, not per frame - a broken tool at 60Hz would bury the log.
             if (Time.unscaledTime >= _nextErrorAt)
             {
                 _nextErrorAt = Time.unscaledTime + 5f;
@@ -449,7 +403,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         var canvas = _canvasGO.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
-        // Over the menu and the world map's screen, under the F7 panel at 5000.
         canvas.sortingOrder = 4600;
 
         var scaler = _canvasGO.AddComponent<CanvasScaler>();
@@ -459,8 +412,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
         _canvasGO.AddComponent<GraphicRaycaster>();
 
-        // Clicks are silently swallowed without an EventSystem; the menu has one, but a scene that
-        // did not would be an invisible failure rather than a loud one.
         if (EventSystem.current == null)
         {
             var events = new GameObject("MenuEditor_EventSystem");
@@ -471,7 +422,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
         var canvasRoot = _canvasGO.GetComponent<RectTransform>();
         _ui.Attach(this, canvasRoot);
-        _blockers.Clear();
 
         BuildDock(canvasRoot);
         BuildOptions(canvasRoot);
@@ -503,11 +453,8 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         layout.childForceExpandWidth = false;
         layout.childForceExpandHeight = false;
 
-        // Horizontal only: a vertical fit collapses the plate for a frame before icons report sizes.
         var fitter = _dockGO.AddComponent<ContentSizeFitter>();
         fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        _blockers.Add(dockRect);
     }
 
     private void BuildOptions(RectTransform canvasRoot)
@@ -522,7 +469,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         _optionsRect.anchoredPosition = new Vector2(-14f, -70f);
 
         VanillaChrome.Dress(_optionsGO.AddComponent<Image>());
-        _blockers.Add(_optionsRect);
 
         var header = new GameObject("Header");
         header.transform.SetParent(_optionsRect, false);
@@ -601,13 +547,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         }
     }
 
-    // A tool asked for its panels to be rebuilt - a preset was loaded underneath them, and every
-    // widget is now showing the old one's numbers.
-    //
-    // Queued for the next frame rather than done here. Every caller is a button's click handler,
-    // and that button is inside the subtree the rebuild destroys - so doing it now tears the UI
-    // down while the event system is still walking it, and what comes back is a panel with nothing
-    // in it. One frame later the click has fully unwound and the rebuild is just a rebuild.
     public void RebuildPanels() => _rebuildQueued = true;
 
     private bool _rebuildQueued;
@@ -621,8 +560,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
             var stale = new List<GameObject>();
             foreach (Transform child in panel.content) stale.Add(child.gameObject);
 
-            // Detached before destroying: Destroy defers to the end of the frame, so a layout
-            // rebuilt in the same breath still counts everything that is on its way out.
             foreach (var child in stale)
             {
                 child.transform.SetParent(null, false);
@@ -638,9 +575,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
                 Plugin.Log.LogError($"MenuEditor: tool '{panel.tool.Name}' could not rebuild: {e}");
             }
 
-            // Back to the top. The column keeps its scroll position across a rebuild, and the
-            // rebuilt content is a different height - so a panel that had been scrolled down came
-            // back showing the empty space past its own end, which reads as the panel vanishing.
             var scroll = panel.columnRoot != null ? panel.columnRoot.GetComponent<ScrollRect>() : null;
             if (scroll == null) continue;
 
@@ -664,7 +598,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
             var active = panel.tool == tool;
             if (panel.columnRoot != null) panel.columnRoot.SetActive(active);
 
-            // The GameObject, not the Image: enabling the component alone leaves it invisible.
             if (panel.ring != null) panel.ring.gameObject.SetActive(active);
         }
 
@@ -694,8 +627,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
         var fitter = go.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        _blockers.Add(_shortcutPanel);
         RefreshShortcuts();
     }
 
@@ -733,7 +664,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         rect.anchorMax = new Vector2(1f, 0f);
         rect.pivot = new Vector2(0.5f, 0f);
 
-        // Above the dock, clear of the shortcut list on the left and the options panel on the right.
         rect.offsetMin = new Vector2(284f, 12f + DockHeight + 8f);
         rect.offsetMax = new Vector2(-408f, 12f + DockHeight + 8f);
         rect.sizeDelta = new Vector2(rect.sizeDelta.x, 40f);
@@ -748,8 +678,6 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         labelRect.anchorMax = Vector2.one;
         labelRect.offsetMin = new Vector2(14f, 0f);
         labelRect.offsetMax = new Vector2(-14f, 0f);
-
-        _blockers.Add(rect);
         Paint(_statusMessage, _statusSeverity);
     }
 
@@ -758,13 +686,12 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
     private static string DockHint(string toolName) => toolName switch
     {
-        "Menu Look" => "Menu Look - Palette, grain, and the snow and glitch effects",
+        "Menu Look" => "Menu Look - Palette, background colour, grain and the glitch effect",
         "Menu Centrepiece" => "Menu Centrepiece - Which spine stands on the title screen, and where",
         "Menu Title" => "Menu Title - Replace or move the game's logo",
         "Menu Presets" => "Menu Presets - Save, load and switch between saved menus",
         _ => toolName
     };
 
-    // IMapEditorHost wants this, and MonoBehaviour already provides it.
     Coroutine IMapEditorHost.StartCoroutine(IEnumerator routine) => StartCoroutine(routine);
 }

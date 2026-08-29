@@ -20,24 +20,19 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     private Vector3 _dragOffset;
     private Vector3 _dragStart;
 
-    // Persists across tool switches, independent of Door.Doors.
     private readonly List<Door> _knownDoors = [];
 
-    // Doors the user deliberately removed; the revive safety net must not resurrect these.
     private readonly HashSet<Door> _removedByTool = [];
 
     public const string PadName = "CultTweaker_DoorPad";
     private readonly Dictionary<Door, SpriteShapeController> _pads = [];
-    // Width stays inside the door's barrier collider or the player slips around it.
     private const float PadLength = 9f;
     private const float PadWidth = 3f;
 
-    // Solid blockers for removed doors whose walkway is carved into the authored island shape.
     private readonly Dictionary<Door, GameObject> _plugs = [];
 
     private readonly List<DoorGizmo> _gizmos = [];
 
-    // Doors are large and their pivots are often off-centre, so the grab area is generous.
     private const float GrabRadius = 3f;
 
     private Canvas _dotCanvas;
@@ -81,7 +76,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     private readonly Dictionary<string, MapEditorToggle> _doorToggles = [];
 
-    // Doors can change behind the panel's back (loads, reconciliation, Enable All).
     private void SyncDoorToggles()
     {
         foreach (var pair in _doorToggles)
@@ -113,7 +107,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return null;
     }
 
-    // includeInactive: a hidden door's hierarchy is inactive; the default overload returns null.
     private static IslandPiece DoorIsland(Door door) =>
         door != null ? door.GetComponentInParent<IslandPiece>(true) : null;
 
@@ -185,7 +178,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _editor.MarkEdited();
     }
 
-    // Reactivates a removed door, or spawns a fresh door island. Also used by the loader.
     public Door EnsureDoor(string direction, bool deferCollision)
     {
         var existing = FindByDirection(direction);
@@ -251,8 +243,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _pads[door] = pad;
         }
 
-        // Every refresh rather than only on creation: a pad can also arrive from a load path that
-        // did not go through the branch above, and one drawn pad is one strip of stray floor.
         HidePad(pad);
 
         var length = PadLengthFor(door);
@@ -264,7 +254,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _editor.StartCoroutine(FinalizePad(pad, deferCollision));
     }
 
-    // Pads stay short; only a doorway the loader finds cut off from the floor grows, stepwise.
     private readonly Dictionary<Door, float> _padLengths = [];
     private const float PadMaxLength = 60f;
     private const float PadGrowStep = 8f;
@@ -272,7 +261,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     private float PadLengthFor(Door door) =>
         _padLengths.TryGetValue(door, out var length) ? length : PadLength;
 
-    // Grows one pad by a step; false once at max length.
     public bool ExtendPad(Door door, bool deferCollision)
     {
         if (door == null) return false;
@@ -285,24 +273,12 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return true;
     }
 
-    // A pad is floor, not scenery. It exists so a door that has been dragged away from the island
-    // still has ground under it, and the ground it provides is its BoxCollider2D: that is what the
-    // room composite merges, and the composite is what the A* grid is built from
-    // (GenerateRoom.SetColliderAndUpdatePathfinding). The sprite shape is only how it looks.
-    //
-    // And how it looked was wrong. The pad is cloned from a room ground shape, so it arrived
-    // wearing that shape's fill and edge sprites - a strip of the biome's own floor pasted over
-    // whatever the author had actually built there, in a rectangle nobody drew. Switching the
-    // renderer off leaves the shape, the collider and the path exactly as they were, and takes away
-    // only the part that was never wanted.
     private static void HidePad(SpriteShapeController pad)
     {
         var renderer = pad != null ? pad.GetComponent<SpriteShapeRenderer>() : null;
         if (renderer != null) renderer.enabled = false;
     }
 
-    // A box the composite can merge; splines are world-axis on an unrotated transform, so the
-    // box is the spline's extents.
     private static void BuildPadCollider(SpriteShapeController pad, Door door, float length)
     {
         var dir = door.GetDoorDirection();
@@ -358,7 +334,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         if (!deferCollision) SceneRefs.RegenerateRoomCollision();
     }
 
-    // Guarantees every pad's box is present and merged before a load rebuilds the union.
     public void FinalizeAllPads()
     {
         foreach (var pair in _pads)
@@ -409,7 +384,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         if (plug != null) Object.DestroyImmediate(plug);
     }
 
-    // Loader reconciliation: hide any live door the blueprint does not list.
     public void RemoveDoorsNotIn(HashSet<string> directions)
     {
         RememberDoors();
@@ -422,7 +396,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         }
     }
 
-    // Instantiates the vanilla door island prefab: trigger, lock controller and floor included.
     private Door SpawnDoor(string direction, bool deferCollision)
     {
         var room = SceneRefs.Room;
@@ -451,8 +424,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         var piece = island.GetComponent<IslandPiece>();
         if (piece != null && room.Pieces != null) room.Pieces.Add(piece);
-        // Vanilla hides placeholder sprites during generation; without this the island shows
-        // its flat green editor fill.
         piece?.HideSprites();
 
         var door = island.GetComponentInChildren<Door>(true);
@@ -463,8 +434,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             return null;
         }
 
-        // Set directly, never via Door.Init: Init dereferences a graph neighbor entry that
-        // does not exist for a door the graph never planned.
         door.ConnectionType = GenerateRoom.ConnectionTypes.True;
 
         if (!HasGraphNeighbor(direction) && door.RoomLockController != null)
@@ -506,7 +475,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public int SealDoorsWithoutNeighbours()
     {
-        // Before the biome knows the current room, "no neighbour" would seal every door.
         if (BiomeGenerator.Instance == null || BiomeGenerator.Instance.CurrentRoom == null) return 0;
 
         RememberDoors();
@@ -523,7 +491,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             var direction = door.direction.ToString();
             if (HasGraphNeighbor(direction))
             {
-                // A door the walk does connect must be usable, even if a previous room sealed it.
                 if (type == GenerateRoom.ConnectionTypes.False)
                     door.ConnectionType = GenerateRoom.ConnectionTypes.True;
                 continue;
@@ -566,7 +533,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
                connection.ConnectionType != GenerateRoom.ConnectionTypes.False;
     }
 
-    // The room pipeline still deactivates repositioned doors; restore any found switched off.
     private void ReviveDisabledDoors()
     {
         for (var i = _knownDoors.Count - 1; i >= 0; i--)
@@ -578,7 +544,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
                 continue;
             }
 
-            // Deliberately removed doors stay removed.
             if (_removedByTool.Contains(door)) continue;
             if (door.gameObject.activeSelf) continue;
 
@@ -599,7 +564,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         ClearGizmos();
     }
 
-    // Same cyan box and yellow dot the select tool uses.
     private void BuildGizmos()
     {
         ClearGizmos();
@@ -628,7 +592,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         var handle = go.AddComponent<DoorDragHandle>();
         handle.Initialize(this, _editor, door);
 
-        // Direction letter above the grip.
         var label = _editor.UI.CreateLabel(rt, door.direction.ToString().Substring(0, 1), 18,
             TMPro.TextAlignmentOptions.Center);
         var labelRt = label.GetComponent<RectTransform>();
@@ -636,7 +599,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         labelRt.anchoredPosition = new Vector2(0f, 28f);
         labelRt.sizeDelta = new Vector2(40f, 24f);
 
-        // Also stops the click reaching any other tool's world handling.
         _editor.RegisterUiBlocker(rt);
         return go;
     }
@@ -714,7 +676,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         _dragging.transform.position = pointerWorld + _dragOffset;
 
-        // A door moved out of its original culling area is deactivated when culling resumes.
         _editor.KeepCullingSuspended = true;
     }
 
@@ -724,8 +685,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         _editor.MarkEdited();
 
-        // One entry for the drag. Putting the door back has to re-run the pad and the anchors the
-        // way the drag itself does, or the island stays where the door no longer is.
         var door = _dragging;
         var start = _dragStart;
         if (door.transform.position != start)
@@ -746,7 +705,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         _editor.SetStatus($"Moved {_dragging.direction} door.");
 
         RefreshPad(_dragging, deferCollision: false);
-        // PlayerDistanceMovement caches StartPos in Start(); re-cache or the door drifts back.
         RefreshMovementAnchors(_dragging);
 
         _dragging = null;
@@ -769,7 +727,6 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         map.Doors.Clear();
         foreach (var door in _knownDoors)
         {
-            // Absence from the blueprint tells the loader to hide that direction on load.
             if (!IsDoorPresent(door)) continue;
             map.Doors.Add(new MapDoorData
             {
@@ -811,7 +768,6 @@ public class DoorDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, IE
         _tool?.EndDoorDrag();
     }
 
-    // A click without a drag just selects, so rotation buttons have a target.
     public void OnPointerClick(PointerEventData eventData)
     {
         _tool?.SelectDoor(_door);

@@ -7,25 +7,10 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor;
 
-// The editor's panels wearing the game's own panel art.
-//
-// Photo mode's overlay is built from a nine-sliced plate the rest of the game reuses, and it is a
-// far better backing than the rounded rectangle the mod draws for itself. It is not in the scene -
-// photo mode loads its UI on demand and unloads it again - so it is fetched from the same
-// addressable the game fetches it from, and the handle is kept for the session.
-//
-// Nothing here is required: until the load lands (and if it never does) every panel keeps the
-// generated plate, and a panel already on screen when it lands is re-dressed in place.
 public static class VanillaChrome
 {
-    // The address photo mode's own loader asks for; see UIManager.LoadPhotomodeAssets. Its
-    // neighbours - "Edit Photo Overlay.prefab", "Photo Gallery Menu.prefab" - are worth a look if
-    // the plate wanted is not in this one.
     private const string PhotoOverlayKey = "Assets/UI/Menus/Photo Mode/Take Photo Overlay.prefab";
 
-    // The plate itself, by path from that prefab's root. Named rather than deduced: "Background"
-    // on its own is also what both sliders call theirs, and the shape of the art is not enough to
-    // tell a control's backing from the panel's.
     private const string PlatePath = "Controls/Background";
 
     private static string SourceKey
@@ -37,7 +22,6 @@ public static class VanillaChrome
         }
     }
 
-    // What a panel wears while the game's art is not available.
     private static readonly Color FallbackTint = new(0f, 0f, 0f, 0.62f);
     private const float FallbackPixelsPerUnit = 1.6f;
 
@@ -48,19 +32,13 @@ public static class VanillaChrome
 
     public static bool Ready => Plate != null;
 
-    // The colour a panel should be, whichever plate is in use. The status bar reads this rather
-    // than blackening itself: on the game's art the accent outline already carries urgency, and
-    // washing the plate out would throw its design away.
     public static Color Tint => Ready ? PlateTint : FallbackTint;
 
     private static bool _requested;
     private static bool _reported;
 
-    // Panels dressed so far, so a late arrival can reach the ones already built. Editor sessions
-    // come and go and take their canvas with them, so destroyed entries are dropped on each pass.
     private static readonly List<Image> _dressed = [];
 
-    // Dress a panel background and keep it on the list. Safe to call before the art exists.
     public static void Dress(Image image)
     {
         if (image == null) return;
@@ -74,8 +52,6 @@ public static class VanillaChrome
     {
         if (Ready)
         {
-            // Slicing a border-less sprite only stretches it, which is what the game does with
-            // this one anyway; the source's own draw mode is carried over rather than assumed.
             image.type = PlateDraw;
             image.sprite = Plate;
             image.pixelsPerUnitMultiplier = PlatePixelsPerUnit;
@@ -110,7 +86,6 @@ public static class VanillaChrome
             return;
         }
 
-        // Never released: releasing it unloads the sprite the panels are drawing.
         handle.Completed += op =>
         {
             try
@@ -140,14 +115,10 @@ public static class VanillaChrome
         PlatePixelsPerUnit = chosen.pixelsPerUnitMultiplier > 0f ? chosen.pixelsPerUnitMultiplier : 1f;
         PlateDraw = chosen.type;
 
-        // As authored, except for art shipped invisible and faded in by a tween at runtime: a
-        // plate at alpha 0 is not a plate. A translucent one is a design and is left alone.
         var tint = chosen.color;
         var alpha = tint.a < 0.05f ? 1f : tint.a;
         PlateTint = new Color(tint.r, tint.g, tint.b, alpha * Opacity);
 
-        // The atlas the sprite lives in is held by our handle; the sprite itself must not be swept
-        // up by a resource unload between editor sessions.
         Plate.hideFlags |= HideFlags.DontUnloadUnusedAsset;
 
         Plugin.Log.LogInfo($"Map editor: panel art '{Plate.name}' taken from '{SourceKey}' " +
@@ -163,13 +134,6 @@ public static class VanillaChrome
 
     // ---- the art's own padding ------------------------------------------------------------------
 
-    // "Rough_WhiteSquare_bottomaligned" says what it is: the shape sits at the bottom of its rect
-    // with empty space above, so a plate stretched to a panel is drawn short of the panel's edges.
-    //
-    // The atlas packer records that padding - textureRect is where the art actually is, rect is the
-    // authored size around it - so the fix is to re-cut the sprite to the art and let it stretch to
-    // the whole panel. On art the packer left untrimmed the two agree and this changes nothing,
-    // which is what the config crop is for.
     private static Sprite Trim(Sprite sprite)
     {
         if (sprite == null) return null;
@@ -189,7 +153,6 @@ public static class VanillaChrome
         var rect = new Rect(art.x + crop.x, art.y + crop.y,
             art.width - crop.x - crop.z, art.height - crop.y - crop.w);
 
-        // Nothing to re-cut, or a crop that would eat the whole plate.
         if (rect.width < 1f || rect.height < 1f) return sprite;
         if (rect == art && Mathf.Approximately(art.width, authored.width) &&
             Mathf.Approximately(art.height, authored.height)) return sprite;
@@ -211,7 +174,6 @@ public static class VanillaChrome
         return cut;
     }
 
-    // left, bottom, right, top, in the art's own pixels.
     private static Vector4 Crop()
     {
         var configured = Plugin.MapEditorPanelCrop?.Value;
@@ -249,10 +211,6 @@ public static class VanillaChrome
 
     // ---- picking a plate ------------------------------------------------------------------------
 
-    // The plate is asked for by path - PlatePath, or whatever the config names instead - and only
-    // deduced from the art's shape when nothing answers to that, which is what a game update moving
-    // it would look like. Everything the prefab draws is written to the log the first time round, so
-    // a pick that goes wrong can be named rather than guessed at again.
     private static Image Choose(GameObject prefab)
     {
         var images = prefab.GetComponentsInChildren<Image>(true);
@@ -273,13 +231,9 @@ public static class VanillaChrome
             var rect = image.rectTransform.rect;
             var area = Mathf.Abs(rect.width * rect.height);
 
-            // Path first, so one plate among several sharing a name can still be asked for; then
-            // the looser two, which are what a sprite is easiest to recognise by in the dump.
             if (Same(PathOf(image.transform, prefab.transform), wanted) ||
                 Same(sprite.name, wanted) || Same(image.name, wanted))
             {
-                // A named pick wins outright, whatever shape it is; the largest match settles a
-                // name used more than once.
                 if (best != null && bestNamed && area <= bestArea) continue;
                 best = image;
                 bestNamed = true;
@@ -289,14 +243,9 @@ public static class VanillaChrome
 
             if (bestNamed) continue;
 
-            // Nothing named matched yet, so the shape has to say it: a panel background is
-            // nine-sliced - the borders are what let one piece of art stretch to any size - and
-            // decoration is not. This is the fallback for a game update moving the plate.
             var border = sprite.border;
             if (border.x <= 0f && border.y <= 0f && border.z <= 0f && border.w <= 0f) continue;
 
-            // A frame drawn round the whole screen is not a plate, and neither is a rect the
-            // prefab leaves for a layout to fill in.
             if (rect.width < 1f || rect.height < 1f) continue;
             if (border.x + border.z >= rect.width || border.y + border.w >= rect.height) continue;
 
@@ -317,8 +266,6 @@ public static class VanillaChrome
 
     private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
-    // Everything the source prefab draws, once, so a plate can be named in the config without
-    // having to guess at it. Names are paths from the prefab root, and that is what to name.
     private static void Report(GameObject prefab, Image[] images)
     {
         if (_reported) return;

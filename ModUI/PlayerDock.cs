@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using COTL_API.CustomSkins;
 using CustomSpineLoader.MapEditor;
 using CustomSpineLoader.SpineLoaderHelper;
@@ -8,13 +8,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.ModUI;
 
-// The players, along the bottom left: one card each, with their portrait and the three things worth
-// setting about how they look.
-//
-// A card rather than a run of rows in the long panel on the right, because these controls belong to
-// a particular player and there is no reading order that makes that obvious in a single column - the
-// old panel had four headers and the same three fields under each, and which player you were editing
-// was whatever header you had last scrolled past. Here the picture is the label.
 public class PlayerDock
 {
     private readonly MapEditorUI _ui;
@@ -23,8 +16,6 @@ public class PlayerDock
     private GameObject _root;
     private readonly List<GameObject> _cards = [];
 
-    // Which spine each player is waiting on. Static because the dock is torn down and built again
-    // while the wait is still going on, and the answer has to outlive the card that asked.
     private static readonly Dictionary<int, string> _awaiting = [];
 
     public PlayerDock(MapEditorUI ui, Transform parent)
@@ -75,10 +66,6 @@ public class PlayerDock
 
         for (var i = 0; i < 4; i++)
         {
-            // One and two always have a card: the panel is also how player two's look is set up
-            // BEFORE they join, and a card that appears and disappears as a controller connects is
-            // worse than one that says they are not in the game yet. Three and four have no such
-            // story - nothing about them can be set until they are here - so they stay hidden.
             var player = PlayerSpineLoader.ResolvePlayer(i);
             if (i > 1 && player == null) continue;
 
@@ -109,8 +96,6 @@ public class PlayerDock
         var rect = card.AddComponent<RectTransform>();
         rect.sizeDelta = new Vector2(CardWidth, 0f);
 
-        // The card is the outermost surface a player's controls sit on, so it wears the
-        // game's plate; the boxes nested inside it stay plain, or it is planks on planks.
         var cardPlate = card.AddComponent<Image>();
         MapEditor.VanillaChrome.Dress(cardPlate);
         cardPlate.raycastTarget = false;
@@ -139,8 +124,6 @@ public class PlayerDock
 
     // ---- the four boxes ----------------------------------------------------------------------------
 
-    // Each control gets a plate of its own so the card reads as four things rather than one stack:
-    // who this is, what they are wearing, whether they are wearing it, and what they are.
     private RectTransform Box(Transform parent, string name)
     {
         var go = new GameObject(name);
@@ -159,9 +142,6 @@ public class PlayerDock
         layout.childControlHeight = false;
         layout.childForceExpandHeight = false;
 
-        // Sized by what is in it, rather than by a number picked here. Every box used to carry a
-        // fixed height, and every one of those numbers was a few pixels short of a caption plus a
-        // 44-high dropdown plus padding - which is what the lists were spilling out of.
         var fitter = go.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
@@ -179,12 +159,6 @@ public class PlayerDock
             return;
         }
 
-        // A spine still being parsed has no skeleton to draw yet. The game announces that with a
-        // caption in the bottom-left corner, which is where this dock now stands - so the card says
-        // it instead, in the space the portrait will fill.
-        //
-        // Two ways to be waiting: this card asked for a spine and is holding the name until it
-        // lands, or something else started a load of the spine the player is already wearing.
         var awaited = _awaiting.TryGetValue(playerId, out var picked) ? picked : null;
         if (string.IsNullOrEmpty(awaited))
         {
@@ -198,8 +172,6 @@ public class PlayerDock
             return;
         }
 
-        // The box's inside, so the render target is the shape it will be drawn at and the lamb is
-        // not stretched to fit.
         var width = CardWidth - CardPadding * 2f - BoxPadding * 2f;
         var height = PortraitHeight - BoxPadding * 2f;
 
@@ -225,12 +197,6 @@ public class PlayerDock
         image.raycastTarget = false;
     }
 
-    // Drives the portrait's own skeleton and nothing else - the player in the world is not touched.
-    // That is the whole reason the portrait is a skeleton of its own rather than a shot of the live
-    // one: PlayerFarming's state machine owns the player's AnimationState and would overwrite
-    // anything set here on its next state change.
-    //
-    // Built after the portrait, because the list of animations comes from the portrait's spine.
     private void BuildAnimationBox(Transform parent, int playerId, bool present)
     {
         if (!present) return;
@@ -263,14 +229,9 @@ public class PlayerDock
             }
             else
             {
-                // Off means the game's own fleece comes back, which it does on the next skin
-                // rebuild - so ask for one rather than leaving the old fleece on screen.
                 PlayerSpineLoader.ResolvePlayer(playerId)?.SetSkin();
             }
 
-            // In place, not a rebuild: nothing about the card's controls has changed. Turning
-            // transmog on goes through ApplyFleece, which announces itself, but turning it OFF is a
-            // plain SetSkin the loader knows nothing about - so it is said here.
             PlayerPreview.Redress(playerId);
         });
     }
@@ -296,9 +257,6 @@ public class PlayerDock
                 return;
             }
 
-            // No redraw asked for here on purpose. ApplyFleece announces itself through
-            // PlayerSpineLoader.LookChanged when the fleece actually lands on the skeleton, which
-            // for a fleece whose spine has to load first is seconds after this returns.
             PlayerSpineLoader.ApplyFleece(playerId, index);
         });
 
@@ -307,8 +265,6 @@ public class PlayerDock
 
         if (!present) return;
 
-        // The picker still works and still remembers, it just does not dress this spine - so say so
-        // rather than leaving a control that looks broken.
         var config = PlayerSpineLoader.ConfigFor(playerId);
         if (config != null && config.DisableFleeceCycling)
             Caption(box, "This spine keeps its own", 13, new Color(1f, 0.8f, 0.45f));
@@ -318,8 +274,6 @@ public class PlayerDock
     {
         var spines = SpineNames();
 
-        // COTL_API tracks a selected spine for players one and two only; a third player's choice
-        // would be written into player one's slot, so the picker is not offered for them.
         if (playerId > 1)
         {
             var note = Box(parent, "Spine");
@@ -339,10 +293,6 @@ public class PlayerDock
 
         var dropdown = _ui.CreateDropdown(box, "Spine", spines, (_, value) =>
         {
-            // Recorded and redrawn BEFORE the load starts. The card used to be rebuilt only from
-            // the landing callback, so the one state it was meant to report - waiting - was always
-            // already over by the time anything asked. The spine cannot be read back off the player
-            // either, since the selection does not change until the load lands.
             _awaiting[playerId] = value;
             Changed?.Invoke();
 
@@ -354,8 +304,6 @@ public class PlayerDock
                 {
                     CustomSkinManager.ChangeSelectedPlayerSpine(value, playerId);
 
-                    // Written down as well as applied: the API's selection does not survive a
-                    // restart on its own.
                     PlayerSpineLoader.RememberSpine(playerId, value);
 
                     Plugin.Log.LogInfo($"Player {playerId + 1} spine set to {value}.");
@@ -372,12 +320,10 @@ public class PlayerDock
         if (selected >= 0) dropdown.SetSelected(selected);
     }
 
-    // Raised after anything that changes how a player looks, so the portraits are retaken.
     public System.Action Changed;
 
     // ---- scaffolding -------------------------------------------------------------------------------
 
-    // The width a box gives its contents. Known up front, which is the point - see Caption.
     private const float BoxInnerWidth = CardWidth - CardPadding * 2f - BoxPadding * 2f;
 
     private void Caption(Transform parent, string text, int size, Color colour)
@@ -389,10 +335,6 @@ public class PlayerDock
         tmp.raycastTarget = false;
         tmp.enableWordWrapping = true;
 
-        // Measured against the width the box WILL give it, not the width it happens to have while
-        // the card is still being built. The general helper measures the latter, which is right in
-        // the editor's wide panel and wrong in a card this narrow: a caption that wraps to two lines
-        // was given one line of height and drew over whatever came next.
         var needed = Mathf.Max(size + 6f, tmp.GetPreferredValues(text, BoxInnerWidth, 0f).y + 4f);
 
         var element = label.GetComponent<LayoutElement>();
@@ -400,8 +342,6 @@ public class PlayerDock
         element.preferredHeight = needed;
         element.minHeight = needed;
 
-        // The operative line: these layout groups do not control child height, so what they read is
-        // the rect's own size rather than the LayoutElement above it.
         if (label.transform is RectTransform rect)
             rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, needed);
     }
@@ -416,6 +356,5 @@ public class PlayerDock
         plate.raycastTarget = false;
     }
 
-    // The panel's own list, kept here so the dock does not depend on the panel.
     private static List<string> SpineNames() => CultTweakerPanel.PlayerSpineNames();
 }

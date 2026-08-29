@@ -22,11 +22,6 @@ public static class CustomRoomPatches
     private static bool IsCustom(GenerateRoom room) =>
         room != null && room.GetComponent<CustomRoomMarker>() != null;
 
-    // Vanilla's own switch for "the scenery in this room is not mine": the only thing that reads it
-    // is OnDisable, which otherwise recycles every SceneryTransform child on the way out - and
-    // ObjectPool.Recycle DESTROYS anything the pool did not spawn. Authored props were being thrown
-    // away when the room was left, and a revisit never brings them back because it does not re-run
-    // Generate and so never re-applies the blueprint. Private, hence the reflection.
     private static readonly System.Reflection.FieldInfo CustomDecorationsField =
         AccessTools.Field(typeof(GenerateRoom), "customDecorations");
 
@@ -60,8 +55,6 @@ public static class CustomRoomPatches
         return false;
     }
 
-    // A later room swap can destroy islands the loader registered in room.Pieces; vanilla's
-    // decoration coroutine dies on the first destroyed entry, so prune before it runs.
     [HarmonyPatch(typeof(GenerateRoom), "OnEnable")]
     private static class GenerateRoom_OnEnable_Patch
     {
@@ -89,15 +82,6 @@ public static class CustomRoomPatches
         }
     }
 
-    // Re-entering a room is not a regeneration. The room object is only switched off and on again,
-    // and OnEnable then runs RegenerateDecorationsWithPool over a room it still believes it
-    // generated - which re-rolls the biome's trees, rocks and critters into it, and spawns them
-    // INSIDE sprite shapes, i.e. all over the author's own floor. That is where the random trees in
-    // a custom room came from, on every revisit. The generation-window suppression in LevelPlayback
-    // cannot catch this one: by the time a room is revisited that window is long closed, so the
-    // marker on the room is what answers instead.
-    //
-    // GeneratedDecorations is still set: BiomeGenerator blocks the arrival until it turns true.
     [HarmonyPatch(typeof(GenerateRoom), "SpawnDecorations")]
     private static class GenerateRoom_SpawnDecorations_Patch
     {
@@ -111,16 +95,12 @@ public static class CustomRoomPatches
         }
     }
 
-    // The tail of that same re-entry pass, and just as wrong here: it switches off ANY
-    // SceneryTransform child within three units of a door, on the assumption that everything under
-    // there is scattered biome dressing. In a custom room it is a prop the author put there.
     [HarmonyPatch(typeof(GenerateRoom), "DisableDecorationsNearDoor")]
     private static class GenerateRoom_DisableDecorationsNearDoor_Patch
     {
         private static bool Prefix(GenerateRoom __instance) => !IsCustom(__instance);
     }
 
-    // Vanilla never removes old backdrops; without this a custom room gains one per visit.
     [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.CreateBackgroundSpriteShape))]
     private static class GenerateRoom_CreateBackgroundSpriteShape_Patch
     {
@@ -131,7 +111,6 @@ public static class CustomRoomPatches
         }
     }
 
-    // A real regeneration replaces everything - the room is vanilla again.
     [HarmonyPatch(typeof(GenerateRoom), nameof(GenerateRoom.Generate),
         typeof(int), typeof(GenerateRoom.ConnectionTypes), typeof(GenerateRoom.ConnectionTypes),
         typeof(GenerateRoom.ConnectionTypes), typeof(GenerateRoom.ConnectionTypes))]
@@ -142,7 +121,6 @@ public static class CustomRoomPatches
             var marker = __instance.GetComponent<CustomRoomMarker>();
             if (marker != null) Object.Destroy(marker);
 
-            // Its scenery is the biome's again, and the pool wants it back on the way out.
             SetCustomDecorations(__instance, false);
         }
     }

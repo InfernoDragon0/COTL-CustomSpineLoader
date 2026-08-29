@@ -12,7 +12,6 @@ namespace CustomSpineLoader.MapEditor;
 
 public static class RoomSnapshot
 {
-    // filename-without-extension -> addressable key; null value marks an ambiguous name.
     private static Dictionary<string, string> _catalogByName;
 
     public static void Collect(CTNodeBlueprint map, RuntimeMapEditor editor)
@@ -105,8 +104,6 @@ public static class RoomSnapshot
                            $"{kept} authored object(s) marked kept, {skipped} skipped.");
     }
 
-    // The room root holds the structural containers (swept separately above) plus loose backdrop
-    // objects; only the loose ones are wanted here.
     private static void SweepRoomRoot(GenerateRoom room, RuntimeMapEditor editor, CTNodeBlueprint map,
         Dictionary<GameObject, (string key, bool addressable)> prefabPaths, ref int resolved, ref int kept,
         ref int skipped)
@@ -160,29 +157,19 @@ public static class RoomSnapshot
 
     private static bool ShouldSkip(GameObject go, RuntimeMapEditor editor, bool runtimeOnly)
     {
-        // Doors, player, camera, room-lock logic and the editor's own objects.
         if (MapEditorProtection.IsProtected(go)) return true;
 
         if (go.name.StartsWith("Room Back Sprite")) return true;
 
-        // Nested sweeps only pick up runtime spawns; prefab-authored children come back with
-        // their parent prefab.
         if (runtimeOnly && !go.name.EndsWith("(Clone)")) return true;
 
-        // Standalone sprite shapes round-trip as spline data via the shape tool. Shapes under
-        // island pieces stay eligible: they are runtime spawns recorded as props.
         if (go.GetComponent<SpriteShapeController>() != null &&
             go.GetComponentInParent<IslandPiece>() == null) return true;
 
-        // A lone enemy root is EnemyTool's or the encounter's business, never a prop. Containers
-        // with enemy children (encounters) stay eligible.
         if (go.GetComponent<UnitObject>() != null) return true;
 
-        // Trigger volumes are authoring objects with no prefab behind them; they round-trip
-        // through bp.Triggers. Checked without the editor, because the loader spawns them too.
         if (go.GetComponentInChildren<CTMapTrigger>(true) != null) return true;
 
-        // Objects the placement tools already serialize under their own sections.
         if (editor != null)
         {
             if (editor.GetTool<StructureTool>()?.IsTracked(go) == true) return true;
@@ -191,8 +178,6 @@ public static class RoomSnapshot
             if (editor.GetTool<PodiumTool>()?.IsTracked(go) == true) return true;
         }
 
-        // Weapon podiums are serialized by the podium tool; vanilla-authored ones that survived
-        // are skipped rather than duplicated as unresolvable props.
         if (go.GetComponentInChildren<Interaction_WeaponSelectionPodium>(true) != null) return true;
 
         return false;
@@ -219,7 +204,6 @@ public static class RoomSnapshot
         return go != null ? go.GetComponent<IslandPiece>() : null;
     }
 
-    // name -> island prefab, across every source. Cached because tier 2 blocks on a load.
     private static readonly Dictionary<string, GameObject> _islandPrefabs = [];
 
     public static GameObject FindIslandPrefabObject(GenerateRoom room, string prefabName)
@@ -227,7 +211,6 @@ public static class RoomSnapshot
         if (string.IsNullOrEmpty(prefabName)) return null;
         if (_islandPrefabs.TryGetValue(prefabName, out var cached) && cached != null) return cached;
 
-        // Tier 1: this room's own lists.
         if (room != null)
         {
             foreach (var list in new[] { room.StartPieces, room.IslandPieces, room.ResourcePieces })
@@ -238,12 +221,9 @@ public static class RoomSnapshot
             }
         }
 
-        // Tier 3: any island prefab still held in memory from an earlier room.
         foreach (var piece in Resources.FindObjectsOfTypeAll<IslandPiece>())
         {
             if (piece == null || piece.name != prefabName) continue;
-            // Prefab assets only - a live scene instance would be a copy of the room we are
-            // about to clear.
             if (piece.gameObject.scene.IsValid()) continue;
             Plugin.Log.LogInfo($"MapEditor: island '{prefabName}' resolved from loaded assets.");
             return CacheIsland(prefabName, piece.gameObject);
@@ -292,8 +272,6 @@ public static class RoomSnapshot
         yield return LoadPrefabByKeyRoutine(key, onDone);
     }
 
-    // Same load, addressed by catalog key rather than filename - for callers that already hold
-    // the key and must not be tripped up by two prefabs sharing a name.
     public static IEnumerator LoadPrefabByKeyRoutine(string key, System.Action<GameObject> onDone)
     {
         if (string.IsNullOrEmpty(key))
@@ -334,14 +312,10 @@ public static class RoomSnapshot
             Plugin.Log.LogWarning($"MapEditor: prefab '{prefabName}' failed to load from '{key}': {e.Message}");
         }
 
-        // Cached for the session: the same room prefab is wanted by every room of a level, and
-        // one load is both faster and safer than repeating it.
         if (result != null) _prefabCache[prefabName] = result;
         onDone?.Invoke(result);
     }
 
-    // Islands, resolved without blocking. Tiers 1 and 3 are synchronous; the catalog tier goes
-    // through the coroutine above.
     public static IEnumerator ResolveIslandRoutine(GenerateRoom room, string prefabName,
         System.Action<GameObject> onDone)
     {
@@ -366,8 +340,6 @@ public static class RoomSnapshot
         onDone?.Invoke(null);
     }
 
-    // Depth-first search for a named descendant, used to locate an authored object inside a
-    // room prefab whose container layout may differ from the live room's.
     public static Transform FindChildByName(Transform root, string name, int depth = 0)
     {
         if (root == null || depth > 6) return null;
@@ -383,9 +355,6 @@ public static class RoomSnapshot
         return null;
     }
 
-    // One object rather than a sweep: the Select tool names what is under the cursor with the same
-    // three tiers a save uses, so the readout and the blueprint agree on what a thing is called.
-    // Called on a click, never per frame - the pool lookup it builds is not free.
     internal static bool TryResolveKey(GameObject go, out string key)
     {
         key = null;
@@ -401,7 +370,6 @@ public static class RoomSnapshot
         key = null;
         isAddressable = true;
 
-        // Tier 1: the pool knows exactly which prefab this instance came from.
         var pool = ObjectPool.instance;
         if (pool != null && pool.spawnedObjects.TryGetValue(go, out var prefab) && prefab != null &&
             prefabPaths.TryGetValue(prefab, out var entry))
@@ -429,7 +397,6 @@ public static class RoomSnapshot
             }
         }
 
-        // Tier 3: catalog lookup by name for direct Addressables instantiations and clones.
         var catalog = CatalogByName();
         if (catalog.TryGetValue(name, out var catalogKey) && catalogKey != null)
         {
@@ -456,7 +423,6 @@ public static class RoomSnapshot
         return null;
     }
 
-    // prefab asset -> the path string ObjectPool.Spawn(path, ...) was called with.
     private static Dictionary<GameObject, (string, bool)> BuildPrefabPathLookup()
     {
         var result = new Dictionary<GameObject, (string, bool)>();
@@ -472,7 +438,6 @@ public static class RoomSnapshot
             }
             catch (System.Exception)
             {
-                // A handle mid-load or released; nothing spawned from it can be in the scene.
             }
         }
 
@@ -497,7 +462,6 @@ public static class RoomSnapshot
                 var name = Path.GetFileNameWithoutExtension(key);
                 if (_catalogByName.TryGetValue(name, out var existing))
                 {
-                    // Same filename under two keys cannot be resolved by name alone.
                     if (existing != key) _catalogByName[name] = null;
                 }
                 else

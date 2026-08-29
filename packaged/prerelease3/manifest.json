@@ -1,0 +1,9 @@
+{
+    "name": "CotLSpineLoader",
+    "version_number": "2.0.2",
+    "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
+    "description": "[PRE-RELEASE 3] CultTweaker 2.0 experimental build: base editing, hub building, the main menu editor and the vanilla-art editor UI. Back up your saves!",
+    "dependencies": [
+        "xhayper-COTL_API-0.3.4"
+    ]
+}

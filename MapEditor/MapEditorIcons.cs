@@ -15,7 +15,6 @@ public static class MapEditorIcons
     private const string IconFolder = "Assets/EditorIcons";
     private const string PlaceholderFile = "Assets/colorwheel.png";
 
-    // Null is a real, cached answer: "no art on disk" must not re-hit the filesystem.
     private static readonly Dictionary<string, Sprite> _diskIcons = [];
     private static Sprite _placeholder;
     private static bool _placeholderTried;
@@ -36,7 +35,6 @@ public static class MapEditorIcons
         return sprite != null ? sprite : Placeholder;
     }
 
-    // Null rather than the placeholder, for callers that would rather draw something of their own.
     public static Sprite GetToolIconOrNull(string toolName)
     {
         if (string.IsNullOrEmpty(toolName)) return null;
@@ -90,7 +88,6 @@ public static class MapEditorIcons
 
         var sprite = known;
 
-        // Other mods' structures are not in the scene's placement list; COTL_API keeps their icon.
         if (sprite == null)
         {
             try
@@ -104,7 +101,6 @@ public static class MapEditorIcons
             }
         }
 
-        // Game-owned sprite: no hideFlags fiddling, it is managed with the scene.
         _structureIcons[type] = sprite;
         return sprite;
     }
@@ -121,7 +117,6 @@ public static class MapEditorIcons
     {
         if (onLoaded == null || string.IsNullOrEmpty(prefabPath)) return;
 
-        // Fake-null check: an unloaded addressable sprite must become a reload, not reach Image.sprite.
         if (_propIcons.TryGetValue(prefabPath, out var cached) && cached != null) { onLoaded(cached); return; }
         if (_propIconsFailed.Contains(prefabPath)) { onLoaded(null); return; }
 
@@ -129,10 +124,8 @@ public static class MapEditorIcons
         if (host != null && !_draining) host.StartCoroutine(DrainPropQueue());
     }
 
-    // Cancels loads not yet started; they would fill cells that no longer exist.
     public static void CancelPendingPropIcons() => _propQueue.Clear();
 
-    // Bumped per session so stale completions cannot drive _inFlight negative.
     private static int _session;
 
     private static IEnumerator DrainPropQueue()
@@ -153,7 +146,6 @@ public static class MapEditorIcons
                 catch (Exception e) { Plugin.Log.LogWarning("MapEditor: prop icon callback failed: " + e.Message); }
             });
 
-            // One dispatch per frame keeps the grid's fill visible rather than a burst-then-stall.
             yield return null;
         }
 
@@ -175,7 +167,6 @@ public static class MapEditorIcons
             return;
         }
 
-        // Never released: releasing the handle unloads the sprite the icon still draws.
         handle.Completed += op =>
         {
             Sprite sprite = null;
@@ -195,12 +186,10 @@ public static class MapEditorIcons
         };
     }
 
-    // Scene-sourced icons die with the scene; disk icons survive (flagged not to unload).
     public static void ClearSceneScopedCache()
     {
         _structureIcons.Clear();
         _propQueue.Clear();
-        // The drain coroutine died with its host; reset, and bump the session so stragglers are no-ops.
         _session++;
         _inFlight = 0;
         _draining = false;

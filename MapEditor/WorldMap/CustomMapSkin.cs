@@ -8,21 +8,14 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// The game's own DLC map art, cut from its "DLC Map Menu" prefab so custom world maps read as part
-// of the game. Only the visuals are taken: every vanilla script is stripped off the clones, since
-// they expect the DLC menu, its save data and its authored node graph. CustomNodeVisual and
-// CustomLineVisual drive what is left.
 internal static class CustomMapSkin
 {
     public static bool Ready { get; private set; }
     public static bool Unavailable { get; private set; }
     public static bool Usable => Ready && !Unavailable;
 
-    // Clones run their Awake the moment they are active, so they are cut and stripped under here.
     private static GameObject _holder;
 
-    // Closing the vanilla map unloads the prefab we harvested from, taking these references with
-    // it; the next map to open re-loads and re-harvests rather than drawing from dead sources.
     private static bool Lost => Ready && _probe == null;
     private static GameObject _probe;
 
@@ -33,7 +26,6 @@ internal static class CustomMapSkin
 
     private static GameObject _connectionSource;
 
-    // Our node types, each naming the vanilla node styles to borrow art from, best first.
     private static readonly Dictionary<string, string[]> TypeMap =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -50,8 +42,6 @@ internal static class CustomMapSkin
 
     // ---- loading ---------------------------------------------------------------------------
 
-    // The prefab is an Addressable the game only loads when the DLC map is about to open, so the
-    // first custom map of a session waits for it.
     public static IEnumerator EnsureLoaded()
     {
         if (Lost) Forget();
@@ -124,8 +114,6 @@ internal static class CustomMapSkin
             {
                 if (location == null) continue;
 
-                // One node per style: the map authors many nodes of each type and they only differ
-                // in position and wiring.
                 var key = location.Type.ToString();
                 if (!Sources.ContainsKey(key)) Sources[key] = location.gameObject;
             }
@@ -159,7 +147,6 @@ internal static class CustomMapSkin
 
     // ---- clones ----------------------------------------------------------------------------
 
-    // Returned inactive and under the holder: the caller reparents it, which is what wakes it.
     public static GameObject CloneNode(string nodeType)
     {
         if (!Usable) return null;
@@ -197,7 +184,6 @@ internal static class CustomMapSkin
         }
     }
 
-    // The plain dungeon node's own icon, borrowed by the editor dock.
     public static Sprite NodeIconSprite()
     {
         if (!Usable) return null;
@@ -229,9 +215,6 @@ internal static class CustomMapSkin
         return null;
     }
 
-    // Strips the vanilla logic off a clone while it is still inactive, leaving the art behind.
-    // DestroyImmediate, not Destroy: a deferred destroy still runs the script's Awake when the
-    // clone is parented in this same frame.
     public static void StripLogic(GameObject clone, MonoBehaviour keep)
     {
         if (clone == null) return;
@@ -242,7 +225,6 @@ internal static class CustomMapSkin
 
             if (behaviour is Graphic graphic)
             {
-                // The node view owns one click target of its own; art must not shadow it.
                 graphic.raycastTarget = false;
                 continue;
             }
@@ -273,7 +255,6 @@ internal static class CustomMapSkin
         }
         catch (Exception)
         {
-            // A missing FMOD event is not worth a broken map screen.
         }
     }
 }

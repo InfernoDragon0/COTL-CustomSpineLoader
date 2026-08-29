@@ -6,34 +6,20 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// The trigger tool's on-screen text, drawn by the mod rather than borrowed from the game.
-//
-// It started out on HUD_DisplayName - the dungeon-name text - which was wrong in three ways: it
-// forces <uppercase> on whatever it is given, it has exactly two positions (bottom right and
-// centre) and neither is where a caption belongs, and it is one line, so a title and its
-// subtext could not be two different sizes. This canvas is ours, so all three are just layout.
-//
-// The font is the game's own. FiraSans SDF is what the intro's "a game by Massive Monster" uses
-// (Intro Room 1/Canvas/Game by MM), and it is loaded for the whole session because the HUD uses
-// it too, so it can be found among the loaded font assets rather than shipped or reloaded.
 public static class TriggerScreenText
 {
     public enum Mode
     {
-        // Bottom left, left aligned: the "SYSTEM / KEPLER-62 / description" corner.
         Caption,
 
-        // Same pair, top centre.
         Title,
 
-        // Dimmed screen with the pair centred on it.
         Fullscreen
     }
 
     private const float FadeIn = 0.6f;
     private const float FadeOut = 0.8f;
 
-    // Not black: the point is to read the text over the room rather than instead of it.
     private const float DimAlpha = 0.75f;
 
     private static ScreenTextOverlay _overlay;
@@ -44,8 +30,6 @@ public static class TriggerScreenText
 
         try
         {
-            // A scene load takes the overlay with it, which is correct - text from the last room
-            // has no business in this one - so a missing one is rebuilt rather than an error.
             if (_overlay == null) _overlay = ScreenTextOverlay.Create();
             if (_overlay == null) return;
 
@@ -64,8 +48,6 @@ public static class TriggerScreenText
     }
 }
 
-// One canvas, reused: a second caption while the first is still up replaces it rather than
-// stacking a second copy over it.
 public class ScreenTextOverlay : MonoBehaviour
 {
     private Canvas _canvas;
@@ -76,8 +58,6 @@ public class ScreenTextOverlay : MonoBehaviour
     private TextMeshProUGUI _subtext;
     private Coroutine _running;
 
-    // Above the HUD, below the editor's own panels (5000+), which are only up while the game is
-    // paused for editing anyway.
     private const int SortingOrder = 4000;
 
     private const float Margin = 90f;
@@ -96,14 +76,10 @@ public class ScreenTextOverlay : MonoBehaviour
         _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         _canvas.sortingOrder = SortingOrder;
 
-        // Fixed reference resolution, so a font size authored here means the same thing on every
-        // display rather than being whatever the screen happens to be tall.
         var scaler = gameObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
-
-        // No GraphicRaycaster: this is scenery, and one would eat clicks meant for the game.
 
         _dim = NewImage("Dim", transform);
         Stretch(_dim.rectTransform);
@@ -128,8 +104,6 @@ public class ScreenTextOverlay : MonoBehaviour
         var fitter = group.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Near-white and thinned; the subtext sits a step down in size, weight and brightness so
-        // the pair reads as a heading and a note rather than two sentences.
         _title = NewText("Title", _block, 64f, new Color(0.96f, 0.96f, 0.94f), -0.14f);
         _subtext = NewText("Subtext", _block, 20f, new Color(0.62f, 0.63f, 0.66f), -0.08f);
     }
@@ -162,9 +136,6 @@ public class ScreenTextOverlay : MonoBehaviour
         text.enableWordWrapping = true;
         text.overflowMode = TextOverflowModes.Overflow;
 
-        // Explicitly neither bold nor weighted: FontWeight only does anything when the font asset
-        // ships the weight variants, which this one does not, so the thinning is done below where
-        // it actually works.
         text.fontWeight = FontWeight.Regular;
         text.fontStyle = FontStyles.Normal;
 
@@ -173,9 +144,6 @@ public class ScreenTextOverlay : MonoBehaviour
 
         Thin(text, dilate);
 
-        // The room behind can be any colour; a soft shadow is what keeps the text readable on a
-        // pale floor without putting a plate behind it. Kept light, because a heavy shadow reads
-        // as weight and undoes the thinning.
         try
         {
             var shadow = go.AddComponent<Shadow>();
@@ -184,16 +152,11 @@ public class ScreenTextOverlay : MonoBehaviour
         }
         catch (Exception)
         {
-            // Shadow is cosmetic; a build without it is still legible.
         }
 
         return text;
     }
 
-    // Thins the glyphs by shrinking the SDF face. Reading `fontMaterial` rather than
-    // `fontSharedMaterial` is the important part: shared would edit the game's own FiraSans
-    // material and thin every other piece of text set in it, HUD included. fontMaterial hands
-    // back a per-object instance instead.
     private static void Thin(TextMeshProUGUI text, float dilate)
     {
         if (Mathf.Approximately(dilate, 0f)) return;
@@ -226,8 +189,6 @@ public class ScreenTextOverlay : MonoBehaviour
         _running = StartCoroutine(Run(mode, hold, fadeIn, fadeOut, dimAlpha));
     }
 
-    // Where the block sits and how it reads. The two text sizes are the point of the layout: a
-    // title and a subtext that are obviously not the same kind of line.
     private void Layout(TriggerScreenText.Mode mode)
     {
         switch (mode)
@@ -271,8 +232,6 @@ public class ScreenTextOverlay : MonoBehaviour
     {
         var dim = mode == TriggerScreenText.Mode.Fullscreen ? dimAlpha : 0f;
 
-        // Unscaled throughout: a sequence often runs while the game is paused around a
-        // conversation, and a scaled fade would sit there at zero alpha until it resumed.
         yield return Fade(0f, 1f, dim, fadeIn);
 
         var deadline = Time.unscaledTime + Mathf.Max(0f, hold);
@@ -317,9 +276,6 @@ public class ScreenTextOverlay : MonoBehaviour
     }
 }
 
-// FiraSans SDF, the font the intro's "a game by Massive Monster" is set in. Looked up among the
-// font assets already in memory rather than loaded: the HUD uses it, so it is always there, and
-// Resources.FindObjectsOfTypeAll reaches assets that no live object happens to reference.
 public static class ScreenTextFont
 {
     private static TMP_FontAsset _font;
@@ -331,9 +287,6 @@ public static class ScreenTextFont
     {
         if (_font != null) return _font;
 
-        // The latch only holds while the failed answer is still current: a font that WAS found
-        // and has since been unloaded reads as fake-null above, and deserves a fresh search
-        // rather than a lifetime of captions in the fallback font.
         if (_searched && ReferenceEquals(_font, null)) return null;
 
         _searched = true;
@@ -354,8 +307,6 @@ public static class ScreenTextFont
                 }
             }
 
-            // Whatever the game's own UI is set in. Not the same face, but the same session's
-            // font rather than TMP's fallback, which ships with the engine and looks it.
             foreach (var text in UnityEngine.Object.FindObjectsOfType<TMP_Text>(true))
             {
                 if (text == null || text.font == null) continue;

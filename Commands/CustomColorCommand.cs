@@ -78,7 +78,6 @@ public class CustomColorCommand : CustomFollowerCommand
 
                     Plugin.Log.LogInfo("Scale is set to: " + currentScale + "X is " + interaction.follower.Spine.Skeleton.ScaleX + " Y is " + interaction.follower.Spine.Skeleton.ScaleY);
 
-
                     if (isCustomFollowerCostumeEnabled)
                     {
                         CustomColorHelper.SetCustomCostume(
@@ -125,7 +124,6 @@ public class CustomColorCommand : CustomFollowerCommand
         }
 
         Debug.Log("Creating color picker UI...");
-        //first we remove the stuff from menu controller
         Time.timeScale = 1f;
         var background = _followerSummaryMenuController.transform.Find("BlurImageBackground");
         background.gameObject.SetActive(false);
@@ -147,7 +145,6 @@ public class CustomColorCommand : CustomFollowerCommand
         var leftContentScrollViewViewport = leftContentScrollView?.Find("Viewport");
         var leftContentScrollViewViewportContent = leftContentScrollViewViewport?.Find("Content");
 
-        //follower traits header change to "Custom Color"
         var followerTraitsHeader = leftContentScrollViewViewportContent?.Find("Follower Traits Header");
         var followerTraitsHeaderTMP = followerTraitsHeader?.GetComponent<TMP_Text>();
         if (followerTraitsHeaderTMP != null)
@@ -155,8 +152,6 @@ public class CustomColorCommand : CustomFollowerCommand
             followerTraitsHeaderTMP.text = "Color preview above.";
         }
 
-        //from the viewport content, disable the following: 
-        //Follower Traits Content, Cult Traits Header, Cult Traits Content, Follower Thoughts, Follower Thoughts Content
         var followerTraitsContent = leftContentScrollViewViewportContent?.Find("Follower Traits Content");
         followerTraitsContent?.gameObject.SetActive(false);
         var cultTraitsHeader = leftContentScrollViewViewportContent?.Find("Cult Traits Header");
@@ -174,7 +169,6 @@ public class CustomColorCommand : CustomFollowerCommand
         followerThoughtsContent?.gameObject.SetActive(false);
         var spacer = leftContentScrollViewViewportContent?.Find("Spacer");
 
-        //then we add the RGB sliders and a checkbox to set enable or disable the custom color
         var sliderTemplate = MonoSingleton<UIManager>.Instance.SettingsMenuControllerTemplate._audioSettings.GetComponentInChildren<ScrollRect>().content.GetChild(0).gameObject;
         var toggleTemplte = MonoSingleton<UIManager>.Instance.SettingsMenuControllerTemplate._graphicsSettings.GetComponentInChildren<ScrollRect>().content.GetChild(4).gameObject;
         var horizontalTemplate = MonoSingleton<UIManager>.Instance.SettingsMenuControllerTemplate._graphicsSettings.GetComponentInChildren<ScrollRect>().content.GetChild(3).gameObject;
@@ -182,8 +176,6 @@ public class CustomColorCommand : CustomFollowerCommand
         #region CREATE UI HERE
 
         var toggleCustomColor = UnityEngine.Object.Instantiate(toggleTemplte, leftContentScrollViewViewportContent);
-        
-        //RGBA Selector
         
         var spacerInstance4 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var sliderRed = UnityEngine.Object.Instantiate(sliderTemplate, leftContentScrollViewViewportContent);
@@ -197,22 +189,18 @@ public class CustomColorCommand : CustomFollowerCommand
         var spacerInstance3 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var sliderAlpha = UnityEngine.Object.Instantiate(sliderTemplate, leftContentScrollViewViewportContent);
 
-        //scale
         var spacerInstance11 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var sliderScale = UnityEngine.Object.Instantiate(sliderTemplate, leftContentScrollViewViewportContent);
 
-        //toggle for follow costume enable disable
         var spacerInstance10 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var toggleFollowCostumeEnable = UnityEngine.Object.Instantiate(toggleTemplte, leftContentScrollViewViewportContent);
 
-        //Follower Costume Selector (Special Type and Clothing Type)
         var spacerInstance5 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var horizontalClothingType = UnityEngine.Object.Instantiate(horizontalTemplate, leftContentScrollViewViewportContent);
 
         var spacerInstance6 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var horizontalSpecialType = UnityEngine.Object.Instantiate(horizontalTemplate, leftContentScrollViewViewportContent);
 
-        //Follower Costume Selector (Hats, Outfit, necklace)
         var spacerInstance7 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var horizontalHatType = UnityEngine.Object.Instantiate(horizontalTemplate, leftContentScrollViewViewportContent);
 
@@ -270,7 +258,6 @@ public class CustomColorCommand : CustomFollowerCommand
         sliderBlueComponent.value = _followerSummaryMenuController._follower.Spine.skeleton.FindSlot("ARM_LEFT_SKIN").B * 100f;
         sliderAlphaComponent.value = _followerSummaryMenuController._follower.Spine.skeleton.A * 100f;
 
-        //scale is from 0.1 to 5.0, a percentage from 0 to 1
         sliderScaleComponent.value = ((currentScale - 0.1f) / 4.9f) * 100f;
 
         #endregion
@@ -284,7 +271,6 @@ public class CustomColorCommand : CustomFollowerCommand
         var horizontalHatTypeText = horizontalHatType.GetComponentInChildren<TMP_Text>();
         var horizontalOutfitTypeText = horizontalOutfitType.GetComponentInChildren<TMP_Text>();
         var horizontalNecklaceTypeText = horizontalNecklaceType.GetComponentInChildren<TMP_Text>();
-
 
         horizontalClothingType.name = "FollowerClothingType";
         horizontalSpecialType.name = "FollowerSpecialOverlayType";
@@ -300,7 +286,6 @@ public class CustomColorCommand : CustomFollowerCommand
         horizontalNecklaceTypeText.text = "Necklace Type";
         toggleFollowCostumeEnableText.text = "Follower Costume Override";
 
-        //get options for clothing type, use the ENUM and convert to list of strings
         var clothingTypeEnumValues = Enum.GetValues(typeof(FollowerClothingType));
         var clothingTypeOptions = clothingTypeEnumValues.Cast<FollowerClothingType>().Select(x => x.ToString()).ToList();
 
@@ -326,7 +311,6 @@ public class CustomColorCommand : CustomFollowerCommand
 
         toggleFollowCostumeEnableComponent.OnValueChanged += (value) => OnFollowerCostumeToggleChanged(value, _followerSummaryMenuController._follower);
 
-        //get selector an override contents for each
         var horizontalClothingTypeSelector = horizontalClothingType.GetComponentInChildren<MMHorizontalSelector>();
         horizontalClothingTypeSelector._localizeContent = false;
         horizontalClothingTypeSelector.UpdateContent([.. clothingTypeOptions]);
@@ -366,7 +350,6 @@ public class CustomColorCommand : CustomFollowerCommand
             toggleFollowCostumeEnableComponent.UpdateState(true);
             isCustomFollowerCostumeEnabled = hasCustomColor.CustomFollowerCostume;
 
-            //set horizontal selectors to current values for cloth, special, hat, outfit, necklace
             horizontalClothingTypeSelector.ContentIndex = Mathf.Clamp(hasCustomColor.FollowerClothingType, 0, clothingTypeOptions.Count - 1);
             horizontalSpecialTypeSelector.ContentIndex = Mathf.Clamp(hasCustomColor.FollowerSpecialType, 0, specialTypeOptions.Count - 1);
             horizontalHatTypeSelector.ContentIndex = Mathf.Clamp(hasCustomColor.FollowerHatType, 0, hatTypeOptions.Count - 1);
@@ -386,7 +369,6 @@ public class CustomColorCommand : CustomFollowerCommand
             toggleFollowCostumeEnableComponent.UpdateState(true);
             isCustomFollowerCostumeEnabled = false;
 
-            //get the default values from follower info
             horizontalClothingTypeSelector.ContentIndex = (int)_followerSummaryMenuController._follower.Brain.Info.Clothing;
             horizontalSpecialTypeSelector.ContentIndex = (int)_followerSummaryMenuController._follower.Brain.Info.Special;
             horizontalHatTypeSelector.ContentIndex = (int)_followerSummaryMenuController._follower.Brain.Info.Hat;
@@ -440,7 +422,6 @@ public class CustomColorCommand : CustomFollowerCommand
             $"OutfitType: {(FollowerOutfitType)selectedOutfitTypeIndex}");
         try
         {
-            //snowman special check
             var special = (FollowerSpecialType)selectedSpecialTypeIndex;
             var skinName = _followerSummaryMenuController._follower.Brain.Info.SkinName;
             
@@ -565,21 +546,14 @@ public class CustomColorCommand : CustomFollowerCommand
             Debug.LogError("Follower Summary Menu Controller is not initialized.");
             return;
         }
-        // You can also update the follower's color here based on the slider values
         var follower = _followerSummaryMenuController._follower;
         var followerInfoBoxSpine = _followerSummaryMenuController._infoBox.FollowerSpine;
 
-        //ARM_LEFT_SKIN, LEG_LEFT_SKIN, LEG_RIGHT_SKIN, ARM_RIGHT_SKIN, HEAD_SKIN_BTM, HEAD_SKIN_BTM_BACK
         var originalColor = follower.Spine.skeleton.FindSlot("ARM_LEFT_SKIN").GetColor();
         switch (color)
         {
             case "Red":
                 currentRed = value;
-                // follower.Spine.skeleton.FindSlot("ARM_LEFT_SKIN").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
-                // follower.Spine.skeleton.FindSlot("LEG_LEFT_SKIN").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
-                // follower.Spine.skeleton.FindSlot("LEG_RIGHT_SKIN").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
-                // follower.Spine.skeleton.FindSlot("ARM_RIGHT_SKIN").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
-                // follower.Spine.skeleton.FindSlot("HEAD_SKIN_BTM").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
                 // follower.Spine.skeleton.FindSlot("HEAD_SKIN_BTM_BACK").R = value;
                 followerInfoBoxSpine.skeleton.FindSlot("ARM_LEFT_SKIN").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
                 followerInfoBoxSpine.skeleton.FindSlot("LEG_LEFT_SKIN").R = value; //.SetColor(new Color(value, originalColor.g, originalColor.b, originalColor.a));
@@ -620,11 +594,9 @@ public class CustomColorCommand : CustomFollowerCommand
                 break;
             case "Alpha":
                 currentAlpha = value;
-                // follower.Spine.skeleton.A = value;
                 followerInfoBoxSpine.color = new Color(followerInfoBoxSpine.color.r, followerInfoBoxSpine.color.g, followerInfoBoxSpine.color.b, value);
                 break;
             case "Scale":
-            // scale from 0.1 to 5.0, value is from 0 to 100
                 currentScale = (value * 4.9f) + 0.1f;
                 followerInfoBoxSpine.transform.localScale = new Vector3(currentScale, currentScale, 1f);
                 break;

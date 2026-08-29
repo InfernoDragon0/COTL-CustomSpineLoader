@@ -12,9 +12,6 @@ public class StructureBuildingOverrideHelper
 {
     public static Dictionary<string, List<StructureBuildingOverride>> StructureBuildingOverrides { get; private set; } = [];
 
-    // Which folder each building's overrides were read from: ours, or another mod's CultTweaker
-    // folder (ModContentPaths). The sprites are named relative to it, so it has to be remembered
-    // rather than rebuilt from the plugin path.
     private static readonly Dictionary<string, string> _folders = [];
 
     public static void LoadBuildingOverrides()
@@ -24,7 +21,6 @@ public class StructureBuildingOverrideHelper
             Directory.CreateDirectory(Path.Combine(Plugin.PluginPath, $"BuildingOverrides"));
             Plugin.Log.LogInfo("Created BuildingOverrides directory.");
         }
-        //loop through each folder in BuildingOverrides
         foreach (var dir in APIHelper.ModContentPaths.DirectoriesIn("BuildingOverrides"))
         {
             var buildingName = new DirectoryInfo(dir).Name;
@@ -56,10 +52,6 @@ public class StructureBuildingOverrideHelper
         }
     }
     
-    // The converted list is built once per building and cached: this is called from a postfix
-    // on Structure.Start, which fires for every matching structure on every location load, and
-    // each call used to decode every override PNG from disk again - a fresh texture per call
-    // that nothing ever destroyed.
     private static readonly Dictionary<string, List<CustomStructureBuildingData>> _converted = [];
 
     public static List<CustomStructureBuildingData> GetOverridesForBuilding(string buildingName)
@@ -69,13 +61,10 @@ public class StructureBuildingOverrideHelper
         var convertibleFormat = StructureBuildingOverrides.TryGetValue(buildingName, out var overrides) ? overrides : null;
         if (convertibleFormat == null)
         {
-            // Negative answers are cached too - most structures have no overrides, and they all
-            // ask on every location load.
             _converted[buildingName] = null;
             return null;
         }
 
-        //convert this list into a list of StructureBuildingOverrideData
         var folder = _folders.TryGetValue(buildingName, out var known)
             ? known
             : Path.Combine(Plugin.PluginPath, "BuildingOverrides/" + buildingName);

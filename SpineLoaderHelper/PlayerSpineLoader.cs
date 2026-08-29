@@ -22,23 +22,9 @@ public class PlayerSpineLoader
     public static List<string> FleeceRotation = []; //string of skin names that have fleeces
     public static Dictionary<string, Tuple<SkeletonDataAsset, List<string>>> FleeceCyclingSpines = []; //spineName: Skel and list of skin names
 
-    // Kept past loading so DisableFleeceCycling and HiddenSlots can be read whenever a player is
-    // dressed. Keyed by folder name, which is the half of "<spine>/<skin>" that COTL_API tracks.
     public static Dictionary<string, PlayerSpineConfig> SpineConfigs = [];
-    // Which fleece each player is wearing, by player id. The source of truth; the two fields below
-    // are the halves of it that survive a restart, kept in step on every write because the config
-    // and the boot path are both written in terms of them.
-    //
-    // Four, because coop seats four - players three and four were previously dressed by whatever
-    // player one had picked, since this was two variables and a switch with two cases.
     public static readonly int[] FleeceIndexes = [-1, -1, -1, -1];
 
-    // Raised when a player's look has actually landed on their skeleton, with the player's id.
-    //
-    // Not the same moment as asking for it. A fleece whose spine is not resident yet starts a load
-    // and returns, dressing the player by callback seconds later - so a caller that redraws when
-    // ApplyFleece RETURNS redraws the old look, which is why a cross-atlas fleece only appeared
-    // when it was picked a second time.
     public static Action<int> LookChanged;
 
     private static void AnnounceLook(int playerId)
@@ -89,8 +75,6 @@ public class PlayerSpineLoader
 
         FleeceIndexes[playerID] = result;
 
-        // The two that persist are mirrored, because the config and the boot path are written in
-        // terms of them.
         if (playerID == 0) currentFleeceIndexP1 = result;
         else if (playerID == 1) currentFleeceIndexP2 = result;
 
@@ -100,19 +84,6 @@ public class PlayerSpineLoader
     }
 
     // ---- deferred skeleton parsing --------------------------------------------------------------
-
-    // Parsing the skeleton JSON is four fifths of what it costs to load a spine: measured at 16.4s
-    // of a 20.9s load across 17 skins, against 2.5s of texture decoding and 1.9s of file reading.
-    // SkeletonDataAsset does it eagerly when CreateRuntimeInstance is passed initialize:true, on the
-    // main thread, before the game can draw anything.
-    //
-    // It does not have to happen there. Once the Atlas exists, SkeletonJson.ReadSkeletonData builds
-    // plain C# objects and touches no Unity API at all, so the parse runs on a background thread
-    // while the menu is up and the result is handed to the asset a frame later.
-    //
-    // Nothing has to wait for it. A spine worn before its turn comes up is parsed by spine-unity
-    // itself, from the TextAsset still attached to the asset, exactly as it always was - the
-    // warm-up only changes where the cost lands, never whether the spine works.
 
     private const float SkeletonScale = 0.005f;
 
@@ -143,7 +114,6 @@ public class PlayerSpineLoader
         Atlas atlas;
         try
         {
-            // The last Unity call the parse needs, so it happens here rather than on the worker.
             atlas = atlasAsset.GetAtlas();
         }
         catch (Exception e)
@@ -159,8 +129,6 @@ public class PlayerSpineLoader
             WarmPending.Enqueue(new WarmUpJob { Name = name, Asset = asset, Atlas = atlas, Json = json });
             _warmQueued++;
 
-            // Lazy loads queue parses long after the boot batch drained; the pump must wake
-            // back up or the result would sit in WarmFinished forever.
             _warmDrained = false;
         }
     }
@@ -175,8 +143,6 @@ public class PlayerSpineLoader
             _warmThread = new Thread(WarmUpLoop)
             {
                 Name = "CultTweaker spine warm-up",
-                // Background, so a half-finished warm-up can never keep the game from closing, and
-                // below normal so it yields to whatever the game is doing with the other cores.
                 IsBackground = true,
                 Priority = System.Threading.ThreadPriority.BelowNormal
             };
@@ -202,12 +168,9 @@ public class PlayerSpineLoader
 
             var watch = Stopwatch.StartNew();
 
-            // Process-wide, so a collection mid-parse skews it low - but parses run one at a
-            // time on this thread, so the delta is a fair per-skeleton attribution.
             var heapBefore = GC.GetTotalMemory(false);
             try
             {
-                // Reads the Atlas, never writes it, so sharing it with the main thread is safe.
                 var reader = new SkeletonJson(new AtlasAttachmentLoader(job.Atlas)) { Scale = SkeletonScale };
                 job.Parsed = reader.ReadSkeletonData(new StringReader(job.Json));
             }
@@ -224,17 +187,10 @@ public class PlayerSpineLoader
         }
     }
 
-    // Driven from Plugin.Update: handing the parsed data to the asset is a Unity-side write, so it
-    // belongs on the main thread even though the work that produced it did not.
-    // True once every queued job has landed - the per-frame pump stops taking the lock then.
-    // Volatile-free by design: _warmApplied only moves on the main thread, and a stale read of
-    // _warmQueued just means one extra harmless pump.
     private static bool _warmDrained;
 
     public static void PumpWarmUp()
     {
-        // Warm-up is a startup job, but this is called from Plugin.Update every frame forever -
-        // once the queue has drained there is nothing left to take a lock for.
         if (_warmDrained) return;
 
         while (true)
@@ -268,8 +224,6 @@ public class PlayerSpineLoader
         }
         else if (job.Asset.skeletonData != null)
         {
-            // Worn before its turn came up, so spine-unity parsed it already. Overwriting now would
-            // leave a live Skeleton pointing at data its own asset no longer holds.
             Plugin.Log.LogInfo($"{job.Name} was already parsed on demand; warm-up result dropped.");
             ReleaseJson(job.Asset);
         }
@@ -279,16 +233,9 @@ public class PlayerSpineLoader
             {
                 job.Asset.skeletonData = job.Parsed;
 
-                // GetSkeletonData builds this as part of parsing, and injecting the data above makes
-                // it return before it ever gets there - so the AnimationStateData it would have
-                // created has to be built here. Without it GetAnimationStateData answers null and
-                // SkeletonAnimation.Initialize throws "data cannot be null", which takes down the
-                // whole of PlayerFarming.Start with it. FillStateData only fills an existing one.
                 job.Asset.stateData = new AnimationStateData(job.Parsed);
                 job.Asset.FillStateData();
 
-                // Ask the asset the same two questions spine-unity is about to ask, rather than
-                // trusting that the warm-up left it complete.
                 if (job.Asset.GetSkeletonData(true) == null || job.Asset.GetAnimationStateData() == null)
                     throw new Exception("the asset was still incomplete afterwards");
 
@@ -298,8 +245,6 @@ public class PlayerSpineLoader
             }
             catch (Exception e)
             {
-                // Put it back exactly as spine-unity expects to find it, so the TextAsset route
-                // still works and a failed warm-up costs nothing but the time it wasted.
                 job.Asset.skeletonData = null;
                 job.Asset.stateData = null;
 
@@ -318,10 +263,6 @@ public class PlayerSpineLoader
                               $"used of {UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / 1048576f:F0}MB reserved.");
     }
 
-    // Once the parsed SkeletonData sits in the asset, the JSON TextAsset it was parsed from is
-    // a dead copy of a file that can run to tens of MB - and there is one per installed spine.
-    // Nothing reads it again: GetSkeletonData returns the cached data, and neither the game nor
-    // COTL_API ever Clear() these assets back to their JSON.
     private static void ReleaseJson(SkeletonDataAsset asset)
     {
         if (asset == null || asset.skeletonData == null || asset.skeletonJSON == null) return;
@@ -334,9 +275,6 @@ public class PlayerSpineLoader
 
     // ---- active spine -------------------------------------------------------------------------
 
-    // COTL_API keeps SelectedSpine/SelectedSpine2 internal, so they are read through Harmony's
-    // traverse rather than by depending on a publicized build of it - the same approach the map
-    // editor's enemy picker uses for the custom enemy list.
     public static string ActiveSpineKey(int playerId)
     {
         try
@@ -351,8 +289,6 @@ public class PlayerSpineLoader
         }
     }
 
-    // "<spine>/<skin>" -> "<spine>". The API tracks a spine for players one and two only, so a
-    // third player is reading player one's - which is also the spine they are actually wearing.
     public static string ActiveSpineName(int playerId) => SpineNameFromKey(ActiveSpineKey(playerId));
 
     public static string SpineNameFromKey(string key)
@@ -363,14 +299,9 @@ public class PlayerSpineLoader
         return slash < 0 ? key : key.Substring(0, slash);
     }
 
-    // The choice this mod wrote down, as opposed to the one the API is currently holding. At boot
-    // these differ for a while: ours is on disk from the moment it was picked, the API's does not
-    // exist until something puts it back.
     public static string RememberedSpineKey(int playerId) =>
         (playerId == 0 ? Plugin.SelectedSpineP1?.Value : Plugin.SelectedSpineP2?.Value) ?? "";
 
-    // Null for the vanilla spine and for any custom one without a config.json, which is the signal
-    // to leave everything at its default behaviour.
     public static PlayerSpineConfig ConfigFor(int playerId)
     {
         var name = ActiveSpineName(playerId);
@@ -381,13 +312,6 @@ public class PlayerSpineLoader
 
     // ---- hidden slots -------------------------------------------------------------------------
 
-    // Strips a slot out of the LIVE skin rather than the loaded SkeletonData. Every path that could
-    // put the slot back - the animations that key it, the game's own SetAttachment calls, the
-    // fleece - resolves through Skeleton.GetAttachment, which reads the current skin and then the
-    // default one; with no entry in either, all of them resolve to nothing.
-    //
-    // Working on the live skin also keeps the data asset clean, so the other skins in the same
-    // file, and the vanilla spine, are unaffected when the player swaps away.
     public static void HideSlots(SkeletonAnimation spine, PlayerSpineConfig config)
     {
         if (spine == null || spine.Skeleton == null) return;
@@ -396,9 +320,6 @@ public class PlayerSpineLoader
         var skin = spine.Skeleton.Skin;
         if (skin == null) return;
 
-        // Between a spine swap and the SetSkin that follows it, the live skin IS one of the
-        // SkeletonData's own. Stripping that would edit the loaded asset itself - permanently, for
-        // every skin in the same file and every player wearing one.
         if (IsDataSkin(spine, skin))
         {
             Plugin.Log.LogWarning("Slots not hidden: the player is wearing a skin straight from the " +
@@ -417,8 +338,6 @@ public class PlayerSpineLoader
                 continue;
             }
 
-            // Every attachment name on the slot, not just the one in the setup pose: CROWN carries
-            // five and CROWN_EYE nine, and an animation can key any of them.
             foreach (var entry in skin.Attachments.ToList())
             {
                 if (entry.SlotIndex != slotIndex) continue;
@@ -434,19 +353,10 @@ public class PlayerSpineLoader
                 skin.SetAttachment(slotIndex, entry.Name, blanked);
             }
 
-            // Clears what the slot is showing at this instant; anything that re-attaches by name
-            // from here lands on one of the transparent copies above.
             spine.Skeleton.SetAttachment(slotName, null);
         }
     }
 
-    // A fully transparent stand-in for an attachment, so the NAME still resolves.
-    //
-    // Deleting the entry instead throws: Skeleton.SetAttachment(slot, name) raises "Attachment not
-    // found" when it cannot resolve, and FlyingCrown.Close re-attaches CROWN by name every time the
-    // crown flies back or a CROWN_HIDE_CANCEL event fires. The copy matters as much as the alpha -
-    // the original attachment belongs to the loaded asset and is shared with every other skin in
-    // the same file.
     private static Attachment Blank(Attachment attachment)
     {
         switch (attachment?.Copy())
@@ -464,8 +374,6 @@ public class PlayerSpineLoader
         }
     }
 
-    // True when the skeleton is wearing a skin owned by the loaded asset rather than the composite
-    // the game builds per player in SetSkin.
     private static bool IsDataSkin(SkeletonAnimation spine, Skin skin)
     {
         var skins = spine.Skeleton.Data?.Skins;
@@ -486,10 +394,6 @@ public class PlayerSpineLoader
 
     // ---- fleece application -------------------------------------------------------------------
 
-    // The fleece lives on ANOTHER skin (a vanilla one on the lamb's own skeleton, or a skin from a
-    // FleeceCyclingOnly spine we loaded ourselves); wearing it means copying that skin's
-    // attachments into the slots the player is currently rendering. Shared by every caller -
-    // the F-keys, the panel and the SetSkin patch - so one fix reaches all three.
     public static Skin ResolveFleeceSkin(string fleeceSkinName, SkeletonAnimation targetSpine)
     {
         if (string.IsNullOrEmpty(fleeceSkinName) || targetSpine == null) return null;
@@ -497,8 +401,6 @@ public class PlayerSpineLoader
         if (!fleeceSkinName.Contains("CultTweaker_"))
             return targetSpine.Skeleton.Data.FindSkin(fleeceSkinName);
 
-        // CultTweaker_<SpineName>_<FleeceName>; the fleece name may itself contain underscores,
-        // which is why the split is capped at 3.
         var split = fleeceSkinName.Split(['_'], count: 3);
         if (split.Length < 3)
         {
@@ -513,9 +415,6 @@ public class PlayerSpineLoader
             return null;
         }
 
-        // GetSkeletonData, not the skeletonData field: the field stays null until the warm-up
-        // thread reaches this spine, and a fleece can be asked for before then. The call parses it
-        // on the spot in that case.
         var skeletonData = FleeceCyclingSpines[spineName].Item1.GetSkeletonData(false);
         var skin = skeletonData != null ? skeletonData.FindSkin(split[2]) : null;
         if (skin != null) return skin;
@@ -524,12 +423,6 @@ public class PlayerSpineLoader
         return targetSpine.Skeleton.Data.FindSkin("Lamb");
     }
 
-    // Copies the fleece's attachments into the live skin, slot by slot. A slot the fleece does not
-    // fill is CLEARED rather than left alone - otherwise the previous fleece's poncho stays on
-    // under the new one.
-    //
-    // Nine of the fourteen slots below are the poncho, so a hidden slot and a fleece want the same
-    // entry: the hidden list wins, and the slot is cleared instead of dressed.
     public static void ApplyFleeceAttachments(SkeletonAnimation spine, Skin fleeceSkin,
         PlayerSpineConfig config = null)
     {
@@ -551,15 +444,12 @@ public class PlayerSpineLoader
                 currentSkin.SetAttachment(slotIndex, slot.Item2, attachment);
         }
 
-        // After the fleece, never before: the loop above writes to some of the same slots.
         HideSlots(spine, config);
 
         spine.Skeleton.SetSlotsToSetupPose();
         spine.Update(0);
     }
 
-    // players is only populated when coop features are enabled, so solo play lives entirely in
-    // Instance and player 0 has to fall back to it.
     public static PlayerFarming ResolvePlayer(int playerId)
     {
         var players = PlayerFarming.players;
@@ -572,9 +462,6 @@ public class PlayerSpineLoader
     public static int GetFleeceIndex(int playerId) =>
         playerId >= 0 && playerId < FleeceIndexes.Length ? FleeceIndexes[playerId] : -1;
 
-    // Dresses one player in one fleece. Players beyond the second are dressed but NOT remembered:
-    // both the config and the SetSkin patch that re-applies a fleece after a respawn only know
-    // about two, so a third player's choice lasts until the game next rebuilds their skin.
     public static bool ApplyFleece(int playerId, int fleeceIndex, bool persist = true)
     {
         if (fleeceIndex < 0 || fleeceIndex >= FleeceRotation.Count)
@@ -593,8 +480,6 @@ public class PlayerSpineLoader
         var fleeceSkinName = FleeceRotation[fleeceIndex];
         var config = ConfigFor(playerId);
 
-        // Remembered even by a spine that will not wear it, so the choice is still there when the
-        // player swaps to one that does. Nothing is said on screen; the panel carries the note.
         if (persist) RememberFleece(playerId, fleeceIndex);
 
         if (config != null && config.DisableFleeceCycling)
@@ -603,13 +488,10 @@ public class PlayerSpineLoader
             Plugin.Log.LogInfo($"{ActiveSpineName(playerId)} keeps its own fleece; " +
                                $"{fleeceSkinName} remembered for player {playerId + 1} only.");
 
-            // The skeleton changed even though the fleece was refused: HideSlots stripped it.
             AnnounceLook(playerId);
             return false;
         }
 
-        // A custom fleece rides a spine that may not be loaded yet; it dresses itself the
-        // moment the load lands rather than failing the cycle.
         var fleeceSpineName = SpineNameFromFleece(fleeceSkinName);
         if (fleeceSpineName != null && !FleeceCyclingSpines.ContainsKey(fleeceSpineName) &&
             Registry.ContainsKey(fleeceSpineName))
@@ -631,7 +513,6 @@ public class PlayerSpineLoader
 
         Plugin.Log.LogInfo($"Player {playerId + 1} is wearing {fleeceSkinName}.");
 
-        // Here rather than at the call site, so the deferred landing above announces itself too.
         AnnounceLook(playerId);
         return true;
     }
@@ -640,17 +521,11 @@ public class PlayerSpineLoader
     {
         if (playerId >= 0 && playerId < FleeceIndexes.Length) FleeceIndexes[playerId] = fleeceIndex;
 
-        // Players three and four are remembered for the session but not written to the config: the
-        // boot path loads a fleece eagerly per player and there are two entries for it, so a third
-        // seat's choice lasts until the game is closed.
         switch (playerId)
         {
             case 0:
                 currentFleeceIndexP1 = fleeceIndex;
                 Plugin.CurrentFleeceIndexP1.Value = fleeceIndex;
-                // The NAME as well as the index: an index only resolves once the rotation is
-                // built, but the next boot needs to know which spine to load eagerly before
-                // any rotation exists.
                 if (Plugin.CurrentFleeceNameP1 != null)
                     Plugin.CurrentFleeceNameP1.Value = FleeceRotation[fleeceIndex];
                 break;
@@ -664,14 +539,6 @@ public class PlayerSpineLoader
     }
     // ---- lazy loading -------------------------------------------------------------------------
 
-    // Eighteen installed spines used to pay their full cost at boot - file reads, texture
-    // decodes and above all the parsed skeleton data, measured in whole gigabytes - for looks
-    // nobody was wearing. The folder scan now only reads each spine's config.json into a
-    // registry. The spines actually selected (the API's saved choice per player, and the fleece
-    // the config file remembers) load eagerly exactly as before, so the saved look is on the
-    // player from the first frame; everything else loads the first time it is picked - file IO
-    // on a worker task, texture decodes spread one per frame, the parse on the warm-up thread -
-    // and applies itself the moment it is ready, so the game never stalls.
     private enum SpineState { NotLoaded, Loading, Ready }
 
     private sealed class SpineEntry
@@ -689,8 +556,6 @@ public class PlayerSpineLoader
 
     private static readonly Dictionary<string, SpineEntry> Registry = new(StringComparer.OrdinalIgnoreCase);
 
-    // Accepts a bare spine name or the API's "<spine>/<skin>" key - the panel and the API's
-    // saved selection both speak the second form.
     private static SpineEntry FindEntry(string name)
     {
         if (string.IsNullOrEmpty(name)) return null;
@@ -700,8 +565,6 @@ public class PlayerSpineLoader
         return slash > 0 && Registry.TryGetValue(name.Substring(0, slash), out entry) ? entry : null;
     }
 
-    // A spine that is on its way in. The F7 panel says so where the portrait would be, rather than
-    // leaving an empty box for the seconds a parse takes.
     public static bool IsPreparing(string name)
     {
         var entry = FindEntry(name);
@@ -714,17 +577,6 @@ public class PlayerSpineLoader
         return entry != null && entry.State == SpineState.Ready;
     }
 
-    // The skeleton behind a registered spine, for anything that wants to draw one somewhere other
-    // than on a player - the main menu's centrepiece. Null while it is still parsing and for a name
-    // nothing registered, so callers pair this with EnsureLoaded rather than polling it.
-    public static SkeletonDataAsset LoadedAsset(string name)
-    {
-        var entry = FindEntry(name);
-        return entry != null && entry.State == SpineState.Ready ? entry.Asset : null;
-    }
-
-    // The panel's picker: every wearable "<spine>/<skin>" key, loaded or not - the same keys
-    // AddPlayerSpine mints, one per skin, so selection works exactly as it always did.
     public static List<string> RegisteredSpineNames()
     {
         var names = new List<string>();
@@ -740,15 +592,12 @@ public class PlayerSpineLoader
         return names;
     }
 
-    // The fleece rotation is built from the registry rather than the loaded dictionary, so a
-    // fleece spine appears in the cycle before it has ever been loaded.
     public static IEnumerable<(string Name, string[] Skins)> FleeceCycleEntries()
     {
         foreach (var entry in Registry.Values)
             if (entry.IsFleece) yield return (entry.Name, entry.Skins);
     }
 
-    // "CultTweaker_<spine>_<fleece>" -> "<spine>", or null for a vanilla fleece.
     public static string SpineNameFromFleece(string fleeceSkinName)
     {
         if (string.IsNullOrEmpty(fleeceSkinName) || !fleeceSkinName.Contains("CultTweaker_")) return null;
@@ -756,8 +605,6 @@ public class PlayerSpineLoader
         return split.Length < 3 ? null : split[1];
     }
 
-    // Runs onReady once the spine is usable. Already loaded - or not ours at all (another mod's
-    // spine registered straight with the API) - runs it immediately.
     public static void EnsureLoaded(string name, Action onReady = null, bool announce = true)
     {
         var entry = FindEntry(name);
@@ -770,7 +617,6 @@ public class PlayerSpineLoader
         if (onReady != null) entry.OnReady.Add(onReady);
         if (entry.State == SpineState.Loading) return;
 
-        // No coroutine host this early means we are inside startup; load the old way.
         if (Plugin.Instance == null)
         {
             LoadEntryNow(entry, null);
@@ -783,10 +629,6 @@ public class PlayerSpineLoader
         Plugin.Instance.StartCoroutine(LoadRoutine(entry, announce));
     }
 
-    // The looks that must exist the moment the player does. Called at startup and again from
-    // PlayerFarming.Awake: the API may not have read its save yet when the mod loads, so the
-    // selection can appear between the two.
-    // Writes the choice down. Called whenever a spine is picked, so it survives the session.
     public static void RememberSpine(int playerId, string spineKey)
     {
         switch (playerId)
@@ -800,12 +642,6 @@ public class PlayerSpineLoader
         }
     }
 
-    // Puts a remembered spine back at startup.
-    //
-    // Only when COTL_API has no selection of its own, which is the whole rule: if the API did keep
-    // the choice, or the player picked one through the API's own settings, that is the newer answer
-    // and this must not talk over it. It is the empty case - the one where the choice was simply
-    // lost - that this exists for.
     private static void RestoreSelectedSpine(int playerId)
     {
         var saved = RememberedSpineKey(playerId);
@@ -813,12 +649,6 @@ public class PlayerSpineLoader
 
         if (!string.IsNullOrEmpty(ActiveSpineKey(playerId))) return;
 
-        // Loaded first, selected second, and that order is the fix.
-        //
-        // ChangeSelectedPlayerSpine only takes a spine the API has been handed, and a spine is not
-        // handed over until it has loaded (Register, at the end of the load). Selecting first meant
-        // naming something that did not exist yet: the API kept its default and the player came up
-        // in the plain lamb, with the log cheerfully reporting a restore that never happened.
         var name = SpineNameFromKey(saved);
         if (!string.IsNullOrEmpty(name) && Registry.ContainsKey(name) && !IsLoaded(name))
         {
@@ -835,9 +665,6 @@ public class PlayerSpineLoader
         {
             CustomSkinManager.ChangeSelectedPlayerSpine(saved, playerId);
 
-            // Read back rather than assumed. The API takes a string and reports nothing, so the only
-            // way to know a selection was accepted is to ask what the selection is now - and a
-            // restore that silently did nothing is exactly the failure this is here to catch.
             var actual = ActiveSpineKey(playerId);
             if (string.Equals(actual, saved, StringComparison.Ordinal))
             {
@@ -893,8 +720,6 @@ public class PlayerSpineLoader
         if (!Directory.Exists(playerFolder))
             Directory.CreateDirectory(playerFolder);
 
-        // Ours, plus the same folder in any other mod's CultTweaker folder (ModContentPaths). The
-        // entry keeps the absolute folder it was found in, so the art loads from wherever it lives.
         foreach (var folder in APIHelper.ModContentPaths.DirectoriesIn("PlayerSkins"))
         {
             var name = Path.GetFileName(folder);
@@ -922,22 +747,11 @@ public class PlayerSpineLoader
 
             Registry[name] = entry;
 
-            // Same key AddPlayerSpine registers under, so a selected "<spine>/<skin>" finds it.
             if (entry.Config != null) SpineConfigs[name.Replace("/", "")] = entry.Config;
         }
 
         LoadedCustomSpines = true;
 
-        // The saved looks load now, synchronously, the way every spine used to - the player must
-        // wear their choice on the first frame, not two seconds in.
-        //
-        // Both sources are asked, and asking only the first is what lost the remembered spine.
-        // ActiveSpineName reads COTL_API's selection, and at this point in the boot there isn't one:
-        // this runs from Plugin.Awake, long before anything has put a selection back. So the list
-        // came out empty, the remembered spine was never loaded here, and by the time
-        // RestoreSelectedSpine tried to select it the API had nothing registered under that name to
-        // select - leaving the player in the default lamb. Our own note on disk has the answer from
-        // the moment it was written, so it is read too.
         var loadWatch = Stopwatch.StartNew();
         var eager = 0;
         foreach (var name in new[]
@@ -959,12 +773,9 @@ public class PlayerSpineLoader
         Plugin.Log.LogWarning($"TIMING TOTAL: {Registry.Count} player spine(s) registered, {eager} " +
                               $"loaded eagerly in {loadWatch.ElapsedMilliseconds}ms; the rest load when picked.");
 
-        // Last, so the worker never competes with the loading loop it is queued from.
         StartWarmUp();
     }
 
-    // The synchronous load: everything a spine needs, on the spot, parse queued to the warm-up
-    // thread. Used at startup for the saved looks and as the no-host fallback.
     private static void LoadEntryNow(SpineEntry entry, Material material)
     {
         var stage = Stopwatch.StartNew();
@@ -996,14 +807,8 @@ public class PlayerSpineLoader
                            $"{textureFiles.Length} texture(s)).");
     }
 
-    // The asynchronous load: file IO on a worker, texture decodes one per frame, parse on the
-    // warm-up thread, applied by callback when it lands. The screen text is the "is anything
-    // happening?" answer for the seconds the parse takes.
     private static IEnumerator LoadRoutine(SpineEntry entry, bool announce)
     {
-        // Not while the F7 panel is up: the caption lands in the bottom-left corner, which is where
-        // the player dock stands, and the dock says it in the card of the player it belongs to -
-        // which is more use anyway, since it names who is waiting rather than only what for.
         var panelOpen = ModUI.CultTweakerPanel.Active != null && ModUI.CultTweakerPanel.Active.IsOpen;
 
         if (announce && !panelOpen)
@@ -1014,7 +819,6 @@ public class PlayerSpineLoader
         string[] textureFiles = null;
         List<byte[]> textureBytes = null;
 
-        // Fully qualified: a game assembly ships its own 'Task' type that wins the name.
         var reads = System.Threading.Tasks.Task.Run(() =>
         {
             try
@@ -1064,8 +868,6 @@ public class PlayerSpineLoader
         BuildEntryAsset(entry, null, atlasText, skeletonText, textures);
         StartWarmUp();
 
-        // Registered before the parse lands so the API can already resolve the name; the wearer
-        // is dressed by callback once the data exists, which is what keeps the swap smooth.
         Register(entry);
 
         var deadline = Time.unscaledTime + 60f;
@@ -1083,14 +885,10 @@ public class PlayerSpineLoader
 
     private static Texture2D LoadSpineTexture(string file, byte[] bytes)
     {
-        // Point filtering to match what TextureHelper always produced for these pages.
         var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point };
         tex.LoadImage(bytes);
         tex.name = Path.GetFileNameWithoutExtension(file);
 
-        // Runtime-built, no asset backing: an UnloadUnusedAssets sweep that decides nothing
-        // references it frees it for good. And a player spine is a whole replacement skeleton
-        // that nothing ever repacks, so the decoded CPU copy is dead weight.
         SpineFolderLoader.Keep(tex);
         SpineFolderLoader.Seal(tex);
         return tex;
@@ -1107,8 +905,6 @@ public class PlayerSpineLoader
         SpineFolderLoader.Keep(mat);
         SpineFolderLoader.Keep(atlas);
 
-        // initialize:false - the third argument is what used to parse the whole skeleton JSON
-        // on the main thread. The warm-up thread does it instead.
         var asset = SkeletonDataAsset.CreateRuntimeInstance(skele, atlas, false, SkeletonScale);
         SpineFolderLoader.Keep(asset);
 
@@ -1116,9 +912,6 @@ public class PlayerSpineLoader
         QueueWarmUp(entry.Name, asset, atlas, skeletonText);
     }
 
-    // Hands the spine to whoever owns its kind. Deliberately NOT ChangeSelectedPlayerSpine: the
-    // old loader selected every spine as it registered it, which left the last folder worn on
-    // every boot regardless of what the player had picked. The API's own saved selection rules.
     private static void Register(SpineEntry entry)
     {
         if (entry.Asset == null) return;
@@ -1162,14 +955,7 @@ public class PlayerSpineConfig
     public string[] Skins { get; set; }
     public bool FleeceCyclingOnly { get; set; } = false;
 
-    // Set on a spine that dresses its own body: the fleece writes over Body, the poncho, the rope
-    // and the bell, which on a custom rig means lamb artwork replacing the skin's own.
     public bool DisableFleeceCycling { get; set; } = false;
 
-    // Slot names this spine never renders. Hiding a slot in the Spine editor does not export;
-    // clearing its setup attachment only lasts until the first animation that keys the slot, and
-    // the game re-attaches the crown by name. Listing the slot here replaces its attachments in the
-    // live skin with transparent copies instead, which is the one thing all three paths resolve
-    // through - see Blank() for why they are replaced rather than removed.
     public string[] HiddenSlots { get; set; } = [];
 }

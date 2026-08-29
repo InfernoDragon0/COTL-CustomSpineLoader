@@ -4,8 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Holds the authored map while it is played. The game's Node objects carry nothing of ours, so
-// level bindings are looked up by grid point.
 public static class DungeonMapPlayback
 {
     private static readonly Dictionary<int, string> LevelByPoint = [];
@@ -13,11 +11,8 @@ public static class DungeonMapPlayback
     private static string _mapName;
     private static CTDungeonMap _map;
 
-    // The Map handed to MapManager; tells "still mine" from "a scene reload rebuilt MapManager".
     private static global::Map.Map _built;
 
-    // The biome's own floor length, put back when a node without a level is entered - it is a
-    // field on the scene's BiomeGenerator, so a level's length would otherwise stick.
     private static int _savedRoomCount = -1;
 
     public static bool Active => LevelByPoint.Count > 0;
@@ -32,8 +27,6 @@ public static class DungeonMapPlayback
         _map = map;
         _mapName = map.MapName;
 
-        // The authored map has free positions; the game addresses nodes by the grid those resolve
-        // to, so the bindings are keyed on the same derived point the builder hands it.
         var points = DungeonMapBuilder.Layout(map);
         _topLayer = 0;
 
@@ -49,7 +42,6 @@ public static class DungeonMapPlayback
                            $"{LevelByPoint.Count} node(s) bound to a level.");
     }
 
-    // Remembers the map by name on entry so the exit door has something to offer.
     public static void UseMap(string mapName)
     {
         Clear();
@@ -68,7 +60,6 @@ public static class DungeonMapPlayback
                               "this machine; its exit will finish the run instead.");
     }
 
-    // True when the selector is up; false = run finished, caller shows the completion screen.
     public static bool TryShowSelector()
     {
         if (_map == null) return false;
@@ -81,7 +72,6 @@ public static class DungeonMapPlayback
             return false;
         }
 
-        // A scene load builds a fresh MapManager; rebuild the graph on the first exit after entry.
         if (manager.CurrentMap == null || !ReferenceEquals(manager.CurrentMap, _built))
         {
             _built = DungeonMapBuilder.Build(_map, out var error);
@@ -95,8 +85,6 @@ public static class DungeonMapPlayback
             DungeonMapBuilder.InstallMap(manager, _built);
         }
 
-        // Top-layer node = run over. An empty path means the first exit (the bottom node just
-        // cleared), so a one-layer map finishes here rather than opening a map with nowhere to go.
         var current = manager.CurrentMap.GetCurrentNode();
         if ((current?.point.y ?? 0) >= TopLayer())
         {
@@ -108,7 +96,6 @@ public static class DungeonMapPlayback
         return true;
     }
 
-    // The highest row the layout resolved to; reaching it ends the run.
     private static int _topLayer;
 
     private static int TopLayer() => _topLayer;
@@ -121,7 +108,6 @@ public static class DungeonMapPlayback
         _built = null;
         _topLayer = 0;
 
-        // Forgotten, not restored: the BiomeGenerator it belonged to is being left behind.
         _savedRoomCount = -1;
     }
 
@@ -131,12 +117,8 @@ public static class DungeonMapPlayback
         return LevelByPoint.TryGetValue(Key(node.point.x, node.point.y), out var name) ? name : null;
     }
 
-    // Runs after vanilla's node-entry setup but before the generation it queued (Regenerate
-    // defers everything into an MMTransition callback).
     public static void OnNodeEntered(global::Map.Node node)
     {
-        // Ours only: the patch fires for whatever map the game is showing, and a foreign node
-        // reads as "no level" - which would end the run this dungeon had just bound.
         var manager = global::Map.MapManager.Instance;
         if (_built == null || manager == null || !ReferenceEquals(manager.CurrentMap, _built))
         {
@@ -148,7 +130,6 @@ public static class DungeonMapPlayback
         var levelName = LevelNameFor(node);
         if (string.IsNullOrEmpty(levelName))
         {
-            // Whatever the last node bound stops here: the node just entered is the game's own.
             RestoreRoomCount();
             LevelPlayback.Stop();
             return;
@@ -178,12 +159,9 @@ public static class DungeonMapPlayback
             if (_savedRoomCount < 0) _savedRoomCount = biome.NumberOfRooms;
             biome.NumberOfRooms = Mathf.Max(2, level.Rooms.Count);
 
-            // A level is a floor: non-floor node types are a single fixed room, which would
-            // show only the level's entrance.
             biome.OverrideRandomWalk = false;
         }
 
-        // The map is not a door, so nothing has reset the door hand-off the room hook reads.
         Patches.DungeonPatches.ResetRoomHandoff();
 
         Plugin.Log.LogInfo($"MapEditor: node ({node.point.x},{node.point.y}) plays level " +

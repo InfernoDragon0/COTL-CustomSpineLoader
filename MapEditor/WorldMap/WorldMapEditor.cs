@@ -1,20 +1,16 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// The world editor host: tool panels overlaid on the play canvas. A separate host from
-// RuntimeMapEditor, which is scoped to a dungeon room and its camera rig.
 public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 {
     public static WorldMapEditor Instance { get; private set; }
 
     public bool IsEditing { get; private set; }
 
-    // IMapEditorHost: the name dialog blocks the editor's own input while it is up, and the map
-    // steps out of the way for it - the dialog is a vanilla menu on a canvas below this one.
     public bool ModalOpen
     {
         get => _modalOpen;
@@ -34,7 +30,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
     public CTWorldMap Map => Screen != null ? Screen.Map : null;
 
-    // Selection by id, not reference - rebuilds replace the objects underneath it.
     public string SelectedLayerId;
     public string SelectedNodeId;
 
@@ -75,14 +70,11 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         _statusMessage = message;
         _statusSeverity = severity;
 
-        // The hovered thing keeps the bar until the cursor leaves it.
         if (_hoverMessage == null) Paint(message, severity);
 
-        // No bar in play view; the screen's own transient line covers it.
         if (!IsEditing) Screen?.SetStatus(message);
     }
 
-    // Fed by every hovered widget through MapEditorHover, and by the map itself in Update.
     public void ShowHoverStatus(string message)
     {
         if (!IsEditing || string.IsNullOrEmpty(message)) return;
@@ -111,17 +103,12 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         };
     }
 
-    // Ctrl+S: save under the name the map already has, no dialog. The first press that would land
-    // on a file this session did not write only warns - the bar goes orange and the press is armed
-    // - so a quicksave can never quietly write over a map somebody else made.
     private bool _quickSaveArmed;
     private float _quickSaveArmedAt;
     private string _quickSavedName;
 
     private const float QuickSaveArmWindow = 5f;
 
-    // Called by the File tool when its dialog writes, so the next Ctrl+S under that name is not
-    // treated as clobbering.
     internal void NoteSaved(string mapName)
     {
         _quickSavedName = mapName;
@@ -172,8 +159,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         IsEditing = true;
         ModalOpen = false;
 
-        // Nodes first, and so selected first: opening the editor lands on the tool the map is
-        // actually made of. Layers dress it and the file tool is housekeeping, so both come after.
         _tools.Clear();
         _tools.Add(new Tools.WorldNodeTool(this));
         _tools.Add(new Tools.WorldLayerTool(this));
@@ -218,13 +203,11 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
         if (Screen != null && WorldMapScreen.IsOpen)
         {
-            // No message: the screen's own badge says the same thing and does not fade.
             Screen.EditMode = false;
             Screen.RefreshStates();
         }
     }
 
-    // The screen closed underneath us (Esc, scene change, travel).
     internal void OnScreenClosed(WorldMapScreen screen)
     {
         if (!IsEditing || screen != Screen) return;
@@ -263,7 +246,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         }
         catch (Exception e)
         {
-            // Once per interval, not per frame - a broken tool at 60Hz would bury the log.
             if (Time.unscaledTime >= _nextErrorAt)
             {
                 _nextErrorAt = Time.unscaledTime + 5f;
@@ -272,13 +254,10 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         }
     }
 
-    // Widgets report their own hover; the map is polled, since its nodes are picked geometrically
-    // rather than through the event system.
     private string _mapHover;
 
     private void ReportHoveredMapContent()
     {
-        // Over a panel the widgets report themselves; stepping in here would wipe what they said.
         if (PointerOverEditorUi())
         {
             _mapHover = null;
@@ -290,8 +269,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
         if (hover != null)
         {
-            // Re-shown when the bar has fallen back to the status message, so leaving a widget with
-            // the cursor still on a node reads the node again.
             if (hover != _mapHover || _hoverMessage == null) ShowHoverStatus(hover);
         }
         else if (_mapHover != null) ClearHoverStatus();
@@ -319,7 +296,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
     // ---- ui ---------------------------------------------------------------------------------
 
-    // The room editor's dock metrics, so the two editors' bottom bars line up.
     private const float ToolIconSize = 72f;
     private const int DockPadding = 8;
     private const float DockHeight = ToolIconSize + DockPadding * 2;
@@ -328,13 +304,9 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
     {
         var canvasRoot = Screen.CanvasRoot;
 
-        // Itself, not null: the shared widgets route their hover lines and their blocker rects
-        // through the attached host, and passing null used to drop both on the floor here.
         _ui.Attach(this, canvasRoot);
         _blockers.Clear();
 
-        // Dock: one flat row of icons across the bottom, the room editor's shape. F6 leaves edit
-        // mode, so there is no Play button taking up a slot.
         _dockGO = new GameObject("WorldEditor_Dock");
         _dockGO.transform.SetParent(canvasRoot, false);
         var dockRect = _dockGO.AddComponent<RectTransform>();
@@ -343,7 +315,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         dockRect.sizeDelta = new Vector2(0f, DockHeight);
         dockRect.anchoredPosition = new Vector2(0f, 12f);
 
-        // The game's own plate, as the room editor's dock wears; see VanillaChrome.
         VanillaChrome.Dress(_dockGO.AddComponent<Image>());
 
         var dockLayout = _dockGO.AddComponent<HorizontalLayoutGroup>();
@@ -355,14 +326,11 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         dockLayout.childForceExpandWidth = false;
         dockLayout.childForceExpandHeight = false;
 
-        // Horizontal only: a vertical fit collapses the plate for a frame before icons report sizes.
         var dockFitter = _dockGO.AddComponent<ContentSizeFitter>();
         dockFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         _blockers.Add(dockRect);
 
-        // Right options panel with one scroll column per tool. Top-anchored with an explicit
-        // height rather than stretched, so collapsing can shrink it to its own header.
         _optionsGO = new GameObject("WorldEditor_Options");
         _optionsGO.transform.SetParent(canvasRoot, false);
         _optionsRect = _optionsGO.AddComponent<RectTransform>();
@@ -395,8 +363,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         BuildStatusBar(canvasRoot);
     }
 
-    // The options panel's own title bar, with the room editor's collapse control: the panel covers
-    // a quarter of the map, and placing something under it should not mean leaving the tool.
     private const float OptionsWidth = 360f;
     private const float OptionsHeight = 940f;
     private const float OptionsHeaderHeight = 34f;
@@ -462,8 +428,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         if (label != null) label.text = _optionsCollapsed ? "+" : "-";
     }
 
-    // The room editor's shortcut list, in the same corner and the same key-cap style: the two
-    // editors are different hosts, but a key hint should not move between them.
     private void BuildShortcutPanel(RectTransform canvasRoot)
     {
         var go = new GameObject("WorldEditor_Shortcuts");
@@ -486,7 +450,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         var fitter = go.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Invisible container, but still a click blocker.
         _blockers.Add(_shortcutPanel);
         RefreshShortcuts();
     }
@@ -509,19 +472,15 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
                 foreach (var (key, action) in source.Shortcuts)
                     _ui.CreateKeyHint(_shortcutPanel, key, action);
 
-            // Always last: these work in every tool. Esc does what F6 does and then closes, which
-            // is not worth a row of its own.
             _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last change");
             _ui.CreateKeyHint(_shortcutPanel, "Ctrl+S", "Quicksave");
             _ui.CreateKeyHint(_shortcutPanel, "F6", "Play view");
         }
 
-        // The bar sits at the bottom: the panel grows upward from the corner it is pivoted to.
         _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   -",
             ToggleShortcutsCollapsed, 30f);
     }
 
-    // The editor's only running commentary: what the cursor is over, and what just happened.
     private void BuildStatusBar(RectTransform canvasRoot)
     {
         _statusGO = new GameObject("WorldEditor_Status");
@@ -532,7 +491,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         rect.anchorMax = new Vector2(1f, 0f);
         rect.pivot = new Vector2(0.5f, 0f);
 
-        // Above the dock, clear of the shortcut list on the left and the options panel on the right.
         rect.offsetMin = new Vector2(284f, 12f + DockHeight + 8f);
         rect.offsetMax = new Vector2(-388f, 12f + DockHeight + 8f);
         rect.sizeDelta = new Vector2(rect.sizeDelta.x, 40f);
@@ -552,8 +510,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         Paint(_statusMessage, _statusSeverity);
     }
 
-    // Drop "<Tool.Name>.png" into Assets/EditorIcons to give a tool its own icon; until then the
-    // dock borrows an icon that already means the right thing, or shows the tool's initials.
     private static Sprite DockIcon(string toolName) => toolName switch
     {
         "World File" => MapEditorIcons.GetToolIconOrNull(toolName) ?? MapEditorIcons.GetToolIconOrNull("Load Map"),
@@ -572,7 +528,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         _ => toolName
     };
 
-    // Gives a widget a line for the status bar; widgets carry none by default.
     public static void Hint(MapEditorDropdown dropdown, string text)
     {
         if (dropdown?.Root == null) return;
@@ -607,8 +562,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
             var active = candidate == tool;
             columnRoot.SetActive(active);
 
-            // The GameObject, not the Image: CreateIconButton hands back a border that starts
-            // switched off, so enabling the component alone left it invisible.
             if (ring != null) ring.gameObject.SetActive(active);
         }
 
@@ -622,18 +575,13 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
     public void RegisterUiBlocker(RectTransform rect)
     {
-        if (rect != null) _blockers.Add(rect);
+        if (rect != null && !_blockers.Contains(rect)) _blockers.Add(rect);
     }
 
-    // A widget click and the tools' own polling both see the same frame, and a dropdown list can
-    // stand outside every registered rect - so pressing a widget also shuts the world out briefly.
     public void BlockWorldClicks() => _worldClickBlockedUntil = Time.unscaledTime + 0.2f;
 
     private int _optionsRebuildFrames;
 
-    // The options panel here is a fixed height, so unlike the room editor's this only has to settle
-    // the content inside the active column. Three frames: Destroy defers to the end of the frame,
-    // and a staggered grid fill may still be adding cells.
     public void RequestOptionsResize() => _optionsRebuildFrames = 3;
 
     private void SettleOptions()
@@ -655,9 +603,16 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         if (Time.unscaledTime < _worldClickBlockedUntil) return true;
 
         var mouse = (Vector2)Input.mousePosition;
-        foreach (var blocker in _blockers)
+
+        for (var i = _blockers.Count - 1; i >= 0; i--)
         {
-            if (blocker == null || !blocker.gameObject.activeInHierarchy) continue;
+            var blocker = _blockers[i];
+            if (blocker == null)
+            {
+                _blockers.RemoveAt(i);
+                continue;
+            }
+            if (!blocker.gameObject.activeInHierarchy) continue;
             if (RectTransformUtility.RectangleContainsScreenPoint(blocker, mouse, null)) return true;
         }
         return false;
@@ -665,7 +620,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
     public Vector2 PointerContent() => Screen != null ? Screen.PointerContentPosition() : Vector2.zero;
 
-    // Picking is geometric - the editor polls input past the buttons.
     public CTWorldMapNode HitNode(Vector2 contentPoint)
     {
         if (Map == null) return null;
@@ -692,7 +646,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
         Screen?.RebuildVisuals();
     }
 
-    // Rebuilt on selection change; widgets hold their initial values otherwise.
     public void RebuildActivePanel()
     {
         foreach (var (tool, _, content, _) in _panels)
@@ -707,7 +660,6 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
 
     public void PushUndo(string description, Func<bool> undo) => History.Push(description, undo);
 
-    // A unique id in a namespace: node1, node2... skipping whatever exists.
     public string MintId(string prefix, Func<string, bool> exists)
     {
         for (var i = 1; i < 10000; i++)

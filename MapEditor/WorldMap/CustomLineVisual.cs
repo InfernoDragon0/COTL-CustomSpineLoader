@@ -6,9 +6,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// Drives a stripped clone of a vanilla DLC map connection: four authored line renderers, one per
-// state, of which exactly one is shown. The vanilla component is dropped because it reads its two
-// endpoints off DungeonWorldMapIcon components we do not keep.
 internal class CustomLineVisual : MonoBehaviour
 {
     private Transform _lineNode;
@@ -63,8 +60,6 @@ internal class CustomLineVisual : MonoBehaviour
         if (_highlighted != null) yield return _highlighted;
     }
 
-    // Endpoints are in the connection's own local space, which the screen keeps aligned with the
-    // node container so a node's anchored position can be handed over as-is.
     public void Place(Vector2 from, Vector2 to)
     {
         _from = from;
@@ -112,7 +107,6 @@ internal class CustomLineVisual : MonoBehaviour
         Show(_normal, to == WorldNodeState.Preview ? 0.5f : 1f);
     }
 
-    // Every link drawn the same in the editor: the authored shape is what is being judged there.
     public void ApplyEditView()
     {
         Show(_selectable ?? _normal, 1f);
@@ -134,8 +128,6 @@ internal class CustomLineVisual : MonoBehaviour
         wanted.UpdateRendering();
     }
 
-    // The prefab rebuilds its mesh from the points; a canvas resize can drop it, so it is re-placed
-    // whenever the object is switched back on.
     private void OnEnable()
     {
         if (_normal != null && _from != _to) Place(_from, _to);

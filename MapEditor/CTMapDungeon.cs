@@ -5,7 +5,6 @@ using MMRoomGeneration;
 
 namespace CustomSpineLoader.MapEditor;
 
-// A dungeon map *is* a dungeon: every saved map registers one of these.
 public class CTMapDungeon : CustomDungeon
 {
     public CTDungeonMap Map;
@@ -26,14 +25,11 @@ public class CTMapDungeon : CustomDungeon
         }
     }
 
-    // The start node's level is bound before the scene loads; the entry guard must not undo it.
     public override bool DrivesLevelPlayback => true;
 
-    // No caption: the map's own name is already announced on arrival.
     public override string CaptionTitle => "";
     public override string CaptionSubtext => "";
 
-    // Node blueprints carry their own enemies at exact positions; random per-room spawns fight them.
     public override void SpawnEnemies(GenerateRoom room, GenerateRoom.ConnectionTypes connectionType) { }
 
     public override void OnRoomGenerated(GenerateRoom room, GenerateRoom.ConnectionTypes connectionType)
@@ -41,14 +37,11 @@ public class CTMapDungeon : CustomDungeon
 
     public override void EnterDungeon()
     {
-        // Remembered on entry: by the time the exit door asks, the thing that knew is gone.
         DungeonMapPlayback.UseMap(Map?.MapName);
 
         base.EnterDungeon();
     }
 
-    // Bind the start node's level here, NOT in EnterDungeon: a level run is static state, and
-    // everything between the button press and the new scene can end it.
     public override void OnBiomeReady(MMBiomeGeneration.BiomeGenerator biome)
     {
         var level = StartLevel();
@@ -64,7 +57,6 @@ public class CTMapDungeon : CustomDungeon
                                   $"'{level.LevelName}': {error}");
     }
 
-    // Below the top layer the exit door picks the next floor; on it, the run is over.
     public override void ExitDoor()
     {
         if (DungeonMapPlayback.TryShowSelector()) return;
@@ -96,8 +88,6 @@ public class CTMapDungeon : CustomDungeon
     public static CTMapDungeon Find(string mapName) =>
         mapName != null && Registered.TryGetValue(mapName, out var dungeon) ? dungeon : null;
 
-    // A minted FollowerLocation cannot be handed back: a re-registered map keeps its slot and
-    // only refreshes its graph - which is what lets Save make it enterable without a restart.
     public static void RegisterAll()
     {
         foreach (var map in CTDungeonMapSerialization.LoadAll())

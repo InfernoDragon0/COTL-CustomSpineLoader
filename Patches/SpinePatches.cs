@@ -34,8 +34,6 @@ namespace CustomSpineLoader.Patches
             if (FollowerSpineLoader.CustomFollowerSkins.TryGetValue(skinName, out var skin))
             {
                 __result = skin;
-                // A save-data write from inside a lookup accessor - only when it changes
-                // something, not on every hit.
                 if (!DataManager.GetFollowerSkinUnlocked(skinName))
                     DataManager.SetFollowerSkinUnlocked(skinName);
             }
@@ -52,7 +50,6 @@ namespace CustomSpineLoader.Patches
                 foreach (var skinName in playerSpine.Skeleton.Data.Skins)
                 {
                     if (PlayerSpineLoader.FleeceRotation.Contains(skinName.Name)) continue;
-                    //skip and lamb_0
                     if (skinName.Name.ToLower().Contains("lamb_0")) continue;
                     if (skinName.Name.ToLower().Contains("lamb"))
                     {
@@ -60,7 +57,6 @@ namespace CustomSpineLoader.Patches
                         Plugin.Log.LogInfo("Added fleece skin: " + skinName.Name);
                     }
                 }
-                //add Goat, Snake, Owl if not exist
                 if (!PlayerSpineLoader.FleeceRotation.Contains("Goat"))
                 {
                     PlayerSpineLoader.FleeceRotation.Add("Goat");
@@ -77,8 +73,6 @@ namespace CustomSpineLoader.Patches
                     Plugin.Log.LogInfo("Added fleece skin: Owl");
                 }
 
-                //add custom fleece skins - from the registry, not the loaded dictionary, so
-                //a fleece spine is in the cycle before it has ever been loaded.
                 foreach (var (spineName, fleeces) in PlayerSpineLoader.FleeceCycleEntries())
                 {
                     foreach (var fleeceName in fleeces)
@@ -102,24 +96,14 @@ namespace CustomSpineLoader.Patches
                 Plugin.Log.LogInfo("Test result is " + test.name);
                 Plugin.Log.LogInfo("Test shader is " + test.shader.name);
                 
-                //Temporarily remove red emissions from custom skins
                 test.SetTextureScale("_EmissionMap", new Vector2(0f, 0f));
                 PlayerSpineLoader.LoadAllPlayerSpines(test);
             }
 
-            // The API's saved selection may not have existed yet when the mod loaded; by the
-            // time a player spawns it does, so the worn look gets a second chance to load.
             PlayerSpineLoader.EnsureSelectedLoaded();
             return true;
         }
 
-        // A spine hotswap (and a respawn, which goes through OnEnable) calls PlayerFarming.Start
-        // again. COTL_API's prefix does the swap and Initialize, but the original Start returns at
-        // its own "if (StartComplete)" guard before reaching the SetSkin() it ends with - so on
-        // every swap after the first, the skin is whatever Initialize left behind: the raw data
-        // skin, with no weapon or chore overlay, and nothing to trigger the postfix below.
-        //
-        // StartComplete is read before the original runs, because the original is what sets it.
         [HarmonyPatch(typeof(PlayerFarming), nameof(PlayerFarming.Start))]
         [HarmonyPrefix]
         private static void PlayerFarming_Start_Prefix(PlayerFarming __instance, ref bool __state)
@@ -131,13 +115,10 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void PlayerFarming_Start_Postfix(PlayerFarming __instance, bool __state)
         {
-            // A first, genuine Start already called SetSkin itself.
             if (!__state) return;
 
             var playerId = CoopManager.CoopActive && __instance.playerID == 1 ? 1 : 0;
 
-            // Limited to spines this mod loaded with a config.json, so a vanilla respawn keeps
-            // behaving exactly as it did.
             if (PlayerSpineLoader.ConfigFor(playerId) == null) return;
 
             Plugin.Log.LogInfo($"Rebuilding player {playerId + 1}'s skin after a spine swap.");
@@ -148,16 +129,11 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void PlayerFarming_SetSkin(ref Skin __result, PlayerFarming __instance, bool BlackAndWhite)
         {
-            // Coop seats four. Solo is pinned to player one because playerID is only meaningful once
-            // the coop manager is running - reading it otherwise dressed the lone player from
-            // whichever seat's settings the field happened to hold.
             var playerId = CoopManager.CoopActive ? Mathf.Clamp(__instance.playerID, 0, 3) : 0;
             var config = PlayerSpineLoader.ConfigFor(playerId);
 
             DressFleece(__instance, playerId, config);
 
-            // Always, and always last: the fleece above writes to some of the same slots, and the
-            // skin the game just rebuilt has to be stripped whether or not a fleece was applied.
             PlayerSpineLoader.HideSlots(__instance.Spine, config);
         }
 
@@ -165,7 +141,6 @@ namespace CustomSpineLoader.Patches
         {
             if (!Plugin.TransmogOn(playerId)) return;
 
-            // This spine dresses its own body; the fleece would write lamb artwork over it.
             if (config != null && config.DisableFleeceCycling) return;
 
             var fleeceIndex = PlayerSpineLoader.GetFleeceIndex(playerId);
@@ -189,8 +164,6 @@ namespace CustomSpineLoader.Patches
             var lambSpine = player.Spine;
             if (lambSpine == null) return;
 
-            // Shared with the F-keys and the F7 panel: the fleece lives on another skin, and
-            // wearing it means copying that skin's attachments into the live one.
             var lambSkin = PlayerSpineLoader.ResolveFleeceSkin(fleeceSkinName, lambSpine);
             if (lambSkin == null)
             {
@@ -205,9 +178,6 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         public static void Follower_FacePosition(Follower __instance)
         {
-            // Runs per follower per frame, and a follower mid-spawn or mid-despawn legitimately
-            // has a null Brain/Info/Spine for a few frames - an unguarded throw here surfaces out
-            // of Follower.Update once per frame per broken follower.
             var info = __instance.Brain?.Info;
             if (info == null) return;
 
@@ -251,21 +221,18 @@ namespace CustomSpineLoader.Patches
                 clothing = (FollowerClothingType)colorData.FollowerClothingType;
                 outfit = (FollowerOutfitType)colorData.FollowerOutfitType;
 
-                //snowman skin
                 if (special is FollowerSpecialType.Snowman_Bad or FollowerSpecialType.Snowman_Average or FollowerSpecialType.Snowman_Great)
                 {
                     skinName = CustomColorCommand.GetSnowmanRandomSkin(special);
                     Plugin.Log.LogInfo("Applying snowman skin: " + skinName);
                 }
 
-                //blacklisted clothing types
                 if (clothing is FollowerClothingType.Jumper or FollowerClothingType.Shirt or FollowerClothingType.Robe or FollowerClothingType.Count)
                 {
                     clothing = FollowerClothingType.Normal_1;
                     Plugin.Log.LogInfo("Clothing type was blacklisted, defaulting to Normal.");
                 }
 
-                //blacklisted outfits
                 if (outfit is FollowerOutfitType.Custom)
                 {
                     outfit = FollowerOutfitType.None;
@@ -275,7 +242,6 @@ namespace CustomSpineLoader.Patches
             return true;
         }
 
-
         [HarmonyPatch(typeof(FollowerBrain), nameof(FollowerBrain.SetFollowerCostume),
             [typeof(Skeleton), typeof(int), typeof(string), typeof(int), typeof(FollowerOutfitType),
                 typeof(FollowerHatType), typeof(FollowerClothingType), typeof(FollowerCustomisationType),
@@ -283,7 +249,6 @@ namespace CustomSpineLoader.Patches
         [HarmonyPostfix]
         private static void FollowerBrain_SetFollowerCostume(FollowerBrain __instance, Skeleton skeleton, FollowerInfo info)
         {
-            //debug dump all slots to a text file
             if (Plugin.DebugDumpFollowerSpineAtlas.Value)
             {
                 Plugin.Log.LogWarning("Debug Dump is enabled! Performance may be impacted");
@@ -313,7 +278,6 @@ namespace CustomSpineLoader.Patches
                     follower.Spine.skeleton.scaleX = colorData.scale;
                 }
                 
-
             }
             else
             {
@@ -336,7 +300,6 @@ namespace CustomSpineLoader.Patches
             CustomColorHelper.SaveCustomColors();
         }
 
-        //For building overrides
         [HarmonyPatch(typeof(Structure), nameof(Structure.Start))]
         [HarmonyPostfix]
         private static void Structure_Start(Structure __instance)

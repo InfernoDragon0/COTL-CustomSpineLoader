@@ -1,16 +1,10 @@
-﻿using System;
+using System;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor;
 
-// A one-question strip along the bottom of the editor, for anything that costs something to answer
-// wrongly - "save before closing?" above all.
-//
-// A strip rather than a name dialog, and the same shape as the dungeon screen's own: the question is
-// asked *about* the room, so a full-screen modal would hide the very thing being asked about. It
-// also keeps the editor running underneath, which a modal does not.
 public class MapEditorConfirm
 {
     private readonly GameObject _root;
@@ -37,10 +31,6 @@ public class MapEditorConfirm
         rect.sizeDelta = new Vector2(560f, 96f);
         rect.anchoredPosition = new Vector2(0f, bottom);
 
-        // The outer plate is the border; the fill sits inside it. Both are black now: the strip
-        // used to be outlined in red to say that answering it wrongly costs something, but the
-        // buttons inside it wear the game's red ribbon, and a red frame around a red button reads
-        // as one shape rather than a question and its answers.
         var border = _root.AddComponent<Image>();
         border.sprite = MapEditorUI.RoundedPlate;
         border.type = Image.Type.Sliced;
@@ -79,7 +69,6 @@ public class MapEditorConfirm
         _confirmRect.sizeDelta = new Vector2(150f, 34f);
         _confirmLabel = confirm.GetComponentInChildren<TMP_Text>();
 
-        // The middle button only appears when a question offers a third way out (discard, skip).
         _altButton = ui.CreateButton(rect, "Discard", () =>
         {
             var action = _onAlt;
@@ -118,7 +107,6 @@ public class MapEditorConfirm
         if (_altButton != null) _altButton.SetActive(threeWay);
         if (_altLabel != null && altLabel != null) _altLabel.text = altLabel;
 
-        // Two buttons meet in the middle; three make room for the one between them.
         if (_confirmRect != null) _confirmRect.anchoredPosition = new Vector2(threeWay ? -114f : -8f, 10f);
         if (_cancelRect != null) _cancelRect.anchoredPosition = new Vector2(threeWay ? 114f : 8f, 10f);
 

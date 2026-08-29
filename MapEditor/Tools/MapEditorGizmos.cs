@@ -8,16 +8,11 @@ public static class MapEditorGizmos
     public static readonly Color BoxColour = new(0.1f, 1f, 1f, 1f);
     public static readonly Color GripColour = new(1f, 0.82f, 0.15f, 0.95f);
 
-    // One-entry per-frame memo: the per-frame gizmo syncs ask for the same object's bounds two
-    // or three times a frame (box, grip, corner), and each ask walked the child renderers. Keyed
-    // by object AND frame, so nothing can ever be stale for longer than the frame it was
-    // computed in.
     private static GameObject _memoTarget;
     private static int _memoFrame = -1;
     private static bool _memoFound;
     private static Bounds _memoBounds;
 
-    // Combined bounds of every visible renderer under `go`.
     public static bool TryGetBounds(GameObject go, out Bounds bounds)
     {
         if (ReferenceEquals(go, _memoTarget) && _memoFrame == Time.frameCount)
@@ -54,8 +49,6 @@ public static class MapEditorGizmos
         return found;
     }
 
-    // Box drawn at the object's own depth rather than a fixed offset in front of everything,
-    // so it sits in the scene with the object instead of hovering over it.
     public static GameObject CreateSelectionBox(GameObject target, string name)
     {
         if (target == null || !TryGetBounds(target, out _)) return null;
@@ -65,10 +58,6 @@ public static class MapEditorGizmos
         return go;
     }
 
-    // One material for every gizmo line in the editor. Sprites/Default renders vertex colour,
-    // so each line still tints itself through startColor/endColor - and gizmos are created per
-    // selection, per door and per overlay path, so a material per line was a monotonic leak
-    // (explicitly-assigned materials are not destroyed with their renderer).
     private static Material _lineMaterial;
 
     public static Material LineMaterial()
@@ -83,10 +72,6 @@ public static class MapEditorGizmos
         return _lineMaterial;
     }
 
-    // A box with no target of its own, for callers that know their own bounds - the trigger tool
-    // marks an action's target this way, and a trigger volume has no renderer to measure.
-    // Gizmos are world objects, not canvas chrome, so hiding the editor's panels has to reach them
-    // too or a screenshot keeps every outline and volume box in it.
     private static readonly List<GameObject> Drawn = [];
     private static bool _hidden;
 
@@ -137,19 +122,15 @@ public static class MapEditorGizmos
     {
         if (box == null || target == null || !TryGetBounds(target, out var bounds)) return;
 
-        // Anchored to the target's own Z so the outline is coplanar with what it is marking.
         SetBox(box, bounds, target.transform.position.z - 0.05f);
     }
 
-    // Where a drag grip should sit: the centre of the object's footprint.
     public static Vector3 GripPosition(GameObject target)
     {
         if (target == null) return Vector3.zero;
         return TryGetBounds(target, out var bounds) ? bounds.center : target.transform.position;
     }
 
-    // Where a resize node should sit: the top-right of the same footprint, so the node is on the
-    // corner of the outline the box already draws.
     public static Vector3 CornerPosition(GameObject target)
     {
         if (target == null) return Vector3.zero;
@@ -158,8 +139,6 @@ public static class MapEditorGizmos
             : target.transform.position;
     }
 
-    // Where a depth node should sit: the opposite top corner, so it is on the outline like the
-    // resize node and cannot be mistaken for it or for the grip in the middle.
     public static Vector3 FarCornerPosition(GameObject target)
     {
         if (target == null) return Vector3.zero;

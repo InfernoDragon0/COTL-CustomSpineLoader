@@ -10,27 +10,17 @@ using UnityEngine;
 
 namespace CustomSpineLoader.ModUI.MenuEditor;
 
-// The one loading path for a preset's art, plus the list of palettes the game has to offer.
-// Everything built here is Keep()'d: it has no file behind it, and the UnloadUnusedAssets sweep
-// that runs on every scene change would free it out from under the menu.
 public static class MenuAssets
 {
     private static readonly Dictionary<string, Sprite> Sprites = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, SkeletonDataAsset> Skeletons = new(StringComparer.OrdinalIgnoreCase);
 
-    // Negative results are cached too, or a missing file would be re-read on every menu load.
     private static readonly HashSet<string> Failed = new(StringComparer.OrdinalIgnoreCase);
 
     // ---- palettes -------------------------------------------------------------------------------
 
     private static readonly List<Palette> Palettes = [];
 
-    // Every Palette the game has loaded, by name. Found rather than listed: the menu names three of
-    // them, but the comic menu, the DLC intro and the room managers each carry their own, and a
-    // player picking a look has no reason to be limited to the three the title screen ships with.
-    //
-    // The same FindObjectsOfTypeAll trick VanillaWidgets uses for loose sprites, and with the same
-    // hold: an asset nothing else references is a candidate for the next unload sweep.
     public static List<Palette> AllPalettes()
     {
         Palettes.RemoveAll(p => p == null);
@@ -42,8 +32,6 @@ public static class MenuAssets
             {
                 if (palette == null) continue;
 
-                // The shader reads Texture and Texture.height unconditionally once HasTexture is
-                // set, so one without art is not something to offer.
                 if (!palette.HasTexture || palette.Texture == null) continue;
 
                 palette.hideFlags |= HideFlags.DontUnloadUnusedAsset;
@@ -81,26 +69,28 @@ public static class MenuAssets
 
     // ---- recolouring ----------------------------------------------------------------------------
 
-    // One palette of our own, rewritten in place, never a new asset per slider step - and never the
-    // game's own Palette, which is a ScriptableObject shared with every gameplay scene.
     private static Palette _tinted;
     private static Texture2D _tintedTexture;
     private static Palette _tintedFrom;
     private static Color[] _sourcePixels;
 
-    public static bool IsNeutral(float hueShift, float saturation, float brightness) =>
+    private static float _tintedHue = float.NaN;
+    private static float _tintedSaturation;
+    private static float _tintedBrightness;
+
+    private static bool IsNeutral(float hueShift, float saturation, float brightness) =>
         Mathf.Approximately(hueShift, 0f) &&
         Mathf.Approximately(saturation, 1f) &&
         Mathf.Approximately(brightness, 1f);
 
-    // The chosen palette with every colour in it shifted. This is the only way to change the gold
-    // field: the Stylizer maps the whole screen through the palette's lookup texture, so the
-    // background's colour is an entry in that table rather than a property of anything in the
-    // scene. Shifting the table shifts the menu.
     public static Palette Recoloured(Palette source, float hueShift, float saturation, float brightness)
     {
         if (source == null || source.Texture == null) return source;
         if (IsNeutral(hueShift, saturation, brightness)) return source;
+
+        if (_tinted != null && _tintedTexture != null && _tintedFrom == source &&
+            _tintedHue == hueShift && _tintedSaturation == saturation && _tintedBrightness == brightness)
+            return _tinted;
 
         try
         {
@@ -155,6 +145,10 @@ public static class MenuAssets
             _tinted.MixedColorCount = source.MixedColorCount;
             _tinted.Colors = source.Colors;
             _tinted.HasTexture = true;
+
+            _tintedHue = hueShift;
+            _tintedSaturation = saturation;
+            _tintedBrightness = brightness;
             return _tinted;
         }
         catch (Exception e)
@@ -164,8 +158,6 @@ public static class MenuAssets
         }
     }
 
-    // Palette lookup textures are import-time assets and are almost never marked readable, so
-    // GetPixels throws on them. Blitting through a RenderTexture is the way to read one anyway.
     private static Color[] ReadablePixels(Texture2D texture)
     {
         var previous = RenderTexture.active;
@@ -233,8 +225,6 @@ public static class MenuAssets
         }
     }
 
-    // The menu's own skeleton is a world-space SkeletonAnimation authored at 0.005, which is
-    // SpineFolderLoader's own default - so a folder spine drops straight in at the right size.
     public static SkeletonDataAsset GetSkeleton(string presetName, string folderName)
     {
         if (string.IsNullOrWhiteSpace(presetName) || string.IsNullOrWhiteSpace(folderName)) return null;
@@ -257,7 +247,6 @@ public static class MenuAssets
         return data;
     }
 
-    // The png files sitting in a preset's folder, for the title picker.
     public static List<string> ImageNames(string presetName)
     {
         var names = new List<string>();
@@ -280,7 +269,6 @@ public static class MenuAssets
         return names;
     }
 
-    // The subfolders of a preset that hold a spine, for the centrepiece picker.
     public static List<string> SpineFolderNames(string presetName)
     {
         var names = new List<string>();
@@ -304,7 +292,6 @@ public static class MenuAssets
         return names;
     }
 
-    // A preset's art can change on disk between menu loads, and a renamed preset carries copies.
     public static void Forget()
     {
         Sprites.Clear();

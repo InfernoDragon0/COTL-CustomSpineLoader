@@ -11,7 +11,6 @@ namespace CustomSpineLoader.APIHelper;
 public class CustomItemLoader : Loader<CustomItemConfig>
 {
     public static List<InventoryItem.ITEM_TYPE> loadedItems = []; 
-    //might need to keep track of the name as well, dictionary, for custom items to be used as recipe items
 
     public CustomItemLoader() : base("CustomInventoryItems") { }
 
@@ -135,8 +134,6 @@ public class CultTweakerCustomItem(
     public override int RefineryInputQty => _refineryInputQty;
     public override float CustomRefineryDuration => _customRefineryDuration;
 
-    // Cached: these getters are read on every UI redraw, and each call used to decode the
-    // PNG from disk into a fresh texture that nothing ever destroyed.
     private Sprite _cachedSprite;
     private Sprite CachedSprite => _cachedSprite ??= TextureHelper.CreateSpriteFromPath(_spritePath);
 

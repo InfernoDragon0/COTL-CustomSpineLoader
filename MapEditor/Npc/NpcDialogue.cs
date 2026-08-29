@@ -10,7 +10,6 @@ namespace CustomSpineLoader.MapEditor.Npc;
 [Serializable]
 public class NpcDialogue
 {
-    // Node id the conversation opens with.
     public string Start = "";
     public List<NpcDialogueNode> Nodes = [];
 
@@ -95,7 +94,6 @@ public class NpcDialogue
         }
         catch (Exception)
         {
-            // Source not ready to answer; fall through and (re)register.
         }
 
         RegisterTerms(npc);
@@ -130,7 +128,6 @@ public class NpcDialogue
                     node.Choices[i].Text);
         }
 
-        // One dictionary rebuild for the whole NPC, not one per term.
         source.UpdateDictionary();
     }
 
@@ -140,8 +137,6 @@ public class NpcDialogue
         {
             var data = source.AddTerm(term, eTermType.Text);
 
-            // Sized when the term was first created; a source whose language list grew since
-            // would index out of range below.
             var languageCount = Math.Max(1, source.mLanguages?.Count ?? 1);
             if (data.Languages == null || data.Languages.Length < languageCount)
                 Array.Resize(ref data.Languages, languageCount);
@@ -158,7 +153,6 @@ public class NpcDialogue
         }
     }
 
-    // The registered term for the NPC's display name; set by RegisterTerms.
     [NonSerialized] public string NameTerm;
 }
 
@@ -168,8 +162,6 @@ public class NpcDialogueNode
     public string Id = "";
     public List<NpcDialogueLine> Lines = [];
 
-    // Node to continue into when the last line finishes and there are no choices; null ends the
-    // conversation.
     public string Next;
 
     public List<NpcDialogueChoice> Choices;
@@ -181,11 +173,8 @@ public class NpcDialogueLine
 {
     public string Text = "";
 
-    // Spine animation played while this line types; empty falls back to the NPC's TalkAnimation.
     public string Animation = "";
 
-    // true = the animation loops for the whole line; false = it plays once, then the skeleton
-    // drops back to the NPC's idle (the game queues the default animation behind a one-shot).
     public bool Loop = true;
 
     [NonSerialized] public string Term;
@@ -210,8 +199,6 @@ public class NpcDialogueLineConverter : JsonConverter<NpcDialogueLine>
         };
     }
 
-    // Reading is the whole job (configs are authored by hand); letting the default writer run
-    // through this converter again would recurse.
     public override bool CanWrite => false;
 
     public override void WriteJson(JsonWriter writer, NpcDialogueLine value, JsonSerializer serializer)
@@ -224,7 +211,6 @@ public class NpcDialogueChoice
     public string Id = "";
     public string Text = "";
 
-    // Node this choice branches to; null ends the conversation.
     public string Next;
 
     [NonSerialized] public string Term;

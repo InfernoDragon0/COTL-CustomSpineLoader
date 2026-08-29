@@ -4,19 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// Addressing something that lives INSIDE a room prefab.
-//
-// Not everything the game ships has an address of its own. NPCs have none at all, and neither do
-// the bosses that are built into their arenas - Narinder and the two Guardians stand under a
-// "Death Cat Controller" inside Boss Room Dungeon 1_6, and nothing under Assets/Prefabs/Enemies
-// will ever name them. What they do have is a stable position in a prefab that IS addressable, so
-// that is what gets written down: the room's key and the path to the child within it.
-//
-// The important property is that a child of a prefab ASSET instantiates on its own. Unity hands
-// back that subtree and nothing else, so the character comes across without the room around it.
-//
-// The NPC tool has worked this way since it was written; this is the same grammar, lifted out so
-// the enemy tool can use it too and the two cannot drift apart on what a key means.
 public static class RoomChildPrefabs
 {
     public const string Prefix = "room:";
@@ -40,7 +27,6 @@ public static class RoomChildPrefabs
         return true;
     }
 
-    // The child's own name: the path is how to find it, not what to call it.
     public static string Label(string key)
     {
         if (!TryParse(key, out _, out var path)) return null;
@@ -49,8 +35,6 @@ public static class RoomChildPrefabs
         return slash >= 0 ? path.Substring(slash + 1) : path;
     }
 
-    // Key -> the prefab child, for thumbnails, the cursor preview and placement alike, so all three
-    // agree on what a key points at.
     public static IEnumerator ResolveRoutine(string key, Action<GameObject> done)
     {
         if (!TryParse(key, out var roomKey, out var childPath))

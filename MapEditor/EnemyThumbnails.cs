@@ -9,27 +9,14 @@ namespace CustomSpineLoader.MapEditor;
 
 public static class EnemyThumbnails
 {
-    // Source resolution per icon. The grid draws them at 88px.
-    // Big enough that hovering a cell can blow the thumbnail up beside the panel without it turning
-    // to mush: the preview box is ~300 units across, and a 96px bake was being stretched three
-    // times over. The cost is atlas memory - a page is Cell x Cell x Columns^2 of RGBA32 - which is
-    // why the columns came down with the cell size going up, and why these are still dropped with
-    // the scene.
     private const int Cell = 256;
 
-    // 5x5 icons to a page. Small pages keep each Texture2D.Apply cheap, which matters because
-    // ours are applied progressively rather than all at once like the nameplate atlas.
-    // Four rather than five, so a page lands on 1024 square rather than 1280.
     private const int Columns = 4;
     private const int PageSize = Cell * Columns;
     private const int SlotsPerPage = Columns * Columns;
 
-    // One render every few frames. Low enough to stay invisible as a hitch, high enough that a
-    // group of ~150 finishes while the user is still looking at it.
     private const int FramesBetween = 2;
 
-    // Backstop for the case where every layer is named: nothing exists this far out, so the
-    // staging camera sees only the subject.
     private static readonly Vector3 Stage = new(5000f, 5000f, 0f);
 
     private static readonly Dictionary<string, Sprite> _cache = [];
@@ -45,8 +32,6 @@ public static class EnemyThumbnails
         public Func<string, Action<GameObject>, IEnumerator> Resolver;
     }
 
-    // resolver: how to turn this key into a prefab, for callers whose keys are not plain
-    // addressable paths (the NPC tool addresses characters living inside a room prefab).
     public static void Request(MonoBehaviour host, string key, bool isCustom, Action<Sprite> onReady,
         Func<string, Action<GameObject>, IEnumerator> resolver = null)
     {
@@ -59,7 +44,6 @@ public static class EnemyThumbnails
         if (host != null && !_draining) host.StartCoroutine(Drain(host));
     }
 
-    // Called when the grid is rebuilt: the pending cells no longer exist.
     public static void CancelPending() => _queue.Clear();
 
     public static void ClearSceneScopedCache()
@@ -149,23 +133,16 @@ public static class EnemyThumbnails
             _camera.clearFlags = CameraClearFlags.SolidColor;
             _camera.backgroundColor = new Color(0f, 0f, 0f, 0f);
             _camera.targetTexture = _target;
-            // Explicit, and after the target texture: a fresh camera starts on the screen's
-            // aspect, which squeezed every skeleton horizontally into the square render texture.
             _camera.aspect = 1f;
             _camera.allowHDR = false;
             _camera.allowMSAA = false;
             _camera.useOcclusionCulling = false;
-            // Rendered by hand, never as part of the frame.
             _camera.enabled = false;
 
-            // Layer isolation is how the game's own bake camera guarantees it photographs only
-            // its subject; parking far out is only the fallback when no layer is spare.
             if (_stageLayer >= 0) _camera.cullingMask = 1 << _stageLayer;
         }
     }
 
-    // Shared with the other off-screen rigs - see OffscreenLayer, which says once what this used to
-    // say once per thumbnail.
     private static int FindFreeLayer() => OffscreenLayer.Value;
 
     private static IEnumerator Render(ThumbRequest request)
@@ -198,7 +175,6 @@ public static class EnemyThumbnails
 
             MakeUnlit(subject, borrowed);
 
-            // Barely any headroom: the subject should fill its tile.
             _camera.orthographicSize = Mathf.Max(bounds.extents.x, bounds.extents.y) * 1.02f + 0.01f;
             _camera.transform.position = new Vector3(bounds.center.x, bounds.center.y, -10f);
             _camera.Render();
@@ -225,8 +201,6 @@ public static class EnemyThumbnails
         if (_shadersResolved) return;
         _shadersResolved = true;
 
-        // Both are known to be in this build: the mod already builds materials from
-        // Spine/Skeleton for custom skins, and from Sprites/Default for its gizmo lines.
         _spineUnlit = Shader.Find("Spine/Skeleton");
         _spriteUnlit = Shader.Find("Sprites/Default");
 
@@ -234,13 +208,6 @@ public static class EnemyThumbnails
             Plugin.Log.LogInfo("MapEditor: no unlit shader available; thumbnails follow the room's lighting.");
     }
 
-    // Swaps every renderer under the subject onto an unlit copy of its own material, so the room's
-    // lighting has no say in the picture. `borrowed` collects the copies for the caller to destroy.
-    //
-    // `restore` is for a caller working on a *live* object rather than a staged throwaway: it
-    // records each renderer's original material array so the swap can be put back in the same call.
-    // The selection preview needs that; the thumbnail rig, which photographs a prefab it is about
-    // to delete, does not.
     internal static void MakeUnlit(GameObject subject, List<Material> borrowed,
         List<(Renderer Renderer, Material[] Originals)> restore = null)
     {
@@ -251,12 +218,9 @@ public static class EnemyThumbnails
         {
             if (renderer == null) continue;
 
-            // A skeleton's mesh wants the Spine shader's blending; anything else is a sprite.
             var isSkeleton = renderer.GetComponent<SkeletonRenderer>() != null;
             var shader = (isSkeleton ? _spineUnlit : _spriteUnlit) ?? _spineUnlit ?? _spriteUnlit;
 
-            // sharedMaterials hands back a fresh array each time, so this is a safe record of what
-            // was there rather than a view onto what is about to change.
             var sources = renderer.sharedMaterials;
             restore?.Add((renderer, sources));
             var copies = new Material[sources.Length];
@@ -266,8 +230,6 @@ public static class EnemyThumbnails
                 if (sources[i] == null) continue;
                 try
                 {
-                    // Copy first, then swap the shader: every property the unlit shader shares
-                    // with the original (_MainTex above all) carries over by name.
                     var copy = new Material(sources[i]) { shader = shader, hideFlags = HideFlags.HideAndDontSave };
                     copies[i] = copy;
                     borrowed.Add(copy);
@@ -291,8 +253,6 @@ public static class EnemyThumbnails
             return BuildGhostSubject(prefab, key, isCustom);
 
         var go = new GameObject("CultTweaker_ThumbnailSubject");
-        // Inactive first, so Awake runs once with the skeleton already assigned rather than
-        // once empty and again on our Initialize.
         go.SetActive(false);
         go.transform.SetParent(_stageRoot, false);
 
@@ -310,8 +270,6 @@ public static class EnemyThumbnails
             return BuildGhostSubject(prefab, key, isCustom);
         }
 
-        // Enemies are authored at wildly different skeleton scales; the prefab's own transform
-        // scale is part of how the enemy actually looks.
         if (source != null)
         {
             var scale = source.transform.lossyScale;
@@ -323,7 +281,6 @@ public static class EnemyThumbnails
 
         try
         {
-            // Nothing ticks at timeScale 0, so the pose and the mesh are pushed by hand.
             spine.Initialize(true);
             spine.Skeleton?.SetToSetupPose();
             spine.Update(0f);
@@ -337,8 +294,6 @@ public static class EnemyThumbnails
         return go;
     }
 
-    // Which skeleton data to photograph: a custom enemy's override wins, otherwise the prefab's
-    // own controller skeleton (the same field the cursor preview uses).
     private static SkeletonAnimation FindSourceSkeleton(GameObject prefab, string key, bool isCustom,
         out SkeletonDataAsset dataAsset, out string skin)
     {
@@ -362,7 +317,6 @@ public static class EnemyThumbnails
         return source;
     }
 
-    // Last resort for non-Spine enemies: the old full-prefab ghost.
     private static GameObject BuildGhostSubject(GameObject prefab, string key, bool isCustom)
     {
         var ghost = MapEditorGhost.Create(prefab, null, "CultTweaker_Thumbnail", disableBehaviours: true);
@@ -374,8 +328,6 @@ public static class EnemyThumbnails
         var spine = EnemyTool.MainSkeleton(ghost);
         if (spine != null)
         {
-            // The mimic prefabs carry extra skeleton renderers for ghost/afterimage effects;
-            // they would double-expose the thumbnail.
             foreach (var other in ghost.GetComponentsInChildren<SkeletonRenderer>(true))
             {
                 if (other == null || ReferenceEquals(other, spine)) continue;
@@ -397,7 +349,6 @@ public static class EnemyThumbnails
             }
         }
 
-        // Ghosts are faded for use as a cursor preview; a thumbnail wants full strength.
         foreach (var renderer in ghost.GetComponentsInChildren<SpriteRenderer>(true))
             renderer.color = new Color(renderer.color.r, renderer.color.g, renderer.color.b, 1f);
 
@@ -489,7 +440,6 @@ public static class EnemyThumbnails
             wrapMode = TextureWrapMode.Clamp
         };
 
-        // Undrawn slots must be transparent, not whatever the allocation happened to contain.
         var blank = new Color32[PageSize * PageSize];
         page.SetPixels32(blank);
         page.Apply(false, false);

@@ -24,22 +24,10 @@ public class CustomDungeon
     public HUD_DisplayName.Positions TitleTextPosition => HUD_DisplayName.Positions.Centre;
     public virtual int NumRooms => 3;
 
-    // True for dungeons that bind a level blueprint before the scene loads. Entering any other
-    // dungeon ends a level run in progress, so its state cannot leak into an unrelated scene -
-    // see BiomeGenerator_OnEnable.
     public virtual bool DrivesLevelPlayback => false;
 
-    // Which of the vanilla difficulty layers this dungeon's rooms draw their encounters from,
-    // 1 (easiest) to 4. It matters more than it looks: see EnterDungeon.
     public virtual int DungeonLayer => 1;
 
-    // The caption a dungeon announces itself with, in the trigger tool's screen-text style: a
-    // title and a smaller line under it, bottom left.
-    //
-    // The default is the editor's own name, because a plain CustomDungeon is the room things are
-    // built in. A dungeon that is somewhere the player was *sent* rather than somewhere the
-    // author is standing overrides these back to empty - the game already puts a dungeon's name
-    // on screen when you arrive, and a second announcement over the top of it is noise.
     public virtual string CaptionTitle => "The Worldshaper";
 
     public virtual string CaptionSubtext =>
@@ -47,15 +35,10 @@ public class CustomDungeon
 
     public virtual float CaptionSeconds => 5f;
 
-    // Deliberately not shown at biome-ready: the room is not built then, the fade is still up,
-    // and the player is parked. A caption that lands while the screen is black has been shown to
-    // nobody. This waits for the transition to end and the player to have control back, then
-    // holds a beat so the caption arrives after the room, not with it.
     public static IEnumerator ShowCaptionWhenPlayable(CustomDungeon dungeon)
     {
         if (dungeon == null || string.IsNullOrEmpty(dungeon.CaptionTitle)) yield break;
 
-        // Realtime: the transition itself runs at timeScale 0.
         var deadline = Time.unscaledTime + 30f;
 
         while (MMTransition.IsPlaying && Time.unscaledTime < deadline) yield return null;
@@ -107,8 +90,6 @@ public class CustomDungeon
 
     public virtual void EnterDungeon()
     {
-        // Whatever run the world map thought it was watching, this entry is a new one; only
-        // the map itself re-arms tracking (right after this call returns).
         MapEditor.WorldMapProgress.AbortTracking();
 
         CustomDungeonManager.EnteringCustomDungeon = this.Location;
@@ -124,12 +105,6 @@ public class CustomDungeon
             DataManager.Instance.CurrentDLCNodeType = DungeonWorldMapIcon.NodeType.Dungeon5_MiniBoss;
         Interaction_BaseDungeonDoor.GetFloor(this.Location);
 
-        // GetFloor reads the layer out of save data keyed by location, and a minted location has
-        // none - DataManager.GetDungeonLayer returns 0 for anything it does not recognise, and
-        // NextDungeonLayer stores that as the current layer. Every island encounter then reports
-        // "not available on this layer" (IslandPiece.AvailableOnLayer has no case for 0), so a
-        // vanilla floor in a custom dungeon generates rooms with nothing in them at all - no
-        // enemies, no resources, and the generator logging that it has run out of encounters.
         if (!GameManager.DungeonUseAllLayers)
         {
             GameManager.CurrentDungeonLayer = UnityEngine.Mathf.Clamp(this.DungeonLayer, 1, 4);
@@ -140,32 +115,10 @@ public class CustomDungeon
         GameManager.GetInstance().OnConversationNew();
     }
 
-    // Called from BiomeGenerator.OnEnable in the dungeon's own scene, once per entry, before
-    // any room is generated. That is the last point at which state can be set up for the run and
-    // the first at which nothing left over from the scene being left behind can tear it down -
-    // anything bound before the transition has to survive a scene load and every teardown along
-    // the way, and a dungeon that binds a level did not.
     public virtual void OnBiomeReady(BiomeGenerator biome) { }
 
-    // Called once per newly generated room, for every connection type (SpawnEnemies is only
-    // invoked for True rooms). Subclasses that build room content from data - CTLevelDungeon
-    // applying node blueprints - hook here. Default: vanilla-generated rooms stay as they are.
     public virtual void OnRoomGenerated(GenerateRoom room, ConnectionTypes connectionType) { }
 
-    // Puts a spawned enemy inside the room it belongs to, which is not cosmetic: it is the
-    // difference between a room that locks and one that does not.
-    //
-    // BiomeGenerator decides whether to close the doors on arrival by asking the room itself what
-    // is in it - `CurrentRoom.generateRoom.GetComponentsInChildren<UnitObject>()`, looking for one
-    // on Team2 - and only calls RoomLockController.CloseAll when that finds something. An enemy
-    // spawned at the right world position but parented somewhere outside the room's hierarchy is
-    // invisible to that question, so the room fills with monsters and the game goes on believing it
-    // is empty. CustomEnemyManager.Spawn has no idea which room the position it was handed belongs
-    // to, so it is on the caller to say.
-    //
-    // CustomTransform is the child GenerateRoom parents its own room content to, and it hangs off
-    // the room, so anything under it is found by that check. worldPositionStays, because the
-    // position is already the one that was wanted.
     private static void AdoptIntoRoom(GenerateRoom room, UnityEngine.Component spawned)
     {
         if (room == null || spawned == null) return;
@@ -183,19 +136,6 @@ public class CustomDungeon
         {
             case ConnectionTypes.True:
                 Plugin.Log.LogInfo("Spawning true test");
-                // Nothing of ours to add. This used to declare the room complete here, and that
-                // is what stopped vanilla-populated rooms locking.
-                //
-                // RoomCompleted does not just open doors: it sets `CurrentRoom.Completed` on the
-                // BiomeRoom, and BiomeGenerator.PlacePlayer wraps its ENTIRE arrival block in
-                // `if (!CurrentRoom.Completed)` - the enemy count, the walk-in, and the CloseAll
-                // with it. Calling it from here, during generation, told the game the room was
-                // finished before the player had even arrived, so the arrival never looked at what
-                // was standing in the room. The vanilla monsters the encounter system had just
-                // spawned were there the whole time; nothing ever asked.
-                //
-                // The room being empty is a question that can only be answered after it is built
-                // and arrived in, so it is asked there instead - see RoomLockNet.
                 if (NormalEnemyList.Count == 0)
                 {
                     Plugin.Log.LogInfo("No custom enemies for this dungeon; leaving the room's " +
@@ -209,20 +149,15 @@ public class CustomDungeon
                     var pos = GetRandomWalkablePosition();
                     var spawned = CustomEnemyManager.Spawn(enemy, pos);
 
-                    // COTL_API returns null while the enemy's prefab is still loading - which is
-                    // exactly this mod's own async build path. A throw here would kill the room's
-                    // generation coroutine; a missing enemy is the lesser harm.
                     if (spawned == null || spawned.health == null)
                     {
                         Plugin.Log.LogWarning($"Enemy '{enemy}' could not be spawned yet (prefab still building?); skipped.");
                         continue;
                     }
 
-                    // This is what makes the room lock, and leaving it out is why it did not.
                     AdoptIntoRoom(room, spawned);
 
                     //TODO: destroy the script controller, and spine components
-                    // then, apply a new spine component and the script controller from the enemy
 
                     spawned.health.OnDie += (Attacker,
                         AttackLocation,
@@ -260,9 +195,7 @@ public class CustomDungeon
                     if (roomLockController1 != null)
                     {
                         Plugin.Log.LogInfo($"Found RoomLockController for enemy position correction: {roomLockController1.name}");
-                        //spawn in bounds
                         spawned.transform.position = roomLockController1.BlockingCollider.transform.position - roomLockController1.BlockingCollider.transform.up * 0.5f;
-                        //update the position to the playerposition
                     }
                     else
                     {
@@ -299,7 +232,6 @@ public class CustomDungeon
             if (tries <= 1)
             {
                 Plugin.Log.LogWarning("Failed to find door for enemy repositioning after multiple attempts, placing enemy in fallback position.");
-                //check if 0th door exists in door.doors
                 if (Door.Doors.Count > 0)
                 {
                     var fallbackDoor = Door.Doors[0];
@@ -327,12 +259,8 @@ public class CustomDungeon
     
     public virtual void ExitDoor()
     {
-        // The one success-only choke point: every run type funnels its victory through here,
-        // and death never reaches it - so this is where a world map node earns its completion.
         MapEditor.WorldMapProgress.NotifyRunSucceeded();
 
-        //Default behavior for exiting the final room is to exit to base.
-        //you can override this behavior to exit into a different scene for a cutscene, etc.
         MonoSingleton<UIManager>.Instance.ShowDeathScreenOverlay(UIDeathScreenOverlayController.Results.Completed);
         AudioManager.Instance.PlayOneShot("event:/pentagram_platform/pentagram_platform_curse") ;
         AudioManager.Instance.PlayOneShot("event:/ui/heretics_defeated");

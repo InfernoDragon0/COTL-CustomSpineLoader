@@ -3,24 +3,14 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// The editor's marker for the selected layer: four thin edges drawn around it. It is NOT parented
-// to the layer - it hangs from the screen's gizmo root, which is the last thing drawn, and copies
-// the layer's transform each frame. Parented to the layer it would draw at that layer's depth, and
-// anything in front of the layer would cover the frame around it.
 internal class WorldMapSelectionFrame : MonoBehaviour
 {
     private const float Thickness = 3f;
 
-    // How big the frame draws, in screen pixels, around a layer whose rect says nothing about what
-    // it draws.
     private const float FallbackScreenSize = 140f;
 
-    // The floor the frame shrinks to, in screen pixels. Also the tools' grab box (they halve it),
-    // so what is outlined is exactly what can be clicked however far a layer is scaled down.
     internal const float MinScreenSize = 68f;
 
-    // Spine layers get a bigger one: the skeleton draws well outside the rect it reports, so a box
-    // that fits a sprite reads as too tight around a spine.
     internal const float SpineMinScreenSize = 110f;
 
     internal static float MinFor(CTWorldMapLayer layer) =>
@@ -55,9 +45,6 @@ internal class WorldMapSelectionFrame : MonoBehaviour
         return frame;
     }
 
-    // Position, rotation and scale copied from the layer, since the frame no longer inherits them.
-    // The centre is taken from the rect rather than the pivot, so an off-centre pivot still frames
-    // what is drawn.
     private void Follow()
     {
         if (_target == null || _rect == null) return;
@@ -65,14 +52,9 @@ internal class WorldMapSelectionFrame : MonoBehaviour
         _rect.position = _target.TransformPoint(_target.rect.center);
         _rect.rotation = _target.rotation;
 
-        // Both roots sit under the content rect at identity, so the layer's own local scale is the
-        // frame's too - including a negative x from a flip, which only mirrors the box.
         _rect.localScale = _target.localScale;
     }
 
-    // Sized in screen pixels rather than the layer's own units, and re-run every frame: the scale
-    // slider moves the layer under the frame, and a frame that tracked it down to nothing would
-    // leave nothing to aim at.
     private void ApplyGeometry()
     {
         if (_target == null || _rect == null) return;
@@ -80,7 +62,6 @@ internal class WorldMapSelectionFrame : MonoBehaviour
         var scale = Mathf.Max(0.0001f, Mathf.Abs(_target.lossyScale.x));
         var size = _target.rect.size;
 
-        // A rect that says nothing (a spine graphic's does not) gets a frame of its own size.
         if (size.x <= 1f || size.y <= 1f)
             size = new Vector2(FallbackScreenSize, FallbackScreenSize) / scale;
         else
@@ -121,17 +102,12 @@ internal class WorldMapSelectionFrame : MonoBehaviour
 
         var image = go.AddComponent<Image>();
 
-        // The room editor's selection colour: one editor's gizmos should not be a different
-        // colour from the other's.
         image.color = CustomSpineLoader.MapEditor.Tools.MapEditorGizmos.BoxColour;
 
-        // Scenery: the tools pick layers geometrically and must not be shadowed by the marker.
         image.raycastTarget = false;
         return rect;
     }
 
-    // The frame rides the layer's own scale, so a layer scaled down to a fifth would draw a
-    // hairline; the edges are divided by that scale to keep an even weight on screen.
     private void ApplyThickness()
     {
         if (_target == null) return;
@@ -149,8 +125,6 @@ internal class WorldMapSelectionFrame : MonoBehaviour
 
     private void LateUpdate()
     {
-        // A redraw replaces the layer objects; the frame outlives its target for a frame and then
-        // has nothing to mark. The screen makes a new one for the new object.
         if (_target == null)
         {
             Destroy(gameObject);

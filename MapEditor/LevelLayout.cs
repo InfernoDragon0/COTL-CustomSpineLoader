@@ -14,30 +14,6 @@ public enum LevelSide
     West
 }
 
-// Turns an authored level grid into the biome the game actually builds.
-//
-// Vanilla lays a floor out by random walk: drop a room at the origin, then NumberOfRooms times pick
-// a random room already placed and a random one of four directions, adding a neighbour wherever the
-// cell is free (BiomeGenerator.CreateRandomWalk). Entrance and exit are then the two furthest-apart
-// dead ends of whatever that produced. An author gets to say how many rooms and what is inside
-// them, and nothing at all about the shape.
-//
-// The game already has the switch for authoring a shape instead: `OverrideRandomWalk`. It is not a
-// back door - MapManager.EnterNode sets it for every dungeon-map node that is not a random floor,
-// and the DLC intro dungeon runs on it. Setting it makes every procedural stage stand down where it
-// starts: PlaceEntranceAndExit, GetCriticalPath, PlaceLockAndKey, PlaceStoryRooms,
-// PlaceDynamicCustomRooms and PlaceFixedCustomRooms all check it and return.
-//
-// So this builds the room graph itself and raises that flag, and the rest of generation carries on
-// as normal on top of it. Room shape and doors follow from the connection types alone -
-// GenerateRoom.Generate(seed, N, E, S, W) walks CreatePaths and PlaceDoors off them - so authoring
-// the sides is authoring the room.
-//
-// What it does NOT do is use vanilla's own `OverrideRooms` list. That path marks every room custom
-// and loads a prefab by Addressable path for it, which is right for the fixed prefab rooms it was
-// built for and wrong here: an authored level wants ordinary generated rooms, with islands and
-// doors, that a blueprint is then pasted onto. Those are the rooms InstantiatePrefabs makes for
-// anything left `IsCustom == false`.
 public static class LevelLayout
 {
     // ---- reading a layout ------------------------------------------------------------------------
@@ -55,8 +31,6 @@ public static class LevelLayout
         return null;
     }
 
-    // The room's index in the level, which is also its slot for playback. -1 for a cell the level
-    // has nothing on.
     public static int SlotFor(CTLevelBlueprint level, int x, int y)
     {
         if (level == null) return -1;
@@ -89,8 +63,6 @@ public static class LevelLayout
     public static readonly LevelSide[] Sides =
         [LevelSide.North, LevelSide.East, LevelSide.South, LevelSide.West];
 
-    // North is +Y and east is +X, which on a grid drawn face-on is up and right. The compass is the
-    // biome's own vocabulary and stays in the data; on screen it only ever confused the issue.
     public static string DescribeSide(LevelSide side) => side switch
     {
         LevelSide.North => "Up",
@@ -126,13 +98,6 @@ public static class LevelLayout
         }
     }
 
-    // Sets a side and the side facing it back, together.
-    //
-    // A door is a thing two rooms share, and Normalize settles disagreements with "if either says
-    // door, both do" - which is what lets a room dragged next to another open the door from one
-    // side only. The cost is that closing one from a single side can never take: the neighbour is
-    // still saying door, so the very next pass puts it back. Every deliberate change to a door goes
-    // through here so both rooms say the same thing before Normalize is asked anything.
     public static void SetShared(CTLevelBlueprint level, CTLevelRoom room, LevelSide side, string value)
     {
         Set(room, side, value);
@@ -151,15 +116,6 @@ public static class LevelLayout
 
     // ---- keeping a layout honest ------------------------------------------------------------------
 
-    // The rules a grid has to obey for the generator to make sense of it, re-applied after every
-    // edit rather than defended at each call site: a room can be moved, and a move changes which of
-    // its sides face a neighbour and which face open grid.
-    //
-    //   - a side facing a neighbour is a Door or a Wall, never a way in or out (the doorway would
-    //     open onto the next room's floor rather than off the map)
-    //   - a side facing open grid is a Wall, the way in, or the way out (a plain Door there is a
-    //     doorway onto open water, and GenerateRoom would build one)
-    //   - a Door is agreed by both rooms: if either side says door, both do
     public static void Normalize(CTLevelBlueprint level)
     {
         if (level == null) return;
@@ -175,7 +131,6 @@ public static class LevelLayout
 
                 if (neighbour != null)
                 {
-                    // Facing a room: only door or wall, and the neighbour agrees.
                     if (value != CTLevelRoom.Door) value = CTLevelRoom.Wall;
                     if (Get(neighbour, Opposite(side)) == CTLevelRoom.Door) value = CTLevelRoom.Door;
 
@@ -184,7 +139,6 @@ public static class LevelLayout
                     continue;
                 }
 
-                // Facing nothing: a door there leads off the map.
                 if (value == CTLevelRoom.Door) Set(room, side, CTLevelRoom.Wall);
             }
         }
@@ -192,12 +146,6 @@ public static class LevelLayout
         AssignEnds(level);
     }
 
-    // Opens a door from this room to everything it touches. Called when a room is placed or moved,
-    // which is the moment "which rooms are next to each other" changes - working it out by hand
-    // afterwards is bookkeeping the arrangement already answers.
-    //
-    // Only ever this room's sides, so a door deliberately closed between two rooms elsewhere is not
-    // re-opened by dragging a third one about.
     public static void WireRoom(CTLevelBlueprint level, CTLevelRoom room)
     {
         if (level == null || room == null) return;
@@ -208,13 +156,6 @@ public static class LevelLayout
         Normalize(level);
     }
 
-    // The way in goes on the first room and the way out on the last, on a side facing open grid.
-    // Derived rather than set: they are a property of where a room sits in the level, and leaving
-    // them to be placed by hand meant a level could be dragged into a shape with two ways in, or
-    // none, and only find out at the badge.
-    //
-    // Preferences match vanilla's own: it puts an entrance on the south side where it can, and the
-    // end-of-floor door on the north.
     private static readonly LevelSide[] WayInOrder =
         [LevelSide.South, LevelSide.West, LevelSide.East, LevelSide.North];
 
@@ -237,7 +178,6 @@ public static class LevelLayout
 
         if (level.Rooms.Count == 0) return;
 
-        // A one-room level is both ends at once; PlaceEnd skips a side already carrying the other.
         PlaceEnd(level, level.Rooms[0], CTLevelRoom.WayIn, WayInOrder);
         PlaceEnd(level, level.Rooms[^1], CTLevelRoom.WayOut, WayOutOrder);
     }
@@ -257,7 +197,6 @@ public static class LevelLayout
         }
     }
 
-    // Which side carries the way in or the way out, for a room that has one.
     public static LevelSide? SideCarrying(CTLevelRoom room, string value)
     {
         if (room == null) return null;
@@ -295,10 +234,6 @@ public static class LevelLayout
             return issues;
         }
 
-        // Without a layout there is nothing to check about the shape, because there is no shape: the
-        // game rolls one, places its own entrance and end-of-floor rooms, and the blueprints are
-        // dealt onto whatever it produced. All that is required is somewhere to start and somewhere
-        // to finish - which here is the first room and the last.
         if (!level.AuthoredLayout)
         {
             if (level.Rooms.Count < 2)
@@ -310,8 +245,6 @@ public static class LevelLayout
             return issues;
         }
 
-        // Two rooms on one cell is the one thing the generator cannot survive: BiomeRoom.GetRoom
-        // returns the first, so the second is built, never reachable, and never freed.
         var seen = new Dictionary<(int, int), CTLevelRoom>();
         foreach (var room in level.Rooms)
         {
@@ -324,8 +257,6 @@ public static class LevelLayout
         var entrances = Rooms(level, CTLevelRoom.WayIn);
         var exits = Rooms(level, CTLevelRoom.WayOut);
 
-        // Both doors are placed for the author, so the only way to be missing one is a room with no
-        // side facing open grid - it is walled in by its own neighbours.
         if (entrances.Count == 0)
             issues.Add(new LayoutIssue(
                 "The first room is boxed in; it needs a free side for the way in.",
@@ -336,8 +267,6 @@ public static class LevelLayout
                 "The last room is boxed in; it needs a free side for the way out.",
                 level.Rooms[^1], false));
 
-        // Unreachable rooms are the failure this whole grid exists to make visible: the level runs,
-        // and part of it is simply never seen.
         if (entrances.Count > 0)
         {
             var reached = Reachable(level, entrances[0]);
@@ -355,9 +284,6 @@ public static class LevelLayout
             }
         }
 
-        // The two prefab rooms have a place they belong. Putting them elsewhere works - the podium
-        // room is a room with podiums in it wherever it stands - so this says so rather than
-        // refusing it.
         foreach (var room in level.Rooms)
         {
             if (room == null || room.VanillaRoom == CTLevelRoom.Generated) continue;
@@ -383,8 +309,6 @@ public static class LevelLayout
         return issues;
     }
 
-    // A level where nothing is bound plays as a string of vanilla rooms. That is a legitimate thing
-    // to author, so it is worth saying and not worth refusing.
     private static void AddPoolAdvisory(CTLevelBlueprint level, List<LayoutIssue> issues)
     {
         var bound = 0;
@@ -454,9 +378,6 @@ public static class LevelLayout
 
     // ---- building the biome -------------------------------------------------------------------------
 
-    // Which prefab a room's role resolves to in this biome, or null for an ordinary generated room.
-    // Read off the biome rather than hardcoded, so "the podium room" means the right room in every
-    // dungeon a level can be played in.
     public static string PrefabPathFor(BiomeGenerator biome, string role)
     {
         if (biome == null || string.IsNullOrEmpty(role)) return null;
@@ -470,8 +391,6 @@ public static class LevelLayout
 
         if (string.IsNullOrEmpty(path)) return null;
 
-        // Vanilla's own second-layer swap: the biome carries one path per room and the harder
-        // variant of it is the same file with _P2 on the end.
         if (GameManager.Layer2 && !path.Contains("_P2.prefab"))
             path = path.Replace(".prefab", "_P2.prefab");
 
@@ -494,7 +413,6 @@ public static class LevelLayout
         return GenerateRoom.ConnectionTypes.False;
     }
 
-    // True when this took over; false leaves the vanilla walk to run.
     private static bool Build(BiomeGenerator biome, CTLevelBlueprint level)
     {
         if (biome == null || !IsAuthored(level)) return false;
@@ -516,16 +434,12 @@ public static class LevelLayout
             return false;
         }
 
-        // Vanilla's own first act, and not optional: BiomeRoom registers itself in a static list on
-        // construction, so rooms left over from the previous floor would still answer GetRoom.
         if (biome.Rooms != null)
             foreach (var stale in biome.Rooms)
                 stale?.Clear();
 
         biome.Rooms = [];
 
-        // Per-room seeds off the biome's, so a given biome seed rebuilds the same rooms. The
-        // decoration and encounter passes read these.
         var random = new System.Random(biome.Seed);
         var built = new Dictionary<(int, int), BiomeRoom>();
 
@@ -536,10 +450,6 @@ public static class LevelLayout
             var room = new BiomeRoom(authored.X, authored.Y,
                 random.Next(-2147483647, int.MaxValue), biome.GeneratorRoomPrefab.gameObject);
 
-            // A room that is a vanilla prefab is loaded by path instead of stamped out of the
-            // generator prefab. IsCustom is what InstantiatePrefabs reads to do that; Generated
-            // stays false so the prefab's own GenerateRoom still builds the island and the doors
-            // around what the prefab brought with it - which is how vanilla places both of these.
             var prefab = PrefabPathFor(biome, authored.VanillaRoom);
             if (!string.IsNullOrEmpty(prefab))
             {
@@ -563,8 +473,6 @@ public static class LevelLayout
 
                 var type = Parse(Get(authored, side));
 
-                // A connection that names a room carries it; one that names nothing is a door off
-                // the map, which is what the way in and the way out are.
                 var connection = neighbour != null
                     ? new RoomConnection(neighbour)
                     : new RoomConnection(type);
@@ -580,9 +488,6 @@ public static class LevelLayout
         var entrance = built[(entranceRoom.X, entranceRoom.Y)];
         var exit = exitRooms.Count > 0 ? built[(exitRooms[0].X, exitRooms[0].Y)] : entrance;
 
-        // What PlaceEntranceAndExit would have set. These are not bookkeeping: Door and
-        // Interaction_BiomeDoor both dereference RoomEntrance without checking it, and the room the
-        // floor starts in is read straight out of StartX/StartY.
         biome.RoomEntrance = entrance;
         biome.RoomExit = exit;
 
@@ -591,7 +496,6 @@ public static class LevelLayout
         reader.Field("StartY").SetValue(entrance.y);
         reader.Field("lastRoom").SetValue(exit);
 
-        // The flag the rest of generation reads to leave the layout alone.
         biome.OverrideRandomWalk = true;
         biome.NumberOfRooms = biome.Rooms.Count;
 
@@ -613,10 +517,6 @@ public static class LevelLayout
 
     // ---- patches --------------------------------------------------------------------------------------
 
-    // The one hook, and deliberately this one rather than the dungeon's OnBiomeReady: a floor
-    // entered from a dungeon map is regenerated in place (MapManager.EnterNode -> Regenerate), which
-    // runs GenerateRoutine again without the biome ever being enabled a second time. CreateRandomWalk
-    // is the first thing GenerateRoutine does, on both paths.
     [HarmonyPatch(typeof(BiomeGenerator), "CreateRandomWalk")]
     private static class BiomeGenerator_CreateRandomWalk_Patch
     {
@@ -627,14 +527,10 @@ public static class LevelLayout
 
             try
             {
-                // Skipping the original is the whole point: it is the random walk.
                 return !Build(__instance, level);
             }
             catch (System.Exception e)
             {
-                // A throw here would take the generation coroutine down and leave a black room.
-                // The vanilla walk is a worse level than the one that was authored, and an
-                // enormously better one than no level at all.
                 Plugin.Log.LogError("MapEditor: authored layout failed to build; the floor falls " +
                                     "back to a random walk: " + e);
                 return true;
@@ -642,17 +538,11 @@ public static class LevelLayout
         }
     }
 
-    // OverrideRandomWalk hides the minimap, which is right for what vanilla uses the flag for - a
-    // node whose whole floor is one room has no map worth drawing. An authored level is a floor like
-    // any other and wants its map back.
     [HarmonyPatch(typeof(MiniMap), "OnBiomeGenerated")]
     private static class MiniMap_OnBiomeGenerated_Patch
     {
         private static bool _lowered;
 
-        // Lower the flag for the length of the original call so it draws the rooms rather than
-        // taking its early exit, then put it straight back - everything else that reads it, and
-        // there is a lot, still needs it raised.
         private static void Prefix()
         {
             _lowered = false;

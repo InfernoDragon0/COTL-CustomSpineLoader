@@ -12,7 +12,6 @@ public class LightingProfile
     public MapLightingData Data = new();
 }
 
-// Named lighting looks in one flat LightingProfiles.json, shared across maps.
 public static class LightingProfiles
 {
     public const string FileName = "LightingProfiles.json";
@@ -39,8 +38,6 @@ public static class LightingProfiles
             string.Equals(p.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
-    // Upsert. Stores a clone (map edits must not rewrite the profile) with Enabled forced on
-    // (else a profile saved while following the biome applies as a no-op).
     public static void Save(string name, MapLightingData data)
     {
         if (string.IsNullOrWhiteSpace(name) || data == null) return;

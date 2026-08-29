@@ -5,15 +5,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// A "search by name" field above a tool's icon grid.
-//
-// Text entry rides RuntimeMapEditor.PromptText: Input.inputString with the EventSystem suspended
-// and the game's UI navigator locked, because a TMP_InputField on the editor's own canvas loses a
-// fight with Rewired's input module and the game's navigator. See the Structure tool's chapter in
-// the README for why that is, and what the E key used to do.
-//
-// The tool supplies two callbacks: one to show the matches for a query, one to put its ordinary
-// view back. Everything about the typing, the label and the debounce lives here.
 public class MapEditorSearchRow
 {
     private readonly RuntimeMapEditor _editor;
@@ -44,8 +35,6 @@ public class MapEditorSearchRow
         Paint();
     }
 
-    // Clicking a result is a way of saying "this one", so it ends the search the way Enter does -
-    // otherwise picking something meant confirming first and then clicking it.
     public void Confirm()
     {
         _editor.ConfirmPrompt();
@@ -78,10 +67,6 @@ public class MapEditorSearchRow
                 _query = query;
                 Paint();
 
-                // Debounced through a coroutine rather than the tool's OnUpdate, which does not run
-                // while a prompt is open - the editor returns from Update as soon as it has read the
-                // keystroke. Without the delay every letter would start and cancel a screenful of
-                // async icon loads.
                 _version++;
                 _editor.StartCoroutine(ApplySoon(_version));
             },
@@ -100,7 +85,6 @@ public class MapEditorSearchRow
         var until = Time.unscaledTime + 0.18f;
         while (Time.unscaledTime < until) yield return null;
 
-        // A later keystroke has already asked for its own pass.
         if (version != _version) yield break;
 
         if (string.IsNullOrWhiteSpace(_query)) Restore();
@@ -131,8 +115,6 @@ public class MapEditorSearchRow
         }
     }
 
-    // How many hits a grid is filled with before the rest are left to a narrower query: the cells
-    // are real objects with async icons behind them, and a thousand of them is a stall.
     public const int MaxResults = 60;
 
     public void ReportCount(int shown, int total, string query)

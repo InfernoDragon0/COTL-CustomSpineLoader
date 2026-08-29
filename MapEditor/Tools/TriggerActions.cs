@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.MapEditor.Npc;
@@ -14,79 +14,56 @@ public enum TriggerActionType
     StartConversation,
     PlayPlayerAnimation,
 
-    // Target is a saved lighting profile's name, or empty for "back to the biome's own".
     ApplyLighting,
 
-    // Target is an FMOD music event path.
     ChangeMusic,
 
     Wait,
 
-    // Position is the offset from whatever the camera follows, captured in the editor.
     CameraOffset,
     CameraOffsetReset,
 
-    // Amount is the follow distance: smaller is closer.
     CameraZoom,
     CameraZoomReset,
 
-    // Frames the target for Duration seconds, then hands the camera back.
     CameraLookAtObject,
     CameraLookAtTrigger,
 
-    // Target names one of TriggerCameraActions.Effects; Duration is how long it runs.
     CameraEffect,
 
-    // Amount is how hard, Duration how long. The camera effect list has a shake of its own, but at
-    // one fixed strength; this is the one to reach for when the strength is the point.
     CameraShake,
 
-    // Loop doubles as "skippable": a cutscene has nothing to loop.
     PlayCutscene,
 
-    // Target is the text itself, Duration how long it stays up.
     ShowCaption,
     ShowFullscreenText,
     ShowTitleText,
 
-    // Target is a saved world map's name; the sequence waits until the map screen closes.
     OpenWorldMap,
 
-    // No target: sends the players home, the way the dungeon portal does. A hub's way out.
     ReturnToBase,
 
-    // No target, and nothing happens when it runs: the trigger carrying it marks where the player
-    // arrives, and the arrival reads it off the trigger's position. A hub cannot be saved without one
-    // (HubSession.SpawnPoint); a base may have one and lands the player on it if it does
-    // (BaseDelta.SpawnPoint), read out of the saved file rather than off the trigger, because the
-    // player is put down before the base's own contents are rebuilt.
     HubSpawnPoint
 }
 
-// One sequence step; the runtime twin of MapTriggerActionData.
 public class TriggerAction
 {
     public TriggerActionType Type;
 
-    // Trigger id / object path / NPC internal name / animation name.
     public string Target = "";
 
-    // Authored position of the target object, used when the object itself cannot be found.
     public Vector3 Position;
 
     public float Spread = 1.3f;
     public bool Loop;
     public float Duration;
 
-    // Second number for actions whose Duration already means something else (camera zoom).
     public float Amount;
 
-    // For screen text: Target is the title, this is the line under it.
     public string Subtext = "";
 
     public bool NeedsPlayerInput => Type == TriggerActionType.StartConversation;
 
-    // Lighting fade reuses Duration: negative = explicit instant, 0 = pre-picker, gets default.
     public const float DefaultLightingFade = 1.5f;
 
     public float LightingFade => Duration < 0f ? 0f : Duration > 0f ? Duration : DefaultLightingFade;
@@ -149,7 +126,6 @@ public static class TriggerActions
 
         var locked = false;
 
-        // Copied: an action can outlive the trigger; the list must not change under the loop.
         var actions = new List<TriggerAction>(trigger.Actions);
         var lockControl = trigger.LockPlayerControl;
 
@@ -219,7 +195,6 @@ public static class TriggerActions
                 break;
 
             case TriggerActionType.Wait:
-                // Unscaled: the game may be paused around a conversation; a scaled wait never ends.
                 yield return new WaitForSecondsRealtime(Mathf.Max(0f, action.Duration));
                 break;
 
@@ -298,26 +273,19 @@ public static class TriggerActions
 
                 screen.Open(action.Target);
 
-                // Waits: later actions should run once the player is back.
                 while (WorldMap.WorldMapScreen.IsOpen)
                     yield return new WaitForSecondsRealtime(0.1f);
                 break;
             }
 
-            // A mark, not a step: the hub's arrival reads the trigger's position before the player
-            // is ever put down, so by the time the volume can be walked into there is nothing left
-            // for it to do.
             case TriggerActionType.HubSpawnPoint:
                 break;
 
             case TriggerActionType.ReturnToBase:
-                // The run state has to go first: the scene load lands in the base, where a level
-                // still believing it is playing would apply blueprints to the cult's own rooms.
                 LevelPlayback.Stop();
                 DungeonMapPlayback.Clear();
                 GameManager.ToShip();
 
-                // Nothing after this runs in the room being left; the scene is already going.
                 yield break;
         }
     }
@@ -338,7 +306,6 @@ public static class TriggerActions
             return;
         }
 
-        // FMOD events only loop if authored to; SetMusicLoop is the restart watchdog.
         var host = RuntimeMapEditor.Active;
         if (host != null) host.SetMusicLoop(eventPath);
         else Plugin.Log.LogWarning("MapEditor: no editor host to keep the trigger's music looping; " +
@@ -349,7 +316,6 @@ public static class TriggerActions
 
     private static void ApplyLighting(string profileName, float fadeSeconds)
     {
-        // Empty target = vanilla lighting: back to the biome's own values.
         if (string.IsNullOrEmpty(profileName))
         {
             LightingTool.ClearOverride(fadeSeconds);
@@ -364,7 +330,6 @@ public static class TriggerActions
             return;
         }
 
-        // Save() stores profiles with Enabled forced on, so this applies as-is.
         LightingTool.Apply(profile.Data, fadeSeconds);
     }
 
@@ -394,7 +359,6 @@ public static class TriggerActions
 
             if (enabled)
             {
-                // Only clear states this system set; a player who died mid-sequence keeps theirs.
                 if (player.state.CURRENT_STATE is StateMachine.State.InActive
                     or StateMachine.State.CustomAnimation)
                     player.state.CURRENT_STATE = StateMachine.State.Idle;
@@ -422,7 +386,6 @@ public static class TriggerActions
             var target = centre;
             if (players.Count > 1)
             {
-                // Ring starts at the top: two players land above/below, reading as either side.
                 var angle = Mathf.PI * 0.5f + i * (Mathf.PI * 2f / players.Count);
                 target += new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * Mathf.Max(0.1f, spread);
             }
@@ -435,7 +398,6 @@ public static class TriggerActions
                 AbortGoToCallback: null, groupAction: false);
         }
 
-        // Game's own timeout plus a margin; a player destroyed mid-walk stops being counted.
         var deadline = Time.time + 10f;
         while (Time.time < deadline)
         {
@@ -488,8 +450,6 @@ public static class TriggerActions
         player.CustomAnimation(animation, loop);
     }
 
-    // The skeleton knows how long its own animation is; 1 second is the fallback for a name the
-    // skeleton does not have (the game plays nothing in that case, so the wait is only a beat).
     private static float AnimationLength(PlayerFarming player, string animation)
     {
         var found = FindPlayerAnimation(player, animation);
@@ -502,8 +462,6 @@ public static class TriggerActions
         return data?.FindAnimation(animation);
     }
 
-    // Every animation on the player's own skeleton, for the tool's picker - authoring by typing
-    // names into a text box got them wrong, and a wrong name plays nothing at all.
     public static List<string> PlayerAnimationNames()
     {
         var names = new List<string>();
@@ -553,8 +511,6 @@ public static class TriggerActions
 
         NpcDialogueRunner.Play(definition, speaker);
 
-        // Play is asynchronous by a frame or two (and refuses outright if another conversation
-        // owns the screen), so the wait is guarded rather than assuming it started.
         var guard = Time.unscaledTime + 2f;
         while (!NpcDialogueRunner.IsRunning && !MMConversation.isPlaying && Time.unscaledTime < guard)
             yield return null;
@@ -580,7 +536,6 @@ public static class TriggerActions
             yield return null;
         }
 
-        // The teardown the runner does on the last node lands a frame later.
         yield return null;
     }
 
@@ -594,8 +549,6 @@ public static class TriggerActions
         return null;
     }
 
-    // Objects are addressed by scene path, which survives a save/load as long as the room is the
-    // same one. When it is not, the caller falls back to the position captured at authoring time.
     public static string PathOf(GameObject go)
     {
         if (go == null) return "";

@@ -3,7 +3,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.WorldMap.Tools;
 
-// Save, load, new, and the map-wide knobs.
 public class WorldFileTool : IMapEditorTool
 {
     private readonly WorldMapEditor _editor;
@@ -24,9 +23,6 @@ public class WorldFileTool : IMapEditorTool
         ui.CreateHeader(panel, "- Map -", 22);
         Note(ui, panel, $"Editing: {map.MapName}");
 
-        // One button, the way the room editor's Save is also its rename: the dialog opens on the
-        // current name, so confirming it saves and changing it saves a copy under the new one.
-        // Ctrl+S is the same save with no dialog at all.
         ui.CreateButton(panel, "Save Map...", () =>
             MapNamePrompt.Show(_editor, map.MapName, "World map name", chosen =>
             {
@@ -50,7 +46,6 @@ public class WorldFileTool : IMapEditorTool
                     return;
                 }
 
-                // A map is its folder, so the new name is an empty folder until its art follows.
                 var copied = CTWorldMapSerialization.CopyArt(previous, map.MapName);
                 WorldMapAssets.ForgetFailures();
 
@@ -67,7 +62,6 @@ public class WorldFileTool : IMapEditorTool
             {
                 var fresh = new CTWorldMap { MapName = chosen };
 
-                // Every map starts with its home node; nothing selectable means nothing testable.
                 fresh.Nodes.Add(new CTWorldMapNode
                 {
                     Id = "start",

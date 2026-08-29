@@ -12,10 +12,6 @@ namespace CustomSpineLoader.Patches
     [HarmonyPatch]
     public class AnimatorRebindPatches
     {
-        //AnimationReferenceAssets are ScriptableObjects shared between player instances (P1/P2 coop),
-        //so they are never mutated - each (source, target skeleton) pair gets one cached clone instead.
-        //The same source must always map to the same clone: SimpleSpineAnimator.Update compares
-        //Track.Animation != NorthIdle.Animation and animationData.Animation == animationData.DefaultAnimation.
         private static readonly Dictionary<(AnimationReferenceAsset, SkeletonDataAsset), AnimationReferenceAsset> CloneCache = [];
         private static readonly Dictionary<AnimationReferenceAsset, AnimationReferenceAsset> CloneToOriginal = [];
 
@@ -24,8 +20,6 @@ namespace CustomSpineLoader.Patches
             .Where(f => f.FieldType == typeof(AnimationReferenceAsset))
             .ToList();
 
-        //postfix so this runs after COTL_API's PlayerFarming.Start prefix has swapped skeletonDataAsset
-        //and re-initialized the skeleton; also fires on the OnEnable -> Start() hot-swap path
         [HarmonyPatch(typeof(PlayerFarming), nameof(PlayerFarming.Start))]
         [HarmonyPostfix]
         private static void PlayerFarming_Start_RebindAnimations(PlayerFarming __instance)
@@ -86,8 +80,6 @@ namespace CustomSpineLoader.Patches
         {
             if (src == null) return null;
 
-            //translate a previous clone back to its original so cache keys stay (original, target)
-            //and reverting to the Default spine restores the exact original assets
             var source = CloneToOriginal.TryGetValue(src, out var original) ? original : src;
 
             if (source.skeletonDataAsset == target) return source;
@@ -99,7 +91,6 @@ namespace CustomSpineLoader.Patches
                 CloneToOriginal.Remove(cached);
             }
 
-            //runtime assets made by the game (ChangeStateAnimation etc) only carry a name, no animationName
             var animName = string.IsNullOrEmpty(source.animationName) ? source.name : source.animationName;
             var anim = targetData.FindAnimation(animName);
             if (anim == null)
@@ -122,8 +113,6 @@ namespace CustomSpineLoader.Patches
 
         private static void KickAnimator(SimpleSpineAnimator animator)
         {
-            //COTL_API leaves the AnimationState on an empty animation after the swap, and
-            //UpdateAnimFromState only fires on a state *change*, so restart the current animation here
             if (animator.state != null)
             {
                 animator.UpdateAnimFromState();

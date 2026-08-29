@@ -32,7 +32,6 @@ public class ShapeProfileSprite
 {
     public string Texture = "";
     public float PixelsPerUnit = 100f;
-    // 9-slice borders in pixels, so edge strips stretch their middle rather than their caps.
     public float BorderLeft;
     public float BorderBottom;
     public float BorderRight;
@@ -42,8 +41,6 @@ public class ShapeProfileSprite
 [Serializable]
 public class ShapeProfileCorner
 {
-    // A UnityEngine.U2D.CornerType name: OuterTopLeft, OuterTopRight, OuterBottomLeft,
-    // OuterBottomRight, InnerTopLeft, InnerTopRight, InnerBottomLeft, InnerBottomRight.
     public string Corner = "OuterTopLeft";
     public string Texture = "";
     public float PixelsPerUnit = 100f;
@@ -86,8 +83,6 @@ public static class CustomShapeProfiles
         var shape = ScriptableObject.CreateInstance<SpriteShape>();
         shape.name = NamePrefix + MapEditorSerialization.Sanitize(config.Name);
 
-        // The game runs Resources.UnloadUnusedAssets on every room change; without this flag the
-        // runtime-built asset would be collected mid-session and shapes using it would go blank.
         shape.hideFlags = HideFlags.DontUnloadUnusedAsset;
         shape.useSpriteBorders = config.UseSpriteBorders;
 
@@ -109,8 +104,6 @@ public static class CustomShapeProfiles
                 end = rangeConfig.End,
                 order = rangeConfig.Order
             };
-            // The game's SpriteShape build does not initialize these lists in the parameterless
-            // constructors - Add on them was the NullReferenceException that killed the build.
             range.sprites ??= [];
 
             foreach (var spriteConfig in rangeConfig.Sprites)

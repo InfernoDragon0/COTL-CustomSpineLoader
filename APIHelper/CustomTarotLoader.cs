@@ -37,7 +37,6 @@ public class CustomTarotLoader : Loader<CustomTarotConfig>
             var backSpritePath = string.IsNullOrEmpty(cfg.BackSpritePath) ? string.Empty : Path.Combine(entry.FolderPath, cfg.BackSpritePath);
             if (!string.IsNullOrEmpty(backSpritePath) && !File.Exists(backSpritePath))
             {
-                // back sprite optional
             }
 
             try
@@ -62,7 +61,6 @@ public class CustomTarotConfig
     public string CardName;
     public string SpritePath;
     public string BackSpritePath;
-    // Keep category as string to avoid depending on game enums in this helper
     public string Category = "Custom";
     public int TarotCardWeight = 150;
     public int MaxTarotCardLevel = 0;
@@ -71,7 +69,6 @@ public class CustomTarotConfig
     public string Lore = "Custom Tarot created with CultTweaker.";
     public string Description = "This is a custom tarot created with CultTweaker.";
     
-    // Gameplay/value overrides mapped from CustomTarotCard virtual methods
     public float SpiritHeartCount = 0f;
     public int SpiritAmmoCount = 0;
 
@@ -79,7 +76,6 @@ public class CustomTarotConfig
     public float CurseDamageMultiplierIncrease = 0f;
     public float WeaponCritChanceIncrease = 0f;
 
-    // Note: original method had an InventoryItem.ITEM_TYPE parameter; config provides a simple int modifier.
     public int LootIncreaseModifier = 0;
 
     public float MovementSpeedMultiplier = 0f;
@@ -92,7 +88,6 @@ public class CustomTarotConfig
     public float AmmoEfficiency = 0f;
     public int BlackSoulsOnDamage = 0;
 
-    // Item to drop can be represented by internal item name (string). If unset, no item will be dropped.
     public string ItemToDropInternalName = null;
 
     public float ChanceOfGainingBlueHeart = 0f;
@@ -100,7 +95,6 @@ public class CustomTarotConfig
     public float RelicChargeMultiplier = 0f;
 }
 
-// Minimal custom tarot card implementation that reads values from config.
 public class CultTweakerCustomTarot(string internalName, CustomTarotConfig cfg, string spritePath, string backSpritePath) : CustomTarotCard
 {
     private readonly string _internalName = internalName;
@@ -115,7 +109,6 @@ public class CultTweakerCustomTarot(string internalName, CustomTarotConfig cfg, 
     private readonly string _lore = cfg.Lore;
     private readonly string _description = cfg.Description;
 
-    // gameplay values from config
     private readonly float _spiritHeartCount = cfg.SpiritHeartCount;
     private readonly int _spiritAmmoCount = cfg.SpiritAmmoCount;
     private readonly float _weaponDamageMultiplierIncrease = cfg.WeaponDamageMultiplierIncrease;
@@ -140,8 +133,6 @@ public class CultTweakerCustomTarot(string internalName, CustomTarotConfig cfg, 
 
     public override TarotCards.CardCategory Category => _category;
 
-    // Cached: the tarot pick screen shows several cards at once and re-reads these per draw;
-    // each call used to decode the PNG from disk into a texture nothing ever destroyed.
     private Sprite _cachedFront;
     private Sprite _cachedBack;
 

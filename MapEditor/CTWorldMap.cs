@@ -7,19 +7,16 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// One authored overworld map. See README "World maps".
 public class CTWorldMap
 {
     public string MapName = "untitledworld";
     public string DisplayName = "";
 
-    // FMOD event path; empty leaves whatever music is already playing alone.
     public string MusicEvent = "";
     public bool MusicLoop = true;
 
     public SerializableColor BackgroundColor = new() { R = 0.05f, G = 0.06f, B = 0.10f, A = 1f };
 
-    // Global multiplier on every layer's mouse parallax; 0 pins the whole map still.
     public float ParallaxStrength = 1f;
 
     public List<CTWorldMapLayer> Layers = [];
@@ -37,33 +34,26 @@ public class CTWorldMap
     public string ShownName => !string.IsNullOrWhiteSpace(DisplayName) ? DisplayName : MapName;
 }
 
-// A piece of the map's art. Positions are anchored positions in the 1920x1080 canvas space.
 public class CTWorldMapLayer
 {
     public string Id = "";
 
-    // "Sprite" or "Spine".
     public string Kind = "Sprite";
 
-    // Sprite: a png file name in the map's folder. Spine: a subfolder name.
     public string Asset = "";
 
     public SerializableVector3 Position = new();
     public SerializableVector3 Scale = new() { X = 1f, Y = 1f, Z = 1f };
     public float RotationZ;
 
-    // Mirrored on X, so one png can face both ways.
     public bool FlipX;
 
-    // Draw order among layers; all layers draw behind the connections and nodes.
     public int SortOrder;
 
-    // 0 = pinned; 1 = moves most with the mouse.
     public float ParallaxDistance;
 
     public SerializableColor Tint = SerializableColor.From(Color.white);
 
-    // Spine only.
     public string Animation = "";
     public string Skin = "";
     public bool Loop = true;
@@ -81,29 +71,21 @@ public class CTWorldMapNode
     public SerializableVector3 Position = new();
     public float Scale = 1f;
 
-    // A png in the map's folder; empty draws the built-in disc.
     public string Icon = "";
 
-    // Cosmetic except for Base, Key and Lock.
     public string NodeType = "Dungeon";
 
-    // One direction only; parents are rebuilt from these on load.
     public List<string> Children = [];
 
-    // Hidden | Preview | Selectable.
     public string InitialState = "Hidden";
 
-    // > 0: stays a preview until this many of RequiredNodes are completed.
     public int RequiredCompletedCount;
     public List<string> RequiredNodes = [];
 
-    // Key nodes bank this many keys when completed.
     public int KeysGranted;
 
-    // Lock nodes open when this many keys are spent on them.
     public int KeysCost;
 
-    // "None", "DungeonMap" (a saved CTDungeonMap by name) or "Level" (a saved CTLevelBlueprint).
     public string TargetKind = "None";
     public string Target = "";
 
@@ -112,7 +94,6 @@ public class CTWorldMapNode
     public bool IsLock => string.Equals(NodeType, "Lock", StringComparison.OrdinalIgnoreCase);
 }
 
-// Declaration order is cascade priority - a state never downgrades to an earlier one.
 public enum WorldNodeState
 {
     Hidden,
@@ -129,13 +110,9 @@ public static class CTWorldMapSerialization
 
     public static string RootPath => Path.Combine(Plugin.PluginPath, FolderName);
 
-    // Where a map of this name is written: always our own folder.
     public static string FolderFor(string mapName) =>
         Path.Combine(RootPath, MapEditorSerialization.Sanitize(mapName));
 
-    // Where a map of this name is read from: ours if we have it, else whichever other mod ships it
-    // (see ModContentPaths). A map is its folder - the config and all its art - so everything that
-    // reads a map's files goes through this, not FolderFor.
     public static string FolderForRead(string mapName)
     {
         var own = FolderFor(mapName);
@@ -147,21 +124,16 @@ public static class CTWorldMapSerialization
 
     public static string PathFor(string mapName) => Path.Combine(FolderFor(mapName), ConfigFile);
 
-    // Exists = ours, the overwrite question. Available = ours or any other mod's, the load question.
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
 
     public static bool Available(string mapName) =>
         File.Exists(Path.Combine(FolderForRead(mapName), ConfigFile));
 
-    // The first name in the series nothing is saved under: untitledworld, untitledworld2, and so
-    // on. A "new map" button that reused a taken name would hand back the old map, not a new one.
     public static string FreeName(string stem)
     {
         if (string.IsNullOrWhiteSpace(stem)) stem = "untitledworld";
         stem = MapEditorSerialization.Sanitize(stem);
 
-        // Available, not Exists: a name another mod already uses is a name that would be shadowed
-        // by ours, which is a confusing thing for a "new map" button to hand back.
         if (!Available(stem)) return stem;
 
         for (var suffix = 2; suffix < 1000; suffix++)
@@ -173,7 +145,6 @@ public static class CTWorldMapSerialization
         return stem + Guid.NewGuid().ToString("N").Substring(0, 4);
     }
 
-    // Called at startup so there is somewhere to drop art before any map is saved.
     public static void EnsureRootFolder()
     {
         try
@@ -210,14 +181,10 @@ public static class CTWorldMapSerialization
         }
     }
 
-    // A map is its folder: renaming or saving under a new name writes a config.json somewhere the
-    // art is not, so the art is brought along. Existing files at the destination are left alone.
     public static int CopyArt(string fromMapName, string toMapName)
     {
         if (string.IsNullOrWhiteSpace(fromMapName) || string.IsNullOrWhiteSpace(toMapName)) return 0;
 
-        // Read side for the source: saving another mod's map under a new name is how it is adopted
-        // for editing, and its art has to come along into our own folder for that to mean anything.
         var from = FolderForRead(fromMapName);
         var to = FolderFor(toMapName);
         if (!Directory.Exists(from) ||
@@ -245,7 +212,6 @@ public static class CTWorldMapSerialization
         {
             var name = Path.GetFileName(file);
 
-            // The config is written by Save; copying it would overwrite the map being saved.
             if (skipConfig && string.Equals(name, ConfigFile, StringComparison.OrdinalIgnoreCase)) continue;
 
             var destination = Path.Combine(to, name);
@@ -265,8 +231,6 @@ public static class CTWorldMapSerialization
         return copied;
     }
 
-    // What Save would write, without writing it - the editor compares this against the last saved
-    // copy to know whether closing would lose anything.
     public static string ToJson(CTWorldMap map)
     {
         if (map == null) return "";
@@ -294,7 +258,6 @@ public static class CTWorldMapSerialization
             var map = JsonConvert.DeserializeObject<CTWorldMap>(File.ReadAllText(path));
             if (map == null) return null;
 
-            // The folder name is the identity, not the name stored in the file.
             map.MapName = Path.GetFileName(folder);
             DropUnknowns(map);
             return map;
@@ -336,7 +299,6 @@ public static class CTWorldMapSerialization
         return results;
     }
 
-    // Unknowns from a newer file are dropped with a warning rather than crashing the load.
     private static void DropUnknowns(CTWorldMap map)
     {
         map.Layers.RemoveAll(layer =>

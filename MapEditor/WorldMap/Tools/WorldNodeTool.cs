@@ -6,7 +6,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.WorldMap.Tools;
 
-// Travel nodes: place, drag, link, and configure type, unlocking and destination.
 public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
 {
     public IEnumerable<(string Key, string Action)> Shortcuts =>
@@ -23,13 +22,10 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
 
     private static readonly string[] NodeTypes = ["Base", "Dungeon", "MiniBoss", "Boss", "Key", "Lock", "Reward"];
     private static readonly string[] InitialStates = ["Hidden", "Preview", "Selectable"];
-    // Stored values, and what the picker calls them - "None" reads as an unset field rather than
-    // the deliberate choice it is.
     private static readonly string[] TargetKinds = ["None", "DungeonMap", "Level", "Hub"];
     private static readonly string[] TargetKindLabels =
         ["No destination", "Dungeon map", "Level", "Hub"];
 
-    // Entries in the icon list that are not node types.
     private const string DefaultIconOption = "(default art for the type)";
     private const string IconPrefix = "icon: ";
 
@@ -38,7 +34,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
     private Vector2 _dragStartPointer;
     private Vector2 _dragStartPosition;
 
-    // Corner-node resize, as in the layer tool and the room editor's select tool.
     private const float MinScale = 0.3f;
     private const float MaxScale = 3f;
 
@@ -78,9 +73,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
                 string.IsNullOrWhiteSpace(selected.DisplayName) ? selected.Id : selected.DisplayName,
                 "Node name", chosen => RenameNode(selected, chosen), existsCheck: _ => false));
 
-        // One list for everything that decides how the node is drawn: the seven frame types, then
-        // the map folder's own pngs. Picking a png keeps the type - Key, Lock and Base still mean
-        // what they mean, they just wear a different face.
         Label(ui, panel, "Icon type");
 
         var iconOptions = new List<string>(NodeTypes) { DefaultIconOption };
@@ -118,8 +110,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
             "Visibility - how the node starts before anything unlocks it");
         Note(ui, panel, "The start node should be Selectable.");
 
-        // Where the node goes belongs with what it is, not in a category of its own two headers
-        // further down.
         Label(ui, panel, "Destination");
         var kindPicker = ui.CreateDropdown(panel, "Destination", TargetKindLabels, (index, _) =>
         {
@@ -148,7 +138,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         }
         else if (!string.Equals(selected.TargetKind, "None", StringComparison.OrdinalIgnoreCase))
         {
-            // The one note worth keeping here: an empty picker otherwise reads as a broken one.
             Note(ui, panel, "Nothing saved to target yet - save a dungeon map, level or hub first.");
         }
 
@@ -174,7 +163,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         });
         Note(ui, panel, $"Required now: {string.Join(", ", selected.RequiredNodes)}");
 
-        // Deleting is the Del key; a button for it sat one slip away from the sliders above it.
         Note(ui, panel, "Del deletes this node.");
     }
 
@@ -183,8 +171,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         var map = _editor.Map;
         if (map == null) return;
 
-        // A drag whose release was never seen - a modal dialog stops this update for a few frames -
-        // would otherwise resume against a stale anchor and fling the node at the next press.
         if (_dragging && !Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0)) _dragging = false;
 
         if (HandleScaleDrag()) return;
@@ -202,8 +188,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
-        // Right click links the selection to whatever was clicked, or removes a link under the
-        // cursor when the click lands on empty map.
         if (Input.GetMouseButtonDown(1) && !_editor.PointerOverEditorUi())
         {
             var target = _editor.PointerContent();
@@ -271,9 +255,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
             if (_editor.Screen.NodeRects.TryGetValue(dragged.Id, out var rect) && rect != null)
                 rect.anchoredPosition = target;
 
-            // The links come with it. Cheap enough to run per frame - it aims existing rects and
-            // builds nothing - and without it the node leaves its lines behind until the button
-            // comes up, which is after the moment you needed to see the shape you were drawing.
             _editor.Screen.RefreshLinks();
         }
 
@@ -296,14 +277,11 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
                     });
                 }
 
-                // The drag kept the node and its lines in step by hand; the full redraw at the end
-                // puts everything else that depends on a node's position back in agreement.
                 _editor.RebuildAll();
             }
         }
     }
 
-    // True while the corner node owns the mouse, so the caller skips selecting, linking and moving.
     private bool HandleScaleDrag()
     {
         var handle = _editor.Screen != null ? _editor.Screen.NodeHandle : null;
@@ -353,7 +331,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
 
             _editor.ClearHoverStatus();
 
-            // The links meet the node's edge, so they follow its size only on a redraw.
             _editor.RebuildAll();
             _editor.RebuildActivePanel();
         }
@@ -361,16 +338,12 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         return true;
     }
 
-    // Resized by reference during the drag; a rebuild every frame would drop the handle it is
-    // being dragged by.
     private void ApplyScale(CTWorldMapNode node)
     {
         if (_editor.Screen.NodeRects.TryGetValue(node.Id, out var rect) && rect != null)
             rect.GetComponent<WorldMapNodeView>()?.ApplyScale(node.Scale);
     }
 
-    // Selecting from a list as well as from the map: nodes overlap, and a small one under a big
-    // one is otherwise unreachable. Adding is the ctrl+click gesture, so no button for it.
     private void BuildNodePicker(RectTransform panel, MapEditorUI ui, CTWorldMap map)
     {
         if (map.Nodes.Count == 0)
@@ -395,7 +368,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         {
             if (index < 0 || index >= ids.Count) return;
 
-            // The same frame's click would otherwise reach the map underneath the list.
             _editor.BlockWorldClicks();
             Select(ids[index]);
             _editor.RebuildActivePanel();
@@ -416,7 +388,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         MarkRequired();
     }
 
-    // The gate list, drawn on the map in green.
     private void MarkRequired()
     {
         var node = SelectedNode();
@@ -444,7 +415,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         var existing = source.Children.FindIndex(id =>
             string.Equals(id, target.Id, StringComparison.OrdinalIgnoreCase));
 
-        // Right clicking an existing link removes it, so one gesture both makes and breaks links.
         if (existing >= 0)
         {
             source.Children.RemoveAt(existing);
@@ -547,8 +517,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
                           "link them; it starts as a preview.");
     }
 
-    // One name for both jobs: it is what the map shows, and the id everything refers to is derived
-    // from it. Ids stay unique on their own, so two nodes may carry the same display name.
     private void RenameNode(CTWorldMapNode node, string chosen)
     {
         var map = _editor.Map;
@@ -569,7 +537,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
 
         node.Id = newId;
 
-        // Every in-map reference follows the rename; progress keyed on the old id does not.
         foreach (var other in map.Nodes)
         {
             for (var i = 0; i < other.Children.Count; i++)
@@ -619,7 +586,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         var map = _editor.Map;
         var index = map.Nodes.IndexOf(node);
 
-        // Everything that pointed at it, remembered for the undo.
         var childRefs = new List<(CTWorldMapNode owner, int index)>();
         var requiredRefs = new List<(CTWorldMapNode owner, int index)>();
         foreach (var other in map.Nodes)
@@ -673,7 +639,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         }
         else if (string.Equals(kind, "Level", StringComparison.OrdinalIgnoreCase))
         {
-            // Hubs are levels too, and are offered under their own kind instead.
             foreach (var level in CTLevelSerialization.LoadAll())
                 if (level is { IsHub: false } && !string.IsNullOrWhiteSpace(level.LevelName))
                     result.Add(level.LevelName);
@@ -712,8 +677,6 @@ public class WorldNodeTool : IMapEditorTool, IMapEditorShortcuts
         label.GetComponent<TMP_Text>().color = new Color(1f, 1f, 1f, 0.7f);
     }
 
-    // A caption above a dropdown: the widget itself shows its current value once one is picked,
-    // and then nothing on it says what it sets.
     private static void Label(MapEditorUI ui, Transform parent, string text)
     {
         var label = ui.CreateLabel(parent, text, 14);

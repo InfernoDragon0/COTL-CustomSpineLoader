@@ -6,8 +6,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// One travel node on screen: an icon, a name under it, and a state. The icon is a clone of the
-// game's own DLC map node where that art could be loaded, and our own disc where it could not.
 public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     public CTWorldMapNode Data { get; private set; }
@@ -63,7 +61,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
         _label.enableWordWrapping = false;
         _label.raycastTarget = false;
 
-        // The lock's price, or anything else a state wants to say under the name.
         var caption = ui.CreateLabel(transform, "", 15, TextAlignmentOptions.Center);
         _caption = caption.GetComponent<TMP_Text>();
         _caption.color = new Color(1f, 0.85f, 0.4f);
@@ -84,7 +81,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
         var clone = CustomMapSkin.CloneNode(Data.NodeType);
         if (clone == null) return false;
 
-        // Attached and stripped while the clone is still parked inactive under the skin holder.
         _custom = CustomNodeVisual.Attach(clone, Data.NodeType);
         if (_custom == null)
         {
@@ -110,8 +106,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
         return true;
     }
 
-    // The click target is ours in both modes: the vanilla node's own button belongs to the DLC
-    // menu's navigation, which this screen is deliberately outside of.
     private void BuildHitTarget(Action<WorldMapNodeView> onClicked)
     {
         var hitGO = new GameObject("Hit");
@@ -147,7 +141,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
         }
         else
         {
-            // No art: the rounded plate reads as a disc at this size.
             _icon.sprite = MapEditorUI.RoundedPlate;
             _icon.type = Image.Type.Sliced;
             _icon.pixelsPerUnitMultiplier = 0.8f;
@@ -180,8 +173,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
 
     // ---- states ------------------------------------------------------------------------------
 
-    // Live, so the scale slider shows its work without a rebuild; re-asserted on every state pass
-    // so a redraw can never drop back to the authored size.
     public void ApplyScale(float scale)
     {
         scale = Mathf.Max(0.2f, scale);
@@ -251,7 +242,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
         }
     }
 
-    // Editor view: everything visible, buttons disabled - the editor polls its own input.
     public void SetEditView()
     {
         State = WorldNodeState.Selectable;
@@ -280,8 +270,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
         _icon.color = Color.white;
     }
 
-    // The editor's marks: red for the selection, green for a node the selection is gated on. The
-    // vanilla art wears them on its outline; our own art tints its disc instead.
     public static readonly Color SelectedMark = new(1f, 0.33f, 0.28f);
     public static readonly Color RequiredMark = new(0.35f, 0.95f, 0.45f);
 
@@ -314,7 +302,6 @@ public class WorldMapNodeView : MonoBehaviour, IPointerEnterHandler, IPointerExi
     {
         if (!_pulse || _iconRect == null) return;
 
-        // Unscaled: the screen holds the world at timeScale 0.
         var scale = 1f + Mathf.Sin(Time.unscaledTime * 2.4f) * 0.05f;
         _iconRect.localScale = new Vector3(scale, scale, 1f);
     }

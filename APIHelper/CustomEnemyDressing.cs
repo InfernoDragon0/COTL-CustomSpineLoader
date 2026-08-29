@@ -6,30 +6,13 @@ using UnityEngine;
 
 namespace CustomSpineLoader.APIHelper;
 
-// What a JSON enemy gets after COTL_API has spawned it: its skeleton, its size, its tuned
-// numbers, and its boss bar.
-//
-// It happens here rather than in the spawn itself because COTL_API's Spawn only applies a spine
-// override inside its custom-controller branch, and taking that branch means casting the mimic to
-// EnemySwordsmanWolf - which would pin every custom enemy to that one prefab and throw away the
-// mimic's AI, the very thing a JSON enemy is built on. So the spawn is left alone and the enemy
-// is dressed afterwards.
 public static class CustomEnemyDressing
 {
     private const BindingFlags Members =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
 
-    // Every custom enemy that came through Spawn this room. COTL_API instantiates at the scene
-    // root, so nothing about the room's own teardown ever touches them - and custom rooms skip
-    // the scenery recycle sweep entirely - which is how a corpse (or a straggler) followed the
-    // player through doors. Swept when the biome announces the room is being left.
     private static readonly System.Collections.Generic.List<GameObject> TrackedSpawns = [];
 
-    // Fires at the top of ChangeRoomRoutine, while the departing room is still current: its
-    // custom spawns and their corpses are removed. The bodies live at the scene root, where no
-    // room teardown ever reaches them - without this they followed the player through doors.
-    // (A per-room stash-and-restore was tried so corpses would reappear on revisit, vanilla
-    // style, but the restore never landed reliably; removed in favour of the simple rule.)
     public static void OnBiomeLeftRoom()
     {
         for (var i = 0; i < TrackedSpawns.Count; i++)
@@ -48,10 +31,6 @@ public static class CustomEnemyDressing
         }
         TrackedSpawns.Clear();
 
-        // The visible skeleton is not the enemy: on death, SpawnDeadBodyOnDeath drops a separate
-        // DeadBodySliding prefab that inherits the enemy's parent - the scene root, for anything
-        // COTL_API spawned. Vanilla corpses are parented under their room and are left alone
-        // here; only the rootless ones are ours.
         try
         {
             foreach (var body in UnityEngine.Object.FindObjectsOfType<DeadBodySliding>())
@@ -70,9 +49,6 @@ public static class CustomEnemyDressing
 
         TrackedSpawns.Add(unit.gameObject);
 
-        // For every custom enemy that comes through Spawn, ours or not: when COTL_API swaps in
-        // its own controller it destroys the prefab's original UnitObject, and anything on the
-        // prefab that serialized a reference to it is left pointing at a corpse.
         RepairControllerReferences(unit);
 
         if (!CustomEnemyLoader.Registered.TryGetValue(type, out var enemy) || enemy == null) return;
@@ -104,18 +80,6 @@ public static class CustomEnemyDressing
         if (enemy.BossHealthBar) AttachBossBar(go, unit, enemy);
     }
 
-    // COTL_API's Spawn, when a custom enemy brings its own EnemyController, copies every
-    // UnitObject field onto the new controller and then DESTROYS the original - but the mimic
-    // prefab's helper components still hold serialized references to it. Cower is the one that
-    // bites: its death-knockback coroutine's first statement is AIScriptToDisable.enabled =
-    // false, which throws on the destroyed controller AFTER DestroyOnDeath has already been
-    // switched off - so the corpse never finishes dying and stands frozen mid-animation.
-    //
-    // Only the known offenders, by type: a generic "re-point every UnitObject field" sweep would
-    // also rewrite legitimate cross-unit references (BarrierEnemy.barrierPartner points at a
-    // DIFFERENT unit). Destroy is deferred, so the stale value does not read as null this frame -
-    // anything not already pointing at the live controller is re-pointed unconditionally, which
-    // is a no-op for enemies that never had their controller swapped.
     private static void RepairControllerReferences(UnitObject unit)
     {
         try
@@ -135,9 +99,6 @@ public static class CustomEnemyDressing
         }
     }
 
-    // Unconditional, unlike COTL_API's: an enemy that keeps its mimic's brain still wants its own
-    // skin. A skin the skeleton does not have is a warning rather than the exception SetSkin
-    // would throw halfway through Initialize.
     private static void ApplySpine(GameObject go, UnitObject unit, CultTweakerCustomEnemy enemy)
     {
         var spine = FindSkeleton(go, unit);
@@ -169,8 +130,6 @@ public static class CustomEnemyDressing
             return;
         }
 
-        // No override, but a skin: the mimic's own skeleton is being re-dressed, which is how a
-        // follower-skinned enemy is made without shipping any art.
         if (string.IsNullOrEmpty(skin)) return;
 
         try
@@ -192,8 +151,6 @@ public static class CustomEnemyDressing
         }
     }
 
-    // The controller's own Spine field first: an enemy prefab can hold more than one skeleton
-    // (a mount, a weapon), and the field is the one the AI animates.
     private static SkeletonAnimation FindSkeleton(GameObject go, UnitObject unit)
     {
         var fromField = SkeletonField(unit);
@@ -202,8 +159,6 @@ public static class CustomEnemyDressing
         return go.GetComponentInChildren<SkeletonAnimation>(true);
     }
 
-    // Shared with the map editor's enemy tool, which needs the same "which skeleton does the AI
-    // animate" answer for its ghosts and thumbnails - through the same memoised lookup.
     internal static SkeletonAnimation SkeletonField(UnitObject unit)
     {
         if (unit == null) return null;
@@ -216,16 +171,11 @@ public static class CustomEnemyDressing
         }
         catch (Exception)
         {
-            // Not every mimic names it that; the caller has a fallback.
         }
 
         return null;
     }
 
-    // The tuning table, by member name, against the controller itself - which is the UnitObject,
-    // so `maxSpeed` and `AttackWithinRange` are both reachable on the same object. A name that
-    // does not exist is named in the log rather than swallowed: a typo in a config is otherwise
-    // an enemy that quietly ignores half its file.
     private static void ApplyTuning(UnitObject unit, CultTweakerCustomEnemy enemy)
     {
         if (enemy.Tuning == null || enemy.Tuning.Count == 0) return;
@@ -248,9 +198,6 @@ public static class CustomEnemyDressing
         }
     }
 
-    // Memoised per (type, member): the lookups run on every spawn, and a room of eight enemies
-    // with a six-entry tuning table used to do ~100 uncached reflection walks. Misses are cached
-    // too (as null) - a typo'd name asks once, not once per spawn.
     private static readonly System.Collections.Generic.Dictionary<(Type, string), System.Reflection.MemberInfo>
         MemberCache = [];
 
@@ -288,8 +235,6 @@ public static class CustomEnemyDressing
         return false;
     }
 
-    // Numbers only, because a JSON tuning table is numbers. A bool member takes 0 or 1, which is
-    // less pretty than true/false but keeps the table one type.
     private static object Convert(Type type, float value)
     {
         if (type == typeof(float)) return value;
@@ -319,12 +264,6 @@ public static class CustomEnemyDressing
     }
 }
 
-// Drives the game's own boss HUD - the bar across the top with a name on it, the one the bishops
-// and minibosses use - for an ordinary enemy.
-//
-// The bar has to be taken down again by hand. UIBossHUD.Update dereferences its boss every frame
-// with no guard for a destroyed one, so an enemy that dies and leaves the bar up throws
-// MissingReferenceException every frame for the rest of the run.
 public class CustomEnemyBossBar : MonoBehaviour
 {
     private Health _health;
@@ -352,8 +291,6 @@ public class CustomEnemyBossBar : MonoBehaviour
         }
         catch (Exception e)
         {
-            // No HUD in this scene, or no Canvas to parent to. Not fatal - the enemy is fine
-            // without a bar.
             Plugin.Log.LogWarning("Custom enemy boss bar could not be shown: " + e.Message);
         }
     }
@@ -374,8 +311,6 @@ public class CustomEnemyBossBar : MonoBehaviour
 
         try
         {
-            // Only if it is still ours: two of these alive at once would otherwise have the first
-            // one to die take the survivor's bar down with it.
             if (UIBossHUD.Instance != null && UIBossHUD.Instance.boss == _health) UIBossHUD.Hide();
         }
         catch (Exception e)

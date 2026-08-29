@@ -5,23 +5,14 @@ using Newtonsoft.Json;
 
 namespace CustomSpineLoader.MapEditor;
 
-// One authored adventure map: nodes placed freely, joined by links.
-//
-// The game addresses a node by an integer Point and draws it at point * 300, so the grid still
-// exists - but it is derived from the layout on the way in (DungeonMapBuilder.Layout) rather than
-// being the thing that is authored. What is authored is a position and a graph, the way the world
-// map is, so a dungeon can be laid out by eye.
 public class CTDungeonMap
 {
     public string MapName = "untitledmap";
 
-    // The Unity scene the dungeon runs in; json-only, no control in the tool.
     public string SceneName = "Dungeon1";
 
     public List<CTDungeonMapNode> Nodes = [];
 
-    // The grid the builder was first written around. Read so a map saved by that build still
-    // opens; never written again - Migrate turns it into positions and ids.
     public int Layers;
     public int Columns;
 
@@ -39,23 +30,16 @@ public class CTDungeonMap
         return null;
     }
 
-    // The floor the player arrives in: the leftmost node on the lowest row. Asked of the layout
-    // rather than worked out here, because the run starts on whichever node Map.GetFirstNode()
-    // lands on and that is decided by the same resolution the builder uses.
     public CTDungeonMapNode StartNode()
     {
         var rows = DungeonMapBuilder.Rows(this);
         return rows.Count > 0 && rows[0].Count > 0 ? rows[0][0] : null;
     }
 
-    // The spacing the old grid was drawn at, so a map authored on it keeps its shape.
     private const float LegacyPitch = 160f;
 
     private static readonly HashSet<string> Reported = new(StringComparer.OrdinalIgnoreCase);
 
-    // A map written before nodes had ids addresses them by cell: give every node an id, turn its
-    // cell into a position, and rewrite its (x,y) links as links to those ids. Idempotent - a map
-    // that already has ids passes straight through.
     public void Migrate()
     {
         var legacy = false;
@@ -93,8 +77,6 @@ public class CTDungeonMap
             node.Outgoing.Clear();
         }
 
-        // Once per map per session: nothing rewrites the file until it is saved, so every scan of
-        // the folder migrates it again and the log would fill with the same six lines.
         if (Reported.Add(MapName ?? ""))
             Plugin.Log.LogInfo($"MapEditor: dungeon map '{MapName}' was on the old grid; " +
                                $"{Nodes.Count} node(s) moved onto free positions.");
@@ -103,24 +85,17 @@ public class CTDungeonMap
 
 public class CTDungeonMapNode
 {
-    // Stable identity: links name it, and a node that moves keeps it.
     public string Id = "";
 
-    // Where the node sits on the map, in the editor's own units. The game's grid is derived from
-    // this, so two nodes at the same height stand on the same layer.
     public float PosX;
     public float PosY;
 
-    // Map.NodeType by name: a stored int would silently shift when the game renumbers the enum.
     public string NodeType = "MinorEnemy";
 
-    // A CTLevelBlueprint by name, played on entry. Empty = the node's vanilla generation.
     public string Level = "";
 
-    // Nodes this one leads to, by id; incoming is rebuilt from these, never stored.
     public List<string> Children = [];
 
-    // The old grid's cell and links, read from a map saved by that build and dropped by Migrate.
     public int X;
     public int Y;
     public List<CTDungeonMapLink> Outgoing = [];
@@ -140,7 +115,6 @@ public class CTDungeonMapNode
     }
 }
 
-// Only ever read: the cell pair a pre-id map stored its links as.
 public class CTDungeonMapLink
 {
     public int X;
@@ -156,7 +130,6 @@ public static class CTDungeonMapSerialization
     public static string PathFor(string mapName) =>
         Path.Combine(RootPath, MapEditorSerialization.Sanitize(mapName) + ".json");
 
-    // Exists = ours, the overwrite question. Available = ours or any other mod's, the load question.
     public static bool Exists(string mapName) => File.Exists(PathFor(mapName));
 
     public static bool Available(string mapName) => ReadPathFor(mapName) != null;
@@ -165,8 +138,6 @@ public static class CTDungeonMapSerialization
         APIHelper.ModContentPaths.FindFile(FolderName,
             MapEditorSerialization.Sanitize(mapName) + ".json");
 
-    // The map as it would be written. Comparing this to the last write beats a dirty flag set from
-    // every widget: one that forgot to raise the flag would lose the edit silently.
     public static string ToJson(CTDungeonMap map) =>
         map == null ? "" : JsonConvert.SerializeObject(map, Formatting.Indented);
 

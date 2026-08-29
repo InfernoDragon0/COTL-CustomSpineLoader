@@ -21,9 +21,6 @@ public class ClearTool : IMapEditorTool
         Arm(ui, panel, "Clear Terrain", ClearTerrain);
         Arm(ui, panel, "Clear Placed Objects", () => ClearPlaced());
 
-        // Moved here from the Trigger tool: wiping every trigger in the room is a clearing job, and
-        // it belongs with the other clearing jobs rather than at the bottom of the panel used to
-        // author one trigger at a time.
         Arm(ui, panel, "Clear All Triggers", ClearTriggers, CountTriggers);
     }
 
@@ -31,14 +28,6 @@ public class ClearTool : IMapEditorTool
 
     // ---- arming ---------------------------------------------------------------------------------
 
-    // Every button on this panel asks twice, not just the one that arrived already asking. They all
-    // destroy something the room cannot get back - the sweeps do not even leave an undo entry - and
-    // they sit close enough together that a slip reaches the wrong one. One careful button among
-    // three careless ones was the wrong half of the inconsistency to keep.
-    //
-    // Two presses rather than a dialog because the panel has no modal of its own: the first press
-    // rewrites the button to say what it is about to do, a second within the window does it, and a
-    // lapse or a change of tool puts the label back.
     private const float ArmWindow = 4f;
 
     private class ArmedButton
@@ -47,8 +36,6 @@ public class ClearTool : IMapEditorTool
         public string Text;
         public System.Action Run;
 
-        // How many things the press would remove, or -1 where the count is not worth working out
-        // up front - a scenery sweep would have to walk the whole room to answer.
         public System.Func<int> Count;
 
         public float ArmedUntil;
@@ -84,8 +71,6 @@ public class ClearTool : IMapEditorTool
             return;
         }
 
-        // One at a time: arming a second button disarms the first, so there is never more than one
-        // press standing by to destroy something.
         DisarmAll();
         entry.ArmedUntil = Time.unscaledTime + ArmWindow;
 
@@ -114,14 +99,11 @@ public class ClearTool : IMapEditorTool
         var triggers = _editor.GetTool<TriggerTool>();
         if (triggers == null) return;
 
-        // No History.Clear here, unlike the placed-objects sweep: entries whose trigger has gone
-        // report false and are stepped over, so the rest of the session's undo survives.
         var removed = triggers.ClearPlaced();
         _editor.MarkEdited();
         _editor.SetStatus($"Removed {removed} trigger(s).");
     }
 
-    // Only what the editor placed, not what the biome generated.
     public int ClearPlaced()
     {
         var removed = 0;
@@ -130,7 +112,6 @@ public class ClearTool : IMapEditorTool
         removed += _editor.GetTool<NpcTool>()?.ClearPlaced() ?? 0;
         removed += _editor.GetTool<TriggerTool>()?.ClearPlaced() ?? 0;
 
-        // Everything the undo stack referred to has just been destroyed.
         _editor.History.Clear();
 
         SceneRefs.RescanNavigation();
@@ -138,8 +119,6 @@ public class ClearTool : IMapEditorTool
         _editor.SetStatus($"Removed {removed} placed object(s).");
         return removed;
     }
-    // Leaving the panel drops the arming: a half-finished confirmation must not still be waiting
-    // when the tool is opened again later.
     public void OnExit() => DisarmAll();
 
     public void OnUpdate()
@@ -153,7 +132,6 @@ public class ClearTool : IMapEditorTool
         }
     }
 
-    // Public: the blueprint loader clears the whole room before rebuilding it.
     public void ClearScenery()
     {
         var room = SceneRefs.Room;
@@ -167,7 +145,6 @@ public class ClearTool : IMapEditorTool
         destroyed += DestroyChildren(room.SceneryTransform != null ? room.SceneryTransform.transform : null);
         destroyed += DestroyChildren(room.HeavyAssetsTransform);
 
-        // Much of the backdrop hangs off the room root, not SceneryTransform; swept separately.
         destroyed += ClearRoomRoot(room, includeTerrain: false);
 
         SceneRefs.RescanNavigation();
@@ -184,7 +161,6 @@ public class ClearTool : IMapEditorTool
             return;
         }
 
-        // Scenery first, so the counts below only cover terrain.
         ClearScenery();
 
         var destroyed = 0;
@@ -223,7 +199,6 @@ public class ClearTool : IMapEditorTool
         _editor.SetStatus($"Cleared {destroyed} terrain object(s). Doors kept.");
     }
 
-    // Sweeps the room root; the structural containers are cleared through their own passes.
     private static int ClearRoomRoot(MMRoomGeneration.GenerateRoom room, bool includeTerrain)
     {
         var keep = new HashSet<Transform>();
@@ -235,7 +210,6 @@ public class ClearTool : IMapEditorTool
         return ClearRecursive(room.transform, keep, includeTerrain, 0);
     }
 
-    // Protected nodes are descended into, not destroyed, so shared-parent dressing still goes.
     private static int ClearRecursive(Transform node, HashSet<Transform> keep, bool includeTerrain, int depth)
     {
         if (depth > 6) return 0;
@@ -246,7 +220,6 @@ public class ClearTool : IMapEditorTool
             var child = node.GetChild(i);
             if (child == null || keep.Contains(child)) continue;
 
-            // Terrain shapes only go on the deeper clear.
             if (!includeTerrain && child.GetComponentInChildren<SpriteShapeController>(true) != null)
             {
                 destroyed += ClearRecursive(child, keep, false, depth + 1);

@@ -7,7 +7,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// One building the player put down in a hub.
 public class HubStructureRecord
 {
     public string TypeName;
@@ -18,24 +17,13 @@ public class HubStructureRecord
     public int Direction = 1;
     public int Rotation;
 
-    // Where it stands, as well as which cell it claims.
-    //
-    // The cell is not always a cell: a building the game does not put on the grid carries the
-    // sentinel (-2147483647, -2147483647) instead, and a record of that cannot be looked up in any
-    // grid. The world position always resolves - the region can find the tile under a point - so it
-    // is what a restore prefers, with the cell kept as the fallback for records written before this.
     public float WorldX;
     public float WorldY;
     public bool HasWorld;
 
-    // Whether this was a finished building or still a site waiting for a follower. Restoring is done
-    // by building it again, which produces a site either way; one that was already finished when the
-    // player left is finished again straight away rather than asking them to pay for the labour a
-    // second time.
     public bool Finished = true;
 }
 
-// One floor decoration - a path tile, a plank, a tiled floor.
 public class HubPathRecord
 {
     public int TileX;
@@ -51,23 +39,8 @@ public class HubStructureFile
     public List<HubPathRecord> Paths = [];
 }
 
-// What the player built in a hub, per save slot, in our own file.
-//
-// The game would happily store these itself: a hub runs in the Woolhaven room, and Woolhaven has a
-// real save list behind it. It must not be used. That list is shared by every hub and by the actual
-// Woolhaven, and the game prunes it on load - entries whose grid cell is already taken are deleted
-// outright, which is what two hubs sharing one list would do to each other. Worse, it is the
-// player's save: a bug here would cost them their town, not their hub.
-//
-// So the vanilla flow runs in full - the grid, the cost, the build - and the moment the game hands
-// the new building to its save list, we take it straight back out and write it down here instead.
-// The building itself is untouched and works exactly as the game intends; only where it is
-// remembered has changed.
 public static class HubStructureStore
 {
-    // The location a hub's structures belong to. The hub is the Woolhaven room dressed as something
-    // else, so the game's own machinery - which location manager owns the build, which layer the
-    // structure is parented to - keys off this.
     public const FollowerLocation HubLocation = FollowerLocation.DLC_ShrineRoom;
 
     private const string RootFolder = "CustomHubStructures";
@@ -75,8 +48,6 @@ public static class HubStructureStore
     private static readonly List<HubStructureRecord> _records = [];
     private static readonly List<HubPathRecord> _paths = [];
 
-    // Live structures we own, so a demolition or a move can find its record again. Keyed by the
-    // data object the game hands around, which is the only thing both ends agree on.
     private static readonly Dictionary<StructuresData, HubStructureRecord> _live = new();
 
     private static readonly List<StructureBrain> _brains = [];
@@ -87,8 +58,6 @@ public static class HubStructureStore
 
     public static bool Active => _hub != null;
 
-    // The user-visible slot. Saving a DLC game shifts this by ten for the length of one write, and
-    // a hub file named from that would be a file the next session cannot find.
     private static int Slot => SaveAndLoad.SAVE_SLOT % 10;
 
     public static string FolderForSlot() =>
@@ -117,9 +86,6 @@ public static class HubStructureStore
         StructureManager.OnStructureMoved += Moved;
     }
 
-    // Leaving the hub. The brains are ours and the game never clears them on a scene change, so
-    // they would otherwise still be listed against Woolhaven the next time the player goes there -
-    // pointing at buildings that were destroyed with the hub.
     public static void TearDown()
     {
         if (_hub == null && _brains.Count == 0) return;
@@ -127,7 +93,6 @@ public static class HubStructureStore
         StructureManager.OnStructureRemoved -= Removed;
         StructureManager.OnStructureMoved -= Moved;
 
-        // Leaving mid-placement would otherwise leave the town's own build region unfindable.
         Patches.HubBuildPatches.RestoreTownRegion();
 
         _tearingDown = true;
@@ -161,15 +126,12 @@ public static class HubStructureStore
 
     // ---- bookkeeping --------------------------------------------------------------------------
 
-    // Called from the patch that lifts a hub build back out of the game's save list.
     public static void Adopt(StructureBrain brain)
     {
         if (brain?.Data == null) return;
 
         if (!_brains.Contains(brain)) _brains.Add(brain);
 
-        // A build site is a placeholder for the real thing; only what it becomes is worth
-        // remembering, and that arrives here in its own right a moment later.
         if (brain is Structures_BuildSite || brain is Structures_BuildSiteProject) return;
         if (brain.Data.Type == StructureBrain.TYPES.PLACEMENT_REGION) return;
 
@@ -200,8 +162,6 @@ public static class HubStructureStore
     {
         if (_tearingDown || data == null) return;
 
-        // A build site retires itself the moment it becomes the building it was standing in for,
-        // so this fires for things that were never recorded as well as for demolitions.
         _brains.RemoveAll(brain => brain?.Data == data);
 
         if (!_live.TryGetValue(data, out var record)) return;
@@ -225,17 +185,11 @@ public static class HubStructureStore
 
     // ---- restore ------------------------------------------------------------------------------
 
-    // Put back what the player built here last time. Free of charge - it was paid for when it was
-    // first placed - and through the region's own placement call, so the grid is stamped exactly as
-    // a fresh build would stamp it.
     public static int Restore()
     {
         var region = HubBuildTotem.Region;
         if (region == null || _records.Count == 0) return 0;
 
-        // The list is rebuilt from what actually lands: a cell that no longer exists (the author
-        // moved the ground out from under it) drops its building rather than keeping a record that
-        // can never be placed.
         var wanted = new List<HubStructureRecord>(_records);
         _records.Clear();
 
@@ -277,9 +231,6 @@ public static class HubStructureStore
 
     // ---- floor decorations ----------------------------------------------------------------------
 
-    // Mirrored wholesale rather than one at a time: the game keeps them on the region's own data,
-    // and that list is already exactly what needs writing down. It is short, and it only changes
-    // when the player lays or lifts a tile.
     public static void SavePaths()
     {
         var region = HubBuildTotem.Region;
@@ -289,7 +240,6 @@ public static class HubStructureStore
         _paths.Clear();
         foreach (var path in data.pathData)
         {
-            // A struct, so there is no null to check for.
             if (path.PathID == -1) continue;
             _paths.Add(new HubPathRecord
             {
@@ -304,8 +254,6 @@ public static class HubStructureStore
         Save();
     }
 
-    // Put the floor back. The drawing half is a private method on the tile manager - the same one
-    // the game calls when it restores the town's own paths on load - so it is called by name.
     public static int RestorePaths()
     {
         var region = HubBuildTotem.Region;
@@ -362,8 +310,6 @@ public static class HubStructureStore
         }
     }
 
-    // Written on every change: a hub is left by reloading the scene, and there is no moment before
-    // that which is reliably "the end".
     private static void Save()
     {
         if (_hub == null) return;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -7,7 +7,6 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.WorldMap;
 
-// The custom overworld: a full-screen travel menu over the current scene, world paused underneath.
 public class WorldMapScreen : MonoBehaviour
 {
     public static WorldMapScreen Instance { get; private set; }
@@ -16,7 +15,6 @@ public class WorldMapScreen : MonoBehaviour
 
     public CTWorldMap Map { get; private set; }
 
-    // The editor overlays this same canvas; play-mode interactions step aside.
     public bool EditMode
     {
         get => _editMode;
@@ -30,8 +28,6 @@ public class WorldMapScreen : MonoBehaviour
 
     private bool _editMode;
 
-    // Whether this session of the map has been edited at all. The play-mode badge is an editor
-    // affordance: a player who opened the map to travel should not be told about F6.
     private bool _editorUsed;
 
     public RectTransform ContentRoot { get; private set; }
@@ -57,13 +53,11 @@ public class WorldMapScreen : MonoBehaviour
     private readonly List<(RectTransform rect, Vector2 basePos, float distance)> _parallax = [];
     private Dictionary<string, WorldNodeState> _states = new(StringComparer.OrdinalIgnoreCase);
 
-    // The editor drags things by reference rather than rebuilding the canvas every frame.
     internal readonly Dictionary<string, RectTransform> LayerRects = new(StringComparer.OrdinalIgnoreCase);
     internal readonly Dictionary<string, RectTransform> NodeRects = new(StringComparer.OrdinalIgnoreCase);
 
     internal RectTransform CanvasRoot => _canvasGO != null ? _canvasGO.GetComponent<RectTransform>() : null;
 
-    // Pointer position in the map's authored coordinate space.
     internal Vector2 PointerContentPosition()
     {
         RectTransformUtility.ScreenPointToLocalPointInRectangle(ContentRoot, Input.mousePosition,
@@ -71,22 +65,17 @@ public class WorldMapScreen : MonoBehaviour
         return local;
     }
 
-    // Colour sliders fire every drag tick; repainting must not rebuild the layers.
     internal void ApplyBackgroundColor()
     {
         if (_background != null && Map != null)
             _background.color = Map.BackgroundColor?.ToColor() ?? Color.black;
     }
 
-    // The game's naming dialog is a menu on the game's own canvas, which this one covers at
-    // sorting order 4500 - so the map hides for it, the way the room editor closes for it.
     internal void SetModalMode(bool modalOpen)
     {
         if (_canvas != null) _canvas.enabled = !modalOpen && _open;
         if (!_open) return;
 
-        // The prompt runs the clock itself (its animations are scaled and would freeze half-open at
-        // zero); the pause is re-pinned the moment it closes rather than a frame later.
         Time.timeScale = modalOpen ? (_savedTimeScale <= 0f ? 1f : _savedTimeScale) : 0f;
     }
 
@@ -98,8 +87,6 @@ public class WorldMapScreen : MonoBehaviour
         RebuildVisuals();
     }
 
-    // One way out, whether it was pressed or clicked: dismiss a prompt, else leave edit mode, else
-    // close. Esc and the X button share it so the corner button is never a second, different door.
     internal void StepBack()
     {
         if (_confirmRoot != null && _confirmRoot.activeSelf) HideConfirm();
@@ -107,7 +94,6 @@ public class WorldMapScreen : MonoBehaviour
         else RequestClose();
     }
 
-    // Closing must not quietly drop an afternoon's work.
     internal void RequestClose()
     {
         if (!_open) return;
@@ -155,8 +141,6 @@ public class WorldMapScreen : MonoBehaviour
 
     // ---- unsaved work ------------------------------------------------------------------------
 
-    // The map as it last stood on disk. Comparing beats a dirty flag set from every widget: a
-    // slider or dropdown that forgot to raise the flag would silently lose the edit.
     private string _savedJson = "";
 
     internal void MarkSaved() => _savedJson = CTWorldMapSerialization.ToJson(Map);
@@ -168,7 +152,6 @@ public class WorldMapScreen : MonoBehaviour
     {
         Instance = this;
 
-        // The scene can change under an open map (cutscene, death warp); close when it does.
         UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
     }
 
@@ -191,7 +174,6 @@ public class WorldMapScreen : MonoBehaviour
     {
         if (_open) return;
 
-        // Three systems share the pause and the screen; only one runs at a time.
         if (RuntimeMapEditor.Active != null && RuntimeMapEditor.Active.IsEditing)
         {
             Plugin.Log.LogInfo("World map: close the map editor (F4) first.");
@@ -203,7 +185,6 @@ public class WorldMapScreen : MonoBehaviour
             return;
         }
 
-        // No running game to pause on the title screen.
         if (PlayerFarming.Instance == null)
         {
             Plugin.Log.LogInfo("World map: opens in game, not on the menu.");
@@ -231,8 +212,6 @@ public class WorldMapScreen : MonoBehaviour
         Time.timeScale = 0f;
         SimulationManager.Pause();
 
-        // The vanilla map art is an Addressable the game only loads on demand, so the first map of
-        // a session waits a moment for it rather than opening in our own visuals and popping.
         if (!CustomMapSkin.NeedsLoad)
         {
             BuildContent();
@@ -250,7 +229,6 @@ public class WorldMapScreen : MonoBehaviour
     {
         yield return CustomMapSkin.EnsureLoaded();
 
-        // Closed again while the art loaded.
         if (!_open) yield break;
 
         BuildContent();
@@ -280,10 +258,8 @@ public class WorldMapScreen : MonoBehaviour
     {
         if (!_open) return;
 
-        // The editor's name dialog needs a running clock; the pause stands down while a modal is up.
         var editorModal = WorldMapEditor.Instance != null && WorldMapEditor.Instance.ModalOpen;
 
-        // Reassert the pause - a vanilla menu opened underneath can put the clock back.
         if (!editorModal && Time.timeScale != 0f) Time.timeScale = 0f;
 
         if (!editorModal && Input.GetKeyDown(KeyCode.Escape))
@@ -316,7 +292,6 @@ public class WorldMapScreen : MonoBehaviour
         _canvas = _canvasGO.AddComponent<Canvas>();
         _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
-        // Under the F7 panel (5000) and the vanilla dialogs, over the game's HUD.
         _canvas.sortingOrder = 4500;
 
         var scaler = _canvasGO.AddComponent<CanvasScaler>();
@@ -326,7 +301,6 @@ public class WorldMapScreen : MonoBehaviour
 
         _canvasGO.AddComponent<GraphicRaycaster>();
 
-        // Clicks are silently swallowed without an EventSystem; the scene may not have one yet.
         if (EventSystem.current == null)
         {
             var events = new GameObject("WorldMap_EventSystem");
@@ -337,7 +311,6 @@ public class WorldMapScreen : MonoBehaviour
 
         _ui.Attach(null, _canvasGO.GetComponent<RectTransform>());
 
-        // The backdrop swallows every click that misses a node, so nothing reaches the world.
         var backgroundGO = new GameObject("Background");
         backgroundGO.transform.SetParent(_canvasGO.transform, false);
         var backgroundRect = backgroundGO.AddComponent<RectTransform>();
@@ -350,7 +323,6 @@ public class WorldMapScreen : MonoBehaviour
         _linesRoot = NewFullRect(ContentRoot, "Connections");
         _nodesRoot = NewFullRect(ContentRoot, "Nodes");
 
-        // Last child, so the editor's marks draw over every layer and node whatever their order.
         _gizmoRoot = NewFullRect(ContentRoot, "Gizmos");
 
         BuildChrome();
@@ -392,8 +364,6 @@ public class WorldMapScreen : MonoBehaviour
         closeRect.sizeDelta = new Vector2(36f, 36f);
         closeRect.anchoredPosition = new Vector2(-18f, -18f);
 
-        // Bottom left, where the room editor's badge sits, and permanent: a line that fades is a
-        // line that is gone by the time it is wanted.
         var badge = _ui.CreateLabel(_canvasGO.transform, "Play mode - F6 to show UI", 18);
         _playBadge = badge;
         var badgeText = badge.GetComponent<TMP_Text>();
@@ -421,8 +391,6 @@ public class WorldMapScreen : MonoBehaviour
         BuildConfirmStrip();
     }
 
-    // Clear of the editor's dock and status bar, which stand on this same canvas: a prompt behind
-    // them reads as nothing happening at all.
     private const float ConfirmBottom = 168f;
 
     private void BuildConfirmStrip()
@@ -435,10 +403,6 @@ public class WorldMapScreen : MonoBehaviour
         rect.sizeDelta = new Vector2(560f, 96f);
         rect.anchoredPosition = new Vector2(0f, ConfirmBottom);
 
-        // The outer plate is the border; the fill sits inside it. Both are black now: the strip
-        // used to be outlined in red to say that answering it wrongly costs something, but the
-        // buttons inside it wear the game's red ribbon, and a red frame around a red button reads
-        // as one shape rather than a question and its answers.
         var border = _confirmRoot.AddComponent<Image>();
         border.sprite = MapEditorUI.RoundedPlate;
         border.type = Image.Type.Sliced;
@@ -479,7 +443,6 @@ public class WorldMapScreen : MonoBehaviour
         _confirmRect.sizeDelta = new Vector2(150f, 34f);
         _confirmButtonLabel = confirm.GetComponentInChildren<TMP_Text>();
 
-        // The middle button only appears when a prompt offers a third way out (discard, skip).
         _altButton = _ui.CreateButton(_confirmRoot.transform, "Discard", () =>
         {
             var action = _altAction;
@@ -515,7 +478,6 @@ public class WorldMapScreen : MonoBehaviour
         if (_altButton != null) _altButton.SetActive(threeWay);
         if (_altButtonLabel != null && altLabel != null) _altButtonLabel.text = altLabel;
 
-        // Two buttons meet in the middle; three make room for the one between them.
         if (_confirmRect != null) _confirmRect.anchoredPosition = new Vector2(threeWay ? -114f : -8f, 10f);
         if (_cancelRect != null) _cancelRect.anchoredPosition = new Vector2(threeWay ? 114f : 8f, 10f);
 
@@ -539,7 +501,6 @@ public class WorldMapScreen : MonoBehaviour
 
     // ---- content ----------------------------------------------------------------------------
 
-    // Torn down and rebuilt whole; assets are cached in WorldMapAssets, so this is GameObjects only.
     public void RebuildVisuals()
     {
         if (!_built || Map == null) return;
@@ -570,7 +531,6 @@ public class WorldMapScreen : MonoBehaviour
         _background.color = Map.BackgroundColor?.ToColor() ?? Color.black;
         _title.text = Map.ShownName;
 
-        // Layers, back to front. Sibling order is draw order on a canvas.
         var layers = new List<CTWorldMapLayer>(Map.Layers);
         layers.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
 
@@ -583,7 +543,6 @@ public class WorldMapScreen : MonoBehaviour
                 _parallax.Add((rect, rect.anchoredPosition, layer.ParallaxDistance));
         }
 
-        // Nodes, then their link lines.
         foreach (var node in Map.Nodes)
         {
             var icon = string.IsNullOrEmpty(node.Icon)
@@ -656,14 +615,6 @@ public class WorldMapScreen : MonoBehaviour
         return rect;
     }
 
-    // Re-aims the link lines at wherever their nodes now are, without rebuilding the map.
-    //
-    // A node drag moves the node's own rect directly each frame - rebuilding the whole map sixty
-    // times a second to drag one disc would be absurd - but the lines were left out of that and
-    // only caught up on the redraw at mouse-up. So a node came away from its links and they snapped
-    // back onto it when the button came up, which is exactly the moment it is too late to see
-    // whether the shape being drawn is the one wanted. This is the cheap half of a rebuild: no
-    // objects created or destroyed, just two positions read and a rect aimed.
     public void RefreshLinks()
     {
         if (Map == null) return;
@@ -720,16 +671,12 @@ public class WorldMapScreen : MonoBehaviour
     private WorldMapHandle _layerRotateHandle;
     private WorldMapHandle _nodeHandle;
 
-    // The corner nodes the tools drag by; null while nothing is selected.
     internal WorldMapHandle LayerHandle => _layerHandle;
     internal WorldMapHandle LayerRotateHandle => _layerRotateHandle;
     internal WorldMapHandle NodeHandle => _nodeHandle;
 
-    // A node's own rect is small and its art hangs outside it; this is the floor its gizmo box uses.
     private const float NodeGizmoMinScreen = 56f;
 
-    // Draws the editor's frame around one layer. Rebuilt rather than moved: a redraw replaces the
-    // layer objects the frame hangs from.
     internal void HighlightLayer(string layerId)
     {
         if (_layerFrame != null) Destroy(_layerFrame.gameObject);
@@ -753,7 +700,6 @@ public class WorldMapScreen : MonoBehaviour
             WorldMapHandle.RotateColour);
     }
 
-    // Marks one node as the editor's selection and clears the mark from the rest.
     internal void HighlightNode(string nodeId)
     {
         _markedNodeId = nodeId;
@@ -762,7 +708,6 @@ public class WorldMapScreen : MonoBehaviour
         if (_nodeHandle != null) Destroy(_nodeHandle.gameObject);
         _nodeHandle = null;
 
-        // Only while editing: in play view a node is travelled to, not resized.
         if (!EditMode || string.IsNullOrEmpty(nodeId)) return;
         if (!NodeRects.TryGetValue(nodeId, out var rect) || rect == null) return;
 
@@ -773,8 +718,6 @@ public class WorldMapScreen : MonoBehaviour
     private string _markedNodeId;
     private readonly HashSet<string> _requiredMarks = new(StringComparer.OrdinalIgnoreCase);
 
-    // The selected node's unlock gate, drawn on the map: the nodes it waits for wear green, so
-    // picking them is done by looking at the map rather than by reading a list of ids.
     internal void SetRequiredMarks(IEnumerable<string> ids)
     {
         _requiredMarks.Clear();
@@ -791,7 +734,6 @@ public class WorldMapScreen : MonoBehaviour
         {
             if (view == null || view.Data == null) continue;
 
-            // The selection wins where a node is both: it is the one being worked on.
             if (!string.IsNullOrEmpty(_markedNodeId) &&
                 string.Equals(view.Data.Id, _markedNodeId, StringComparison.OrdinalIgnoreCase))
                 view.SetMark(WorldMapNodeView.SelectedMark, emphasised: true);
@@ -822,8 +764,6 @@ public class WorldMapScreen : MonoBehaviour
 
         switch (view.State)
         {
-            // The one prompt left: keys are spent for good, and the vanilla map has no equivalent
-            // gesture to copy. Everything else acts on the click, the way its nodes do.
             case WorldNodeState.Locked:
                 if (record.KeysHeld < node.KeysCost) return;
                 ShowConfirm(node.KeysCost == 1
@@ -842,7 +782,6 @@ public class WorldMapScreen : MonoBehaviour
                 if (string.Equals(node.TargetKind, "None", StringComparison.OrdinalIgnoreCase) ||
                     string.IsNullOrWhiteSpace(node.Target))
                 {
-                    // No destination: selecting completes on the spot.
                     if (view.State == WorldNodeState.Completed) return;
                     WorldMapProgress.MarkCompleted(Map, node.Id);
                     RefreshStates();
@@ -860,8 +799,6 @@ public class WorldMapScreen : MonoBehaviour
 
         APIHelper.CustomDungeon dungeon = null;
 
-        // A hub is not a dungeon: it is the game's own town room, emptied and dressed with the
-        // authored blueprint, so it travels through the hub session rather than a CustomDungeon.
         if (string.Equals(node.TargetKind, "Hub", StringComparison.OrdinalIgnoreCase))
         {
             var mapForHub = Map.MapName;
@@ -874,7 +811,6 @@ public class WorldMapScreen : MonoBehaviour
 
             Close();
 
-            // Entering a hub never completes the node - a hub has no success path to record.
             WorldMapProgress.AbortTracking();
             Plugin.Log.LogInfo($"World map '{mapForHub}': entering hub '{node.Target}'.");
             return;
@@ -911,7 +847,6 @@ public class WorldMapScreen : MonoBehaviour
                 return;
             }
 
-            // Bind the run state first, then the dungeon that carries it.
             var error = LevelPlayback.StartForMapNode(level);
             if (error != null)
             {
@@ -928,7 +863,6 @@ public class WorldMapScreen : MonoBehaviour
             return;
         }
 
-        // Close FIRST: entering plays a transition and loads a scene, both need the clock running.
         var mapName = Map.MapName;
         Close();
 
@@ -936,7 +870,6 @@ public class WorldMapScreen : MonoBehaviour
         {
             dungeon.EnterDungeon();
 
-            // AFTER the entry - EnterDungeon's first act is to abort any stale tracking.
             WorldMapProgress.BeginTracking(mapName, node.Id);
         }
         catch (Exception e)
@@ -951,7 +884,6 @@ public class WorldMapScreen : MonoBehaviour
     {
         if (_parallax.Count == 0 || Map == null) return;
 
-        // Mouse position as -1..1 from screen centre; layers drift towards it by their distance.
         var mouse = Input.mousePosition;
         var offset = new Vector2(
             Mathf.Clamp(mouse.x / Mathf.Max(1f, Screen.width) * 2f - 1f, -1f, 1f),
@@ -967,7 +899,6 @@ public class WorldMapScreen : MonoBehaviour
     }
 }
 
-// The unlock cascade; see README "Nodes and unlocking".
 public static class WorldMapStateResolver
 {
     public static Dictionary<string, WorldNodeState> Resolve(CTWorldMap map, WorldMapRecord record)
@@ -986,8 +917,6 @@ public static class WorldMapStateResolver
             states[node.Id] = state;
         }
 
-        // Completed nodes radiate; opened locks count as completed. Base radiates from the
-        // start - it never completes, so without this no run could ever begin.
         foreach (var node in map.Nodes)
         {
             if (!states.TryGetValue(node.Id, out var state)) continue;
@@ -995,7 +924,6 @@ public static class WorldMapStateResolver
                 Cascade(map, record, states, node, 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         }
 
-        // Count gates clamp last, after the cascade.
         foreach (var node in map.Nodes)
         {
             if (node.RequiredCompletedCount <= 0) continue;
@@ -1027,7 +955,6 @@ public static class WorldMapStateResolver
             {
                 if (child.IsLock && !record.IsLockOpened(child.Id))
                 {
-                    // A closed lock at the frontier: what lies beyond previews but goes no further.
                     Upgrade(states, child.Id, WorldNodeState.Locked);
                     foreach (var grandchildId in child.Children)
                         if (map.FindNode(grandchildId) != null)
@@ -1045,7 +972,6 @@ public static class WorldMapStateResolver
         }
     }
 
-    // Locked ranks with Selectable so neither pulls the other down where branches meet.
     private static int Rank(WorldNodeState state) => state switch
     {
         WorldNodeState.Completed => 3,
@@ -1072,7 +998,6 @@ public static class WorldMapStateResolver
     }
 }
 
-// The screen's only seam to the editor; a build without the editor still shows maps.
 internal static class WorldMapEditorBridge
 {
     public static void RequestEditMode(WorldMapScreen screen)

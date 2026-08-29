@@ -26,8 +26,6 @@ public static class NpcDialogueRunner
     {
         if (npc?.Dialogue == null || speaker == null) return;
 
-        // A conversation already owns the screen (and the player's input); starting a second
-        // one underneath it would corrupt both.
         if (MMConversation.isPlaying) return;
         if (IsRunning && !IsStale()) return;
 
@@ -60,8 +58,6 @@ public static class NpcDialogueRunner
         var entries = BuildEntries(npc, speaker, node);
         if (entries.Count == 0)
         {
-            // A lines-less choice hub still needs one entry for the wheel to hang off; ended
-            // instead - Validate should have removed such nodes already.
             EndConversation(npc, node.Id);
             return;
         }
@@ -70,8 +66,6 @@ public static class NpcDialogueRunner
 
         if (node.Choices != null)
         {
-            // Fully qualified: a legacy top-level Response class also exists in the game
-            // assembly, and it is the wrong one.
             var responses = new List<MMTools.Response>(2);
             for (var i = 0; i < node.Choices.Count; i++)
             {
@@ -118,8 +112,6 @@ public static class NpcDialogueRunner
         }
         else
         {
-            // No editor host in this scene (should not happen in dungeons); play directly and
-            // accept the teardown race rather than dropping the branch.
             PlayNode(npc, speaker, nextId);
         }
     }
@@ -160,8 +152,6 @@ public static class NpcDialogueRunner
         return entries;
     }
 
-    // The one true teardown. Because every Play passed CallOnConversationEnd: false, the
-    // letterbox, camera and player input are still in conversation mode until this runs.
     private static void EndConversation(CustomNpc npc, string lastNodeId)
     {
         IsRunning = false;

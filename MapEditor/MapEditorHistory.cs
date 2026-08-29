@@ -11,17 +11,12 @@ public class MapEditorHistory
         public Func<bool> Undo;
     }
 
-    // Deep enough to cover a long authoring session, bounded so a runaway loop cannot grow it
-    // without limit.
     private const int MaxEntries = 256;
 
     private readonly List<Entry> _entries = [];
 
     public int Count => _entries.Count;
 
-    // Raised whenever the room changes through the stack - a push, or an undo that actually undid
-    // something. The editor uses it to know whether closing would lose work, which makes this the
-    // one hook that covers every tool that places, removes or restores anything.
     public Action Changed;
 
     private void RaiseChanged()
@@ -75,6 +70,5 @@ public class MapEditorHistory
         return false;
     }
 
-    // A load or a full clear invalidates everything the stack refers to.
     public void Clear() => _entries.Clear();
 }

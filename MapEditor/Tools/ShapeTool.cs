@@ -35,7 +35,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private MapEditorToggle _collisionToggle;
     private GameObject _vanillaFloorRow;
 
-    // Spline.InsertPointAt throws if a new point lands on an existing one.
     private const float MinPointSpacing = 0.25f;
 
     public ShapeTool(RuntimeMapEditor editor)
@@ -48,10 +47,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _ui = ui;
 
         _profileDropdown = ui.CreateDropdown(panel, "Select a profile", [], (index, _) => SelectProfileAt(index));
-
-        // No click-to-add switch: Ctrl-click adds a point. A mode that had to be turned on, used,
-        // and remembered to turn off again was a way of asking "did you mean that click?" one step
-        // too early - and left on, every stray click in the room grew the shape.
 
         ui.CreateToggle(panel, "Show Collision", _showCollision, v =>
         {
@@ -87,15 +82,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             ApplyColliderSettings();
         });
 
-        // The list goes last, with the button that adds to it. Everything above acts on the shape
-        // the list picked, so the list reading top-down as "settings, then the things they apply
-        // to" was backwards - and a list that grows is the one thing on the panel that should not
-        // be pushing the fixed controls around.
-        //
-        // It is a list rather than a dropdown because it does the work of three controls: click a
-        // row to edit that shape, -/+ to move it behind or in front of its neighbours, X to delete
-        // it. A dropdown could only answer the first, and the buttons beside it acted on "whatever
-        // is selected" - so you had to read the dropdown to learn what they were about to do.
         ui.CreateHeader(panel, "- Shapes -", 19);
         ui.CreateButton(panel, "New Shape (screen centre)", SpawnShape);
 
@@ -103,18 +89,14 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _shapeList = _shapeBox.Content;
         RefreshShapeList();
 
-        // No depth buttons and no Center View: the purple node on the shape drags Z the way the
-        // Select tool's does, and the camera controls already go where the author wants to look.
     }
 
-    // Must run BEFORE the loader clears the room: template and profiles come from scene objects.
     public void PrepareForLoad()
     {
         CaptureTemplate();
         CollectProfiles();
     }
 
-    // Show Collision goes off too, so a stale toggle cannot redraw over the loaded map.
     public void ResetTracking()
     {
         _shapes.Clear();
@@ -143,9 +125,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         CaptureTemplate();
         CollectProfiles();
 
-        // In a dungeon or a hub this switch decides whether the room's own floor or the author's
-        // shapes carry the collision, and both answers are reasonable. In the base the room's own
-        // floor is the player's town, and switching it off would drop everyone standing on it.
         _vanillaFloorRow?.SetActive(RuntimeMapEditor.Context != EditorContext.Base);
 
         if (_active == null)
@@ -156,7 +135,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         if (_active == null && _allShapes.Count > 0) SelectShapeAt(0);
 
-        // OnExit tears the overlay down; rebuild on re-entry.
         RefreshCollisionOverlay();
 
         _editor.SetStatus("Drag handles to edit the shape.");
@@ -195,7 +173,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         AddPointAt(_editor.MouseWorld());
     }
 
-    // Inactive clone so new shapes can be created after Clear Terrain removed every original.
     private void CaptureTemplate()
     {
         if (_template != null) return;
@@ -211,10 +188,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private static SpriteShapeController FindSourceShape()
     {
-        // Candidates in preference order; a filled one wins over any of them. New shapes are clones
-        // of this, so a template taken from an edging or a rope profile would draw a hollow outline
-        // where a dungeon's island floor gives a solid piece of ground - which is what the tool is
-        // for. Woolhaven's own terrain is exactly that kind of unfilled decoration.
         var candidates = new List<SpriteShapeController>();
 
         var room = SceneRefs.Room;
@@ -229,14 +202,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         foreach (var c in Object.FindObjectsOfType<SpriteShapeController>())
             if (c != null) candidates.Add(c);
 
-        // FindObjectsOfType only sees active objects, and in the base every shape outside the
-        // current room is switched off with the room that owns it. Scene objects only - this sweep
-        // also reaches assets.
         foreach (var c in Resources.FindObjectsOfTypeAll<SpriteShapeController>())
             if (c != null && c.gameObject.scene.IsValid()) candidates.Add(c);
 
-        // Ground before water: a water profile's fill is the water surface, which over an emptied
-        // room draws as nothing at all - the hollow shapes a hub used to get.
         foreach (var candidate in candidates)
             if (DrawsAFill(candidate) && !IsWater(candidate.spriteShape))
             {
@@ -261,9 +229,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return fallback;
     }
 
-    // A shape draws its fill from two things: a profile carrying a fill texture, and a fill
-    // material in the renderer's first slot (the second is the edges). A clone of an edge-only
-    // shape has neither, and comes out as an outline around nothing.
     private void EnsureFill(SpriteShapeController ctrl)
     {
         if (ctrl == null) return;
@@ -292,7 +257,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var fill = FindFillMaterial();
         if (fill == null) return;
 
-        // Slot 0 fill, slot 1 edges - the order the renderer draws them in.
         var edge = materials.Length > 0 && materials[materials.Length - 1] != null
             ? materials[materials.Length - 1]
             : fill;
@@ -301,7 +265,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         Plugin.Log.LogInfo("MapEditor: new shape given a fill material.");
     }
 
-    // The shoelace sum: negative area means the points run clockwise.
     private static bool WindsClockwise(Spline spline)
     {
         if (spline == null || spline.GetPointCount() < 3) return false;
@@ -322,8 +285,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private static bool IsWater(SpriteShape profile) =>
         profile != null && profile.name.IndexOf("water", System.StringComparison.OrdinalIgnoreCase) >= 0;
 
-    // Profiles are assets, so this reaches the ones belonging to rooms that are switched off - the
-    // dungeon and base island profiles among them. Ground first, water only as a last resort.
     private SpriteShape FirstFilledProfile()
     {
         if (_profiles.Count == 0) CollectProfiles();
@@ -347,8 +308,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return water;
     }
 
-    // Borrowed from whatever shape in the scene already draws one; the biome's own material when
-    // the room offers it.
     private static Material FindFillMaterial()
     {
         var declared = SceneRefs.ShapeMaterial;
@@ -368,8 +327,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private static string ProfileName(SpriteShapeController ctrl) =>
         ctrl != null && ctrl.spriteShape != null ? ctrl.spriteShape.name : "none";
 
-    // Two ways a shape can carry a fill: the profile's own fill texture, or a fill material on the
-    // renderer (the renderer's first material slot is the fill, the second the edges).
     private static bool DrawsAFill(SpriteShapeController ctrl)
     {
         if (ctrl == null || ctrl.spriteShape == null) return false;
@@ -380,7 +337,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
                renderer.sharedMaterials[0] != null;
     }
 
-    // DecorationList does not always populate every slot, so live scene shapes are scanned too.
     private void CollectProfiles()
     {
         _profiles.Clear();
@@ -398,7 +354,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             Add(deco.SpriteShapeBack);
         }
 
-        // Custom profiles before the global sweep, so their names resolve to the custom asset.
         foreach (var custom in CustomShapeProfiles.All)
             Add(custom);
 
@@ -407,7 +362,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         if (_template != null) Add(_template.spriteShape);
 
-        // FindObjectsOfTypeAll reaches assets, not just scene objects.
         foreach (var shape in Resources.FindObjectsOfTypeAll<SpriteShape>())
             Add(shape);
 
@@ -424,8 +378,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private void SpawnShape()
     {
-        // The composite, not the content root: a shape parented anywhere else keeps its own solid
-        // collider and pushes the player off instead of being ground to stand on.
         var composite = SceneRefs.EnsureRoomComposite();
         var root = composite != null ? composite.transform : SceneRefs.ContentRoot;
         if (root == null)
@@ -441,7 +393,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             return;
         }
 
-        // Screen centre, not the cursor - the cursor is over the button that was just clicked.
         var center = _editor.ScreenToWorld(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
 
         var go = Object.Instantiate(_template.gameObject, root);
@@ -452,18 +403,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var ctrl = go.GetComponent<SpriteShapeController>();
 
-        // The template is whatever the room had to copy, and a room can have nothing but edging -
-        // Woolhaven does. A new shape is meant to be a piece of ground, so if what was copied
-        // cannot draw a fill it is given a profile and a material that can.
         EnsureFill(ctrl);
 
-        // The template carries the source's baked colliders; strip so this shape bakes its own.
         foreach (var inherited in go.GetComponents<Collider2D>())
             Object.DestroyImmediate(inherited);
 
-        // Wound the same way round as the shape this was copied from. A sprite shape fills the side
-        // its spline turns towards, so a square wound against the template's own direction comes
-        // out inside-out: edges on the inside, fill spread over everything outside it.
         var clockwise = WindsClockwise(_template.spline);
 
         var spline = ctrl.spline;
@@ -495,7 +439,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         ctrl.colliderDetail = _colliderDetail;
         ctrl.colliderOffset = _colliderOffset;
 
-        // CommitShape only maintains collision on shapes that already carry a collider.
         EnsureCollider(ctrl);
 
         _shapes.Add(ctrl);
@@ -512,7 +455,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     private MapEditorScrollBox _shapeBox;
     private MapEditorUI _ui;
 
-    // Every shape in the room, ordered the way they are drawn.
     private readonly List<SpriteShapeController> _allShapes = [];
 
     private void CollectShapes()
@@ -523,19 +465,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         foreach (var s in Object.FindObjectsOfType<SpriteShapeController>())
             if (s != null && s != _template && !_allShapes.Contains(s)) _allShapes.Add(s);
 
-        // Back to front, so the row at the bottom of the list is the shape drawn over the rest.
-        // Sorted by the value that actually decides it - see SortOrderOf.
         _allShapes.Sort((a, b) => SortOrderOf(a).CompareTo(SortOrderOf(b)));
     }
 
-    // **Z does not layer sprite shapes.** The game stacks them with the renderer's sorting layer
-    // and order in layer, and leaves Z at a rounding nudge: GenerateRoom.CreateSpriteShape builds
-    // every room shape at z = 0.0001 and then sets `sortingLayerName = "Ground"` and
-    // `sortingOrder = -1`, and where the game needs to know which shape is on top at a point it
-    // compares `spriteShapeRenderer.sortingLayerID`. Unity draws in that order too - sorting layer,
-    // then order in layer, and only then camera distance - so a Z nudge reaches the weakest
-    // mechanism available, and every shape the tool makes is a clone of one template sharing one
-    // layer and one order. That is why moving a shape in Z barely did anything.
     private static int SortOrderOf(SpriteShapeController ctrl)
     {
         var renderer = ctrl != null ? ctrl.spriteShapeRenderer : null;
@@ -548,18 +480,8 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (renderer != null) renderer.sortingOrder = order;
     }
 
-    // The layer the game's own room shapes are on, and where ours have to be too.
     private const string GroundLayer = "Ground";
 
-    // Ground is ground, whatever it was cloned from.
-    //
-    // A shape is made by copying a live one, so it inherits that one's sorting - fine in a dungeon,
-    // where the only shapes to copy are the room's own. A town has other kinds, and a copy of one of
-    // those can land on the same sorting layer and order as the structures standing on it. Sorting
-    // layer decides first, then order in layer, and only then distance - so when the first two tie,
-    // the decision falls to a depth difference the game leaves at 0.0001 of a unit. That is a
-    // rounding nudge, not a gap, and two surfaces that close flicker over each other as the camera
-    // moves. Which is the whole of the terrain-versus-structure fight.
     private static bool _saidWhereGroundWent;
 
     private static void SettleSorting(SpriteShapeController ctrl)
@@ -601,7 +523,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private const float RowHeight = 30f;
 
-    // Tall enough to browse a room's terrain in, short enough that the controls above it stay put.
     private const float ShapeListHeight = 300f;
 
     private void RefreshShapeList()
@@ -681,16 +602,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         var button = _ui.CreateButton(row.transform, text, onClick, RowHeight - 4f);
 
-        // CreateButton's layout flexes to fill a column; here that would push the label out.
         var element = button.GetComponent<LayoutElement>();
         element.preferredWidth = 30f;
         element.minWidth = 30f;
         element.flexibleWidth = 0f;
     }
 
-    // One step at a time on the pressed shape alone. Deliberately *not* a renumbering of the whole
-    // list: the room's own generated shapes are in here too, on orders the biome chose, and
-    // rewriting those to tidy up the numbering would restack terrain the author never touched.
     private void NudgeOrder(SpriteShapeController shape, int direction)
     {
         if (shape == null) return;
@@ -739,8 +656,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         var doomed = shape;
 
-        // A piece of the player's own ground, deleted. Written down before it is destroyed, while
-        // there is still something to describe.
         BaseDelta.NoteRemoved(doomed.gameObject);
 
         _shapes.Remove(doomed);
@@ -748,7 +663,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         ClearHandles();
 
-        // DestroyImmediate: a deferred destroy leaves the shape in the merged outline until the next change.
         Object.DestroyImmediate(doomed.gameObject);
         SceneRefs.RegenerateRoomCollision();
         BaseGround.RequestRefresh();
@@ -787,7 +701,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.SetStatus("Profile: " + _profiles[_profileIndex].name);
     }
 
-    // notify: false - selecting a shape must not add or strip a collider as a side effect.
     private void SyncCollisionToggle()
     {
         if (_collisionToggle == null) return;
@@ -823,7 +736,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             }
         }
 
-        // Insert after the nearest point, not at the end, so the outline stays sensible.
         var insertIndex = NearestPointIndex(spline, local) + 1;
         try
         {
@@ -865,7 +777,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         spline.SetPosition(index, _active.transform.InverseTransformPoint(worldPos));
 
-        // Geometry only while dragging; collision and navigation are rebuilt on release.
         RefreshGeometry(_active);
     }
 
@@ -875,7 +786,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var spline = _active.spline;
         if (index < 0 || index >= spline.GetPointCount()) return;
 
-        // A sprite shape needs at least a triangle to generate geometry.
         if (spline.GetPointCount() <= 3)
         {
             _editor.SetStatus("A shape needs at least 3 points.", StatusSeverity.Warning);
@@ -918,15 +828,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
                 ctrl.gameObject.AddComponent<PolygonCollider2D>();
         }
 
-        // Handed to the room's outline in the same breath it is born, before physics has ever
-        // stepped over it.
-        //
-        // A collider is a solid body of its own until something delegates it to the composite, and
-        // everything that does so runs a frame later, once the sprite shape's mesh exists. In the
-        // editor that gap costs nothing - the clock is stopped. On the way into a base it is a real
-        // frame of real physics, and anything standing where the collider appears is shoved off it:
-        // that is what pushed the player away from the spawn point when a base with reshaped ground
-        // loaded. The geometry catches up at the bake; what matters here is that it never acts alone.
         JoinRoomComposite(ctrl);
     }
 
@@ -943,7 +844,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _collisionOverlay = new GameObject("MapEditor_CollisionOverlay");
         _collisionOverlay.transform.SetParent(_editor.transform, false);
 
-        // Red: this shape's own contribution.
         if (_active != null)
         {
             var edge = _active.GetComponent<EdgeCollider2D>();
@@ -960,7 +860,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             }
         }
 
-        // Green: the merged room outline, which is what the player actually collides with.
         var composite = SceneRefs.RoomComposite;
         if (composite == null) return;
 
@@ -998,7 +897,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         }
     }
 
-    // Cheap: geometry only. Safe to call every frame of a drag.
     private static void RefreshGeometry(SpriteShapeController ctrl)
     {
         if (ctrl == null) return;
@@ -1041,21 +939,14 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.SetStatus("Shape collision off - visual only.");
     }
 
-    // Every edit to a shape lands here - points added, moved and removed, the shape dragged, its
-    // depth nudged, its collision switched - so it is the one place the editor needs to hear about
-    // to know a close would lose terrain work.
     private void CommitShape(SpriteShapeController ctrl)
     {
         if (ctrl == null) return;
 
         _editor.MarkEdited();
 
-        // In the base, a shape the tool did not make is a piece of the player's own ground. Nothing
-        // is written down here - a drag commits on every frame it moves - only the fact that this
-        // shape has been touched, and where it stood before anyone touched it.
         BaseDelta.NoteShapeTouched(ctrl);
 
-        // Visual-only shapes never get a collider: editing decorative geometry must not turn it solid.
         if (!ShapeHasCollision(ctrl))
         {
             ctrl.RefreshSpriteShape();
@@ -1067,16 +958,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.StartCoroutine(BakeNextFrame(ctrl));
     }
 
-    // Bake a shape's collider and fold it into the room's collision outline.
-    //
-    // The half of a commit that decides whether a shape is floor or a wall you bounce off. A collider
-    // that is not part of the room's composite is a solid body on its own, and the two are
-    // indistinguishable until something walks into one. Split out because a shape rebuilt on load has
-    // to be given the same treatment a shape edited by hand gets - which it was not, and that is what
-    // left reshaped base terrain pushing the player around after every load.
-    //
-    // Sorting is deliberately left alone here, unlike FinalizeLoadedShape: the base's own terrain
-    // came with a draw order the game chose, and this is about collision.
     public void MergeCollisionIntoRoom(SpriteShapeController ctrl)
     {
         if (ctrl == null || !ShapeHasCollision(ctrl)) return;
@@ -1095,10 +976,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
         SceneRefs.RegenerateRoomCollision();
 
-        // In the base, collision is only half of what makes a floor. The polygon the game validates
-        // positions against, the followers' bounds check and the buildable grid all read a separate
-        // outline, and ground that is solid but not in that outline is ground the game keeps
-        // teleporting people off.
         BaseGround.RequestRefresh();
 
         if (ReferenceEquals(ctrl, _active)) RefreshCollisionOverlay();
@@ -1123,7 +1000,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             : $"Vanilla floor collision disabled ({affected} piece(s)); shapes now define the floor.");
     }
 
-    // No collision rebuild here: the loader batches one rebuild at the end of the load.
     public int ApplyVanillaFloorFlag(bool enabled)
     {
         _useVanillaFloor = enabled;
@@ -1150,7 +1026,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var composite = SceneRefs.RoomComposite;
         if (composite == null || ctrl == null) return;
 
-        // Only colliders parented under the composite participate in it.
         if (!ctrl.transform.IsChildOf(composite.transform)) return;
 
         ctrl.gameObject.layer = composite.gameObject.layer;
@@ -1228,7 +1103,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public bool HasActiveShape => _active != null;
 
-    // Z preserved: dragging never changes depth ordering.
     public void SetActiveShapePosition(Vector3 world)
     {
         if (_active == null) return;
@@ -1250,7 +1124,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var handle = go.AddComponent<ShapePointHandle>();
         handle.Initialize(this, _editor, index);
 
-        // Clicking a handle must not also drop a new point into the shape.
         _editor.RegisterUiBlocker(rt);
         return go;
     }
@@ -1302,11 +1175,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         foreach (var s in _shapes)
             if (s != null && !list.Contains(s)) list.Add(s);
 
-        // In the base, only what this tool made. The sweep below exists so a dungeon room's own
-        // authored terrain round-trips through a blueprint, which is the right thing when the
-        // blueprint *is* the room. A base file is a difference from a room that already exists, and
-        // sweeping there would write down the player's whole town - and then lay a second copy of it
-        // over the first on the way back in.
         if (RuntimeMapEditor.Context == EditorContext.Base) return list;
 
         foreach (var ctrl in Object.FindObjectsOfType<SpriteShapeController>())
@@ -1321,8 +1189,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return list;
     }
 
-    // Untracked, unserialized clone for auxiliary geometry (door pads); caller sets up the
-    // spline and collider, FinalizeLoadedShape a frame later bakes it.
     public SpriteShapeController CreateUntrackedShape(Transform parent, string name)
     {
         CaptureTemplate();
@@ -1343,8 +1209,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public static void EnsureShapeCollider(SpriteShapeController ctrl) => EnsureCollider(ctrl);
 
-    // Recreates a saved shape; self-registers so a save round-trips. Caller must call
-    // FinalizeLoadedShape a frame later.
     public SpriteShapeController RebuildShape(MapShapeData data)
     {
         if (data == null || data.Points == null || data.Points.Count < 3) return null;
@@ -1382,8 +1246,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return ctrl;
     }
 
-    // A live shape written down: the same record a save makes of it, wherever the caller means to
-    // put that record. The base editor keeps one per piece of the player's own terrain it changed.
     public static MapShapeData Describe(SpriteShapeController ctrl)
     {
         var spline = ctrl.spline;
@@ -1415,12 +1277,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return data;
     }
 
-    // A saved shape's profile, spline and collider written onto a controller that already exists.
-    //
-    // Split out of RebuildShape because the base editor needs the second half of it on its own: a
-    // shape the player's base came with is not rebuilt from nothing, it is found where it stands and
-    // told what the author did to it. Returns false when the data does not describe a usable shape,
-    // which is the caller's cue to throw away whatever it made for it.
     public bool ApplyShapeData(SpriteShapeController ctrl, MapShapeData data)
     {
         if (ctrl == null || data?.Points == null) return false;
@@ -1429,7 +1285,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (profile != null) ctrl.spriteShape = profile;
         else Plugin.Log.LogWarning($"MapEditor: profile '{data.Profile}' not found, keeping template profile.");
 
-        // Absent in maps saved before draw order was editable; those keep the template's order.
         if (data.SortingOrder.HasValue) SetSortOrder(ctrl, data.SortingOrder.Value);
 
         var spline = ctrl.spline;
@@ -1442,7 +1297,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             {
                 spline.InsertPointAt(added, MapEditorSerialization.ToVector3(p.Position));
 
-                // Tangent mode first: setting it recomputes tangents and would clobber saved values.
                 if (System.Enum.TryParse<ShapeTangentMode>(p.TangentMode, out var mode))
                     spline.SetTangentMode(added, mode);
                 spline.SetLeftTangent(added, MapEditorSerialization.ToVector3(p.LeftTangent));
@@ -1454,7 +1308,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             }
             catch (System.Exception e)
             {
-                // A coincident point throws; losing one point must not lose the whole shape.
                 Plugin.Log.LogWarning($"MapEditor: skipped point {i} of shape '{data.Profile}': {e.Message}");
             }
         }
@@ -1483,8 +1336,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return true;
     }
 
-    // Must run a frame after RebuildShape: mesh gen is deferred to end of frame, so baking
-    // earlier captures the stale outline.
     public void FinalizeLoadedShape(SpriteShapeController ctrl)
     {
         SettleSorting(ctrl);
@@ -1500,7 +1351,6 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _editor.MoveCameraTo(_active.transform.position);
     }
 
-    // Terrain the base editor's journal must not treat as the player's own.
     public bool IsTracked(GameObject go)
     {
         if (go == null) return false;
@@ -1508,17 +1358,10 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     }
 }
 
-// Marks a piece of terrain as this tool's rather than the room's.
-//
-// It matters in exactly one place, and only there because the base is edited in place: a dungeon
-// room's shapes are all ours by the time a save runs, and a hub's room was emptied first. The base
-// keeps its own ground standing beside anything drawn on top of it, and nothing about a sprite shape
-// says which of the two it is.
 public class CTEditorShape : MonoBehaviour
 {
 }
 
-// Drag to move a spline point; right-click to delete it.
 public class ShapePointHandle : MonoBehaviour, IDragHandler, IEndDragHandler, IPointerClickHandler
 {
     private ShapeTool _tool;
@@ -1538,7 +1381,6 @@ public class ShapePointHandle : MonoBehaviour, IDragHandler, IEndDragHandler, IP
         _tool.SetPointWorldPosition(_index, _editor.ScreenToWorld(eventData.position));
     }
 
-    // Collision and navigation are rebuilt once here, not on every drag frame.
     public void OnEndDrag(PointerEventData eventData)
     {
         _tool?.CommitActiveShape();
@@ -1552,7 +1394,6 @@ public class ShapePointHandle : MonoBehaviour, IDragHandler, IEndDragHandler, IP
     }
 }
 
-// Drags the whole shape; grab offset captured on mouse-down so it does not snap to the cursor.
 public class ShapeCenterHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     private ShapeTool _tool;

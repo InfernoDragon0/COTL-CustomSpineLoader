@@ -6,18 +6,8 @@ using UnityEngine;
 
 namespace CustomSpineLoader.SpineLoaderHelper;
 
-// Gives a custom structure a Spine skeleton instead of the flat sprite COTL_API paints onto the
-// building prefab.
-//
-// COTL_API builds every custom structure by instantiating one vanilla prefab (Decoration Wreath
-// Stick) and swapping its SpriteRenderer's sprite, and that swap is not extensible. So the sprite
-// still happens - it stays the build-menu icon - and the skeleton is added afterwards as a child
-// of the placed structure, with the sprite renderers switched off. Everything else about the
-// structure (its brain, bounds, collapse/repair, flipping) is untouched: the skeleton is just
-// another child transform, so the game's own child bookkeeping carries it along.
 public static class StructureSpineHelper
 {
-    // Called for every structure the game places, custom or not, so the cheap checks come first.
     public static void TryAttach(GameObject root, StructureBrain.TYPES type)
     {
         if (root == null) return;
@@ -25,8 +15,6 @@ public static class StructureSpineHelper
         if (registered is not CultTweakerCustomStructure custom) return;
         if (custom.SpineData == null || custom.SpineConfig == null) return;
 
-        // Placement can run more than once for the same object (a structure re-placed after a
-        // location reload keeps its GameObject), and a second skeleton would draw over the first.
         if (root.GetComponentInChildren<CultTweakerStructureSpine>(true) != null) return;
 
         try
@@ -43,9 +31,6 @@ public static class StructureSpineHelper
     {
         var config = custom.SpineConfig;
 
-        // The first sprite renderer is the reference for everything the skeleton has to match:
-        // the sorting layer (or it draws behind the ground) and the rotation (or it lies flat in
-        // it - see WorldRotationFor).
         var haveSorting = false;
         var sortingLayer = 0;
         var sortingOrder = 0;
@@ -65,8 +50,6 @@ public static class StructureSpineHelper
             if (config.HideSprite) sprite.enabled = false;
         }
 
-        // Inactive first, so SkeletonAnimation's Awake runs once with the skeleton already
-        // assigned rather than once empty and again on Initialize.
         var go = new GameObject("CultTweakerSpine");
         go.SetActive(false);
         go.transform.SetParent(root.transform, false);
@@ -80,8 +63,6 @@ public static class StructureSpineHelper
         var spine = go.AddComponent<SkeletonAnimation>();
         spine.skeletonDataAsset = custom.SpineData;
 
-        // Checked rather than assigned: Skeleton.SetSkin throws on a name the skeleton does not
-        // have, and that would happen inside Initialize with the structure half-built.
         var data = custom.SpineData.GetSkeletonData(false);
         if (!string.IsNullOrEmpty(config.SkinName))
         {
@@ -112,16 +93,6 @@ public static class StructureSpineHelper
                            (string.IsNullOrEmpty(config.Animation) ? "" : $" playing '{config.Animation}'") + ".");
     }
 
-    // Cult of the Lamb is drawn on a tilt: the camera looks down at sixty degrees, and everything
-    // that stands upright in the world is authored rotated -60 on X to meet it (300 in the
-    // inspector, which is the same angle). Grass, projectiles and one-shot spine effects all do
-    // this to themselves in the game's own code.
-    //
-    // A GameObject created from nothing has no rotation at all, so an unrotated skeleton lies flat
-    // on the ground like a decal. The structure's own sprite is the better reference wherever
-    // there is one - whatever the building does to face the camera, the skeleton then does too -
-    // and the game's tilt only stands in when there is nothing to copy or the sprite was left
-    // unrotated. Rotation in the config overrides both.
     private const float WorldTilt = -60f;
 
     private static Quaternion WorldRotationFor(StructureSpineConfig config, bool haveSprite,
@@ -135,8 +106,6 @@ public static class StructureSpineHelper
         return Quaternion.Euler(WorldTilt, 0f, 0f);
     }
 
-    // An empty animation name is a legitimate answer: the structure then holds its setup pose,
-    // which is what a static prop wants.
     public static void PlayAnimation(SkeletonAnimation spine, CultTweakerCustomStructure custom)
     {
         var config = custom?.SpineConfig;
@@ -161,8 +130,6 @@ public static class StructureSpineHelper
     }
 }
 
-// Marks a structure as already skinned, and gives anything that wants to drive the skeleton
-// later (an interaction, a season swap) a handle on it.
 public class CultTweakerStructureSpine : MonoBehaviour
 {
     public SkeletonAnimation Spine;

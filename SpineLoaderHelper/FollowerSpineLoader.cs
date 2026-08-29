@@ -21,13 +21,10 @@ public class FollowerSpineLoader
 
     public static void LoadAllFollowerSpines(Material material = null)
     {
-        //get the plugin path, then find the foler FollowerSkins in it
         var followerFolder = Path.Combine(Plugin.PluginPath, "FollowerSpines");
-        //check if the folder exists
         if (!Directory.Exists(followerFolder))
             Directory.CreateDirectory(followerFolder);
 
-        //ours, plus the same folder in any other mod's CultTweaker folder (ModContentPaths)
         var folders = APIHelper.ModContentPaths.DirectoriesIn("FollowerSpines");
 
         foreach (var folder in folders)
@@ -69,8 +66,6 @@ public class FollowerSpineLoader
                     Plugin.Log.LogInfo("Reading texture from " + textureFile);
                     Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
                     tex.name = Path.GetFileNameWithoutExtension(textureFile);
-                    // Same unload protection the folder loader has: runtime textures freed by an
-                    // UnloadUnusedAssets sweep never come back.
                     SpineFolderLoader.Keep(tex);
                     textures[Array.IndexOf(spineTextures, textureFile)] = tex;
                 }
@@ -85,8 +80,6 @@ public class FollowerSpineLoader
                 Plugin.Log.LogInfo("Using material name " + mat.name);
                 CustomSkinManager.AddFollowerSpine(followerSpineName, runtimeSkeletonAsset);
 
-                //apply the default skin, init each layer of the skin in order of defaultSkin string list
-                //new skin("custom skin")
                 for (int i = 0; i < defaultSkinName.Count; i++)
                 {
                     var skinToApply = defaultSkinName[i];
@@ -104,17 +97,11 @@ public class FollowerSpineLoader
 
     public static void LoadAllNonSpineSkins()
     {
-        //get the plugin path, then find the foler FollowerSkins in it
         var followerFolder = Path.Combine(Plugin.PluginPath, "FollowerSkins");
-        //check if the folder exists
         if (!Directory.Exists(followerFolder))
             Directory.CreateDirectory(followerFolder);
 
-        //ours, plus the same folder in any other mod's CultTweaker folder (ModContentPaths)
         var folders = APIHelper.ModContentPaths.DirectoriesIn("FollowerSkins");
-
-        //each png file represents a single part to override...?
-
 
         foreach (var folder in folders)
         {
@@ -122,7 +109,6 @@ public class FollowerSpineLoader
             Plugin.Log.LogInfo("Loading Follower Override Skin: " + followerSkinName);
             List<string> completedSkins = [];
 
-            //name of the variant file does not matter. each variant has their own config
             foreach (var variant in Directory.GetDirectories(folder))
             {
                 Plugin.Log.LogInfo("Creating Variant: " + Path.GetFileName(variant));
@@ -175,11 +161,6 @@ public class FollowerSpineLoader
                     continue;
                 }
 
-
-                //create texture file from each overrides png
-
-
-                //each PNG is a separate part to override, and the scales and rotations can be set in the config file
             }
             if (completedSkins.Count > 0)
             {
@@ -189,16 +170,12 @@ public class FollowerSpineLoader
 
             // if (spineSkeleton.Length > 0 && spineTextures.Length > 0 && spineAtlas.Length > 0)
             // {
-            //     Plugin.Log.LogInfo("Reading atlas from " + spineAtlas[0]);
             //     var atlasTxt = new TextAsset(File.ReadAllText(spineAtlas[0]));
 
-            //     Plugin.Log.LogInfo("Reading skeleton from " + spineSkeleton[0]);
             //     var skele = new TextAsset(File.ReadAllText(spineSkeleton[0]));
             //     var textures = new Texture2D[spineTextures.Length];
 
-            //     foreach (var textureFile in spineTextures)
             //     {
-            //         Plugin.Log.LogInfo("Reading texture from " + textureFile);
             //         Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
             //         tex.name = Path.GetFileNameWithoutExtension(textureFile);
             //         textures[Array.IndexOf(spineTextures, textureFile)] = tex;
@@ -211,8 +188,6 @@ public class FollowerSpineLoader
             //     Plugin.Log.LogInfo("Using material name " + mat.name);
             //     CustomSkinManager.AddFollowerSpine(followerSpineName, runtimeSkeletonAsset);
 
-            //     //apply the default skin, init each layer of the skin in order of defaultSkin string list
-            //     //new skin("custom skin")
             //     for (int i = 0; i < defaultSkinName.Count; i++)
             //     {
             //         var skinToApply = defaultSkinName[i];
@@ -223,10 +198,6 @@ public class FollowerSpineLoader
 
         }
     }
-
-    //CustomSpineLoader.SpineLoaderHelper.FollowerSpineLoader.ApplyOverridesToFollower(
-    // FollowerManager.FindFollowerByID(266),
-    // "CTTemplateSkin_base")
 
     public static string BuildCustomOverrideSkin(string skinVariantName, string baseSkinName)
     {
@@ -248,7 +219,6 @@ public class FollowerSpineLoader
 
         Plugin.Log.LogInfo($"Attempting to build skin with {skinData.Count} override parts for variant {skinVariantName}");
 
-        //copy base to final skin
         baseSkin.Attachments.ToList().ForEach(attachment => { finalSkin.SetAttachment(attachment.SlotIndex, attachment.Name, attachment.attachment.Copy()); });
         baseSkin.Bones.ToList().ForEach(finalSkin.Bones.Add);
         baseSkin.Constraints.ToList().ForEach(finalSkin.Constraints.Add);
@@ -270,7 +240,6 @@ public class FollowerSpineLoader
 
             try
             {
-                //build atlas per image provided
                 skinOverride.Item3.name = skinVariantName + "_" + skinOverride.Item2;
                 Material mat = new(SpineFolderLoader.SpineShader())
                 {
@@ -375,8 +344,6 @@ public class FollowerSpineLoader
         CustomFollowerSkins.Add(skinVariantName, repackedSkin);
         DataManager.SetFollowerSkinUnlocked(skinVariantName);
 
-        // The repack just baked every part's pixels into its own atlas; the parts are never
-        // pixel-read again, so their CPU copies - half of each texture's memory - come back.
         foreach (var built in skinData)
             SpineFolderLoader.Seal(built.Item3);
 
@@ -391,7 +358,6 @@ public class FollowerSpineLoader
         {
             Skin = v
         }).ToList();
-
 
         WorshipperData.Instance.Characters.Add(new WorshipperData.SkinAndData
         {
@@ -431,8 +397,6 @@ public class FollowerSpineLoader
             .Where(p => p.ColorChoices?.Any() == true)
             .ToList();
 
-        // Min() on an empty sequence throws, and this runs during startup skin loading - a
-        // config with no colour choices anywhere must fall through to the default set below.
         int count = parts.Count == 0 ? 0 : parts.Min(p => p.ColorChoices.Count);
 
         if (count == 0)
@@ -471,20 +435,16 @@ public class FollowerSpineLoader
         return color;
     }
 
- 
 }
 
 public class FollowerSpineConfig
 {
-    //default skins to initialize layered on load
     public List<string> DefaultSkin { get; set; }
     public string[] Skins { get; set; }
 
-    //if it should be initialized with the original base skin, like clothes and necklaces
     public bool InitializeWithoutBase { get; set; } = true;
 }
 
-//the json looks like this:
     /* {
         partConfigs: {
             nameOfImage: {
@@ -539,12 +499,6 @@ public class DebugOutputSkin
     public string PartName { get; set; }
 }
 
-// Writes the slot/part list of a follower's live skin to followerSlots.json - the reference an
-// author needs to write a follower skin override, because the part names are not guessable.
-//
-// Two callers: the costume patch (when the debug config flag is on, once per session because the
-// existing file is left alone) and the mod panel's button, which is an explicit request and so
-// overwrites and reports where the file went.
 public static class FollowerSlotDumper
 {
     public const string FileName = "followerSlots.json";
@@ -597,7 +551,6 @@ public static class FollowerSlotDumper
         }
     }
 
-    // The nearest thing to "a follower" that is actually in the world right now.
     public static Skeleton FindLiveFollowerSkin()
     {
         foreach (var follower in UnityEngine.Object.FindObjectsOfType<Follower>())

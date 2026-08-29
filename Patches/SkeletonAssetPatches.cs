@@ -4,12 +4,6 @@ using Spine.Unity;
 
 namespace CustomSpineLoader.Patches;
 
-// The game refreshes some skeletons by round-tripping their asset: Clear() then
-// GetSkeletonData() re-parses the JSON (Interaction_EntranceShrine.ReloadStatue does this to
-// the player-dummy statues). Our runtime assets free their JSON once parsed - the file never
-// changes, so the cached data is the file - which turns that round trip into "Skeleton JSON
-// file not set" and a skeleton that never initialises again. For those assets Clear() is
-// skipped: GetSkeletonData already answers with exactly what a re-parse would produce.
 [HarmonyPatch]
 public static class SkeletonAssetPatches
 {
@@ -21,7 +15,6 @@ public static class SkeletonAssetPatches
     }
 }
 
-// Temp fix for a vanilla bug: the global LOD manager updates even when the UI is not present
 [HarmonyPatch]
 public static class SkeletonLodPatches
 {

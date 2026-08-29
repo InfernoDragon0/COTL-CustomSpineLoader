@@ -11,7 +11,6 @@ namespace CustomSpineLoader.MapEditor;
 
 public class MapEditorUI
 {
-    // Shared row height across the whole editor.
     public const float RowHeight = 34f;
 
     // ---- palette ----------------------------------------------------------------------------
@@ -21,10 +20,8 @@ public class MapEditorUI
     public static readonly Color FieldIdle = new(0.05f, 0.05f, 0.04f, 0.96f);
     public static readonly Color FieldHover = new(0.16f, 0.15f, 0.13f, 1f);
 
-    // The cult red, used for the selected tool and the selected grid cell.
     public static readonly Color Accent = new(0.83f, 0.24f, 0.20f, 1f);
 
-    // The green the game's own settings sliders fill with; shared by the check boxes.
     public static readonly Color SliderFill = new(0.55f, 0.78f, 0.25f, 1f);
 
     public static readonly Color TrackColour = new(0.05f, 0.05f, 0.04f, 0.95f);
@@ -35,14 +32,12 @@ public class MapEditorUI
     public RectTransform CanvasRoot => _canvasRoot;
     public IMapEditorHost Editor => _editor;
 
-    // Whichever host built UI last. Static because the widgets that need it - MapEditorHover,
-    // AttachButton - are static helpers on components the host never sees.
-    //
-    // Every editor attaches itself as it opens, so this is current whenever one is up. It can be
-    // left pointing at a closed editor, which is the same no-op the two-host version had: a
-    // status line written to a bar that is not on screen. Destroyed is the case that matters, and
-    // CurrentHost answers that in Unity's terms rather than C#'s.
     private static IMapEditorHost _host;
+
+    internal static void Rehost(IMapEditorHost host)
+    {
+        if (host != null) _host = host;
+    }
 
     internal static IMapEditorHost CurrentHost
     {
@@ -53,7 +48,6 @@ public class MapEditorUI
         }
     }
 
-    // Must run before any dropdown or grid is built.
     public void Attach(IMapEditorHost editor, RectTransform canvasRoot)
     {
         _editor = editor;
@@ -66,7 +60,6 @@ public class MapEditorUI
 
     private static Sprite _rounded;
 
-    // 9-sliced rounded rectangle, generated at runtime - the mod ships no art.
     public static Sprite RoundedPlate
     {
         get
@@ -88,7 +81,6 @@ public class MapEditorUI
             {
                 for (var x = 0; x < size; x++)
                 {
-                    // Distance past the corner arc; one pixel of edge softening.
                     var dx = Mathf.Max(radius - (x + 0.5f), (x + 0.5f) - (size - radius), 0f);
                     var dy = Mathf.Max(radius - (y + 0.5f), (y + 0.5f) - (size - radius), 0f);
                     var distance = Mathf.Sqrt(dx * dx + dy * dy);
@@ -132,7 +124,6 @@ public class MapEditorUI
             {
                 for (var x = 0; x < size; x++)
                 {
-                    // Signed distance to the rounded edge: 0 on the outline, negative inside.
                     var dx = Mathf.Max(radius - (x + 0.5f), (x + 0.5f) - (size - radius), 0f);
                     var dy = Mathf.Max(radius - (y + 0.5f), (y + 0.5f) - (size - radius), 0f);
                     var corner = Mathf.Sqrt(dx * dx + dy * dy) - radius;
@@ -142,7 +133,6 @@ public class MapEditorUI
                         Mathf.Min(y + 0.5f, size - (y + 0.5f)));
                     var distance = dx > 0f || dy > 0f ? corner : -edge;
 
-                    // Opaque in the band [-thickness, 0], faded at both ends.
                     var alpha = Mathf.Clamp01(-distance + 0.5f) * Mathf.Clamp01(distance + thickness + 0.5f);
                     pixels[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
                 }
@@ -159,7 +149,6 @@ public class MapEditorUI
         }
     }
 
-    // A frame laid over an existing panel, used to mark it as needing attention.
     public static Image AddOutline(RectTransform parent, Color colour, float inset = 0f)
     {
         var go = new GameObject("Outline");
@@ -180,19 +169,12 @@ public class MapEditorUI
         return image;
     }
 
-    // Softer than the ribbon the pause menu paints, which is the cult red at full strength: this
-    // one sits under a dozen buttons in a panel rather than one highlighted line in a menu, and
-    // that much red at that many places reads as a warning rather than a button.
     private static readonly Color RibbonIdle = new(0.20f, 0.17f, 0.16f, 0.85f);
     private static readonly Color RibbonHover = new(0.55f, 0.33f, 0.28f, 0.95f);
 
-    // Grey art, so these are near enough its own shades: a row in a list should read as part of the
-    // list, not as a dozen things asking to be pressed.
     private static readonly Color QuietIdle = new(0.42f, 0.41f, 0.39f, 0.85f);
     private static readonly Color QuietHover = new(0.82f, 0.80f, 0.76f, 0.95f);
 
-    // The pause menu's button art where it can be had, the mod's rounded plate until then. Inside a
-    // list it is the grey cut of the same ribbon.
     private static Image AddRibbonPlate(GameObject go, MapEditorEmphasis emphasis,
         out Color idle, out Color hover)
     {
@@ -204,8 +186,6 @@ public class MapEditorUI
             return AddPlate(go, PlateIdle);
         }
 
-        // Either the caller says this is not the thing to reach for, or it is a row in a list and
-        // nothing in a list is.
         var quiet = emphasis == MapEditorEmphasis.Quiet ||
                     go.GetComponentInParent<MapEditorQuietArea>() != null
             ? VanillaWidgets.QuietRibbon
@@ -216,7 +196,9 @@ public class MapEditorUI
 
         var image = go.AddComponent<Image>();
         image.sprite = quiet != null ? quiet : source.sprite;
-        image.type = source.type;
+
+        var sprite = image.sprite;
+        image.type = sprite != null && sprite.border != Vector4.zero ? Image.Type.Sliced : source.type;
         image.pixelsPerUnitMultiplier = source.pixelsPerUnitMultiplier > 0f
             ? source.pixelsPerUnitMultiplier
             : 1f;
@@ -240,7 +222,6 @@ public class MapEditorUI
     private static TMP_FontAsset _headingFont;
     private static bool _headingRequested;
 
-    // Headers built before the async heading font arrives; re-fonted on arrival.
     private static readonly List<TMP_Text> _pendingHeaders = [];
 
     public static void WarmFonts()
@@ -254,7 +235,6 @@ public class MapEditorUI
             {
                 if (font == null)
                 {
-                    // No font coming; clear or the static list accumulates destroyed TMP_Texts.
                     _pendingHeaders.Clear();
                     return;
                 }
@@ -282,8 +262,6 @@ public class MapEditorUI
 
             try
             {
-                // The settings rows' own face first, so the editor's writing matches the widgets
-                // borrowed from them rather than sitting beside them in a different hand.
                 _cachedFont = VanillaWidgets.RowFont
                               ?? FontHelpers.UIFont ?? FontHelpers.PauseMenu ?? FontHelpers.StartMenu;
             }
@@ -308,9 +286,6 @@ public class MapEditorUI
 
     private static TMP_FontAsset _cachedButtonFont;
 
-    // What the game writes its own menu buttons in - the pause menu's face. Kept apart from the
-    // panel's writing on purpose: the two are different faces in the game and reading them as one
-    // would flatten the difference between a row and a thing you press.
     internal static TMP_FontAsset ButtonFont
     {
         get
@@ -330,10 +305,8 @@ public class MapEditorUI
         }
     }
 
-    // The game's menus never go below this.
     private const int MinFontSize = 17;
 
-    // MMTextScaler captures the font size in OnEnable; add only once the size is final.
     private static void AddTextScaler(GameObject go)
     {
         try
@@ -342,11 +315,9 @@ public class MapEditorUI
         }
         catch (Exception)
         {
-            // No AccessibilityManager in this scene; the label simply does not scale.
         }
     }
 
-    // Pins row height for the layout group; width is driven by the column.
     private static void ApplyRowLayout(GameObject go, float height)
     {
         var element = go.GetComponent<LayoutElement>();
@@ -385,10 +356,6 @@ public class MapEditorUI
         return go;
     }
 
-    // Gives a label the height its wrapped text actually needs. Every row is pinned to one line by
-    // ApplyRowLayout, so a label that runs to three draws straight over whatever comes next.
-    // Measured rather than laid out: this is called while the column is still being built, before
-    // it has had a layout pass.
     public static void FitLabelHeight(GameObject label, float width = 380f)
     {
         if (label == null) return;
@@ -399,9 +366,6 @@ public class MapEditorUI
 
         var content = text.text ?? "";
 
-        // Measured, with a floor taken from the line count. TMP's measurement wants a font that has
-        // finished loading and a mesh that has been generated at least once; asked too early it
-        // answers short, and a label that answers short draws straight over the button under it.
         var lines = 1;
         foreach (var character in content)
             if (character == '\n') lines++;
@@ -414,22 +378,12 @@ public class MapEditorUI
         element.minHeight = needed;
         element.preferredHeight = needed;
 
-        // **And the rect itself**, which is the part that actually matters here and the reason a
-        // grown label kept drawing over the widget below it. A tool's options column is a
-        // VerticalLayoutGroup with `childControlHeight = false`, and in that mode the group asks
-        // each child for `sizeDelta.y` and never looks at its LayoutElement at all. So a label that
-        // had grown to five lines still counted as the one row `ApplyRowLayout` gave it, the next
-        // widget was placed 25px down, and the extra lines drew straight through it. Marking the
-        // parent dirty only re-ran a layout that was reading the wrong number.
-        //
-        // The LayoutElement is still set, for a parent that *does* control height.
         if (label.transform is RectTransform rect)
             rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, needed);
 
         if (label.transform.parent is RectTransform parent) LayoutRebuilder.MarkLayoutForRebuild(parent);
     }
 
-    // Section heading in the game's heading font.
     public GameObject CreateHeader(Transform parent, string text, int size = 24)
     {
         var borrowed = VanillaWidgets.CreateHeader(parent, text, size, size + 14f);
@@ -438,8 +392,6 @@ public class MapEditorUI
         return CreateHeadingLabel(parent, text, size);
     }
 
-    // The editor's own heading, drawn rather than borrowed. The borrowed one keeps its writing on a
-    // child, so anything that wants the text component itself asks for this.
     public GameObject CreateHeadingLabel(Transform parent, string text, int size)
     {
         var go = CreateLabel(parent, text, size, TextAlignmentOptions.Center);
@@ -476,8 +428,6 @@ public class MapEditorUI
     {
         void Handle()
         {
-            // The editors poll the mouse themselves, and a click on a widget must not also read as
-            // a click on whatever is underneath it.
             CurrentHost?.BlockWorldClicks();
 
             onClick?.Invoke();
@@ -490,16 +440,6 @@ public class MapEditorUI
             button.targetGraphic = graphic;
             button.transition = Selectable.Transition.None;
 
-            // The editor's buttons are clicked, never navigated to. Without this, MMButton's
-            // OnPointerEnter hands the hovered button to UINavigatorNew as its current selectable,
-            // and that navigator polls Rewired's accept binding - E on a keyboard - straight from
-            // its own Update, outside the EventSystem entirely. So E pressed anywhere fired
-            // whichever editor button the cursor had last passed over, including while typing into
-            // a prompt, and suspending the EventSystem did nothing about it because that path never
-            // goes near the EventSystem. It is worse than "while hovered": OnPointerExit never
-            // clears the navigator's selectable, so the last button stayed armed indefinitely.
-            // Clicks are unaffected - OnPointerClick does not consult this - and the hover state it
-            // skips is Unity's, which we do not use (transition is None, MapEditorHover draws ours).
             button.PreventMouseSelection = true;
 
             button.onClick.AddListener(Handle);
@@ -514,7 +454,6 @@ public class MapEditorUI
         }
     }
 
-    // Hover brightens the plate and feeds the status bar.
     internal static MapEditorHover AddHover(GameObject go, Image plate, Color idle, Color hover, string hoverText)
     {
         var component = go.AddComponent<MapEditorHover>();
@@ -530,8 +469,6 @@ public class MapEditorUI
     {
         var label = CreateLabel(parent, text, size, TextAlignmentOptions.Center);
 
-        // A button is not a settings row: it keeps the menu face the game writes its own buttons
-        // in, which is a heavier one than the panel's writing.
         var face = ButtonFont;
         if (face != null) label.GetComponent<TMP_Text>().font = face;
         var rt = label.GetComponent<RectTransform>();
@@ -614,8 +551,6 @@ public class MapEditorUI
         slider.maxValue = max;
         slider.SetValueWithoutNotify(initial);
 
-        // The same handle tools reach for on the game's row, so neither of them has to know which
-        // one it got.
         var state = row.AddComponent<MapEditorSlider>();
         state.Slider = slider;
         state.Readout = readoutText;
@@ -642,22 +577,14 @@ public class MapEditorUI
 
     // ---- hover preview ------------------------------------------------------------------------
 
-    // A cell is 60-ish pixels of a prop that may be a hundred times that on the ground, so half the
-    // catalog reads as the same brown smudge. Hovering one blows its icon up beside the options
-    // panel - drawn from the sprite the cell already holds, so it costs a texture draw and nothing
-    // else, and it needs no click the way the ghost preview does.
     private const float PreviewSize = 300f;
 
-    // Clear of the room editor's options panel (420 wide at a 12px margin).
     private const float PreviewRightOffset = 448f;
 
     private GameObject _previewGO;
     private Image _previewImage;
     private TMP_Text _previewCaption;
 
-    // How far in from the right edge the hover preview sits. The default clears the room editor's
-    // own panel; a screen that puts a wider panel there raises this while it is up, or the preview
-    // lands on top of the very grid it is previewing.
     public float IconPreviewRightOffset { get; set; } = PreviewRightOffset;
 
     public static float DefaultIconPreviewRightOffset => PreviewRightOffset;
@@ -673,15 +600,9 @@ public class MapEditorUI
         EnsurePreview();
         if (_previewGO == null) return;
 
-        // Placed on every show rather than once at build: the offset belongs to whichever screen is
-        // open, and the preview outlives all of them.
         var rect = (RectTransform)_previewGO.transform;
         rect.anchoredPosition = new Vector2(-IconPreviewRightOffset, -12f);
 
-        // And raised to the front for the same reason. Sibling order is draw order on a canvas, and
-        // this is built the first time anything hovers a cell - so any full-screen tool opened after
-        // that is a later sibling and draws straight over it. Raising it on show costs nothing and
-        // does not care which screens have come and gone.
         rect.SetAsLastSibling();
 
         _previewImage.sprite = sprite;
@@ -713,7 +634,6 @@ public class MapEditorUI
         plate.pixelsPerUnitMultiplier = 1.6f;
         plate.color = new Color(0f, 0f, 0f, 0.82f);
 
-        // Never a click target: it floats over the map and the cursor is on the grid behind it.
         plate.raycastTarget = false;
 
         var iconGO = new GameObject("Icon");
@@ -758,7 +678,6 @@ public class MapEditorUI
         rowRt.sizeDelta = new Vector2(360, RowHeight);
         ApplyRowLayout(row, RowHeight);
 
-        // Nearly invisible, but a Graphic is required for the row to receive the click.
         var bg = row.AddComponent<Image>();
         bg.color = new Color(1f, 1f, 1f, 0.03f);
 
@@ -779,7 +698,6 @@ public class MapEditorUI
         boxRt.sizeDelta = new Vector2(26f, 26f);
         boxRt.anchoredPosition = new Vector2(-4f, 0f);
 
-        // Outline plate, hollow when off - the "blank check box" the game uses.
         var outline = box.AddComponent<Image>();
         outline.sprite = RoundedPlate;
         outline.type = Image.Type.Sliced;
@@ -859,17 +777,11 @@ public class MapEditorUI
         scroll.content = contentRt;
         scroll.verticalScrollbar = CreateScrollbar(scrollGO.transform);
 
-        // Gone entirely when the content fits: a rail against a list that cannot scroll is a
-        // control that does nothing. AutoHide rather than AutoHideAndExpandViewport, because the
-        // viewport's inset is set by hand above and that mode would fight it for the two pixels.
         scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
 
         return contentRt;
     }
 
-    // A thin rail rather than a bar: the wide one ate into the last column of icons, and a list
-    // of pictures should not be framed by a slab of grey. The handle takes the editor's accent, so
-    // it reads as the game's own red.
     public const float ScrollbarWidth = 2f;
 
     private static Scrollbar CreateScrollbar(Transform parent)
@@ -904,7 +816,6 @@ public class MapEditorUI
         handleRt.offsetMin = Vector2.zero;
         handleRt.offsetMax = Vector2.zero;
 
-        // A plain rectangle: rounding a six-pixel rail only makes it look chewed.
         var handleImg = handle.AddComponent<Image>();
         handleImg.color = new Color(Accent.r, Accent.g, Accent.b, 0.9f);
 
@@ -913,7 +824,6 @@ public class MapEditorUI
         return scrollbar;
     }
 
-    // Fixed-height texture row; the inner RawImage letterboxes to the texture's aspect.
     public GameObject CreateImage(Transform parent, Texture2D texture, float height = 100f)
     {
         var row = new GameObject("Preview");
@@ -977,12 +887,6 @@ public class MapEditorUI
         arrowRt.sizeDelta = new Vector2(44f, -8f);
         arrowRt.anchoredPosition = new Vector2(-4f, 0f);
 
-        // The game's own caret where it can be had: a bare triangle, no plate behind it, which is
-        // how the settings menu ends a dropdown.
-        //
-        // The fallback is the plain accent tile this used to be. It used to carry a typed arrow as
-        // well, which never drew a thing - the game's font has no glyph at that code point - so
-        // what stood here was always just the square.
         var caret = VanillaWidgets.DropdownArrow;
         if (caret != null)
         {
@@ -1015,7 +919,6 @@ public class MapEditorUI
         return dropdown;
     }
 
-    // One dropdown open at a time; a stranded overlay would keep swallowing world clicks.
     private MapEditorDropdown _openDropdown;
 
     internal void NotifyDropdownOpened(MapEditorDropdown dropdown)
@@ -1029,14 +932,10 @@ public class MapEditorUI
         if (_openDropdown == dropdown) _openDropdown = null;
     }
 
-    // An open dropdown list stands outside every registered blocker rect, so a surface that polls
-    // its own clicks has to know to close it rather than act on the click underneath.
     public bool TransientUiOpen => _openDropdown != null;
 
     public void CloseTransientUi() => _openDropdown?.Close();
 
-    // A boxed, scrolling list of rows. maxHeight is a ceiling, not a size: the box is as tall as
-    // its rows need and no taller, so a short list does not sit in a pane of empty black.
     public MapEditorScrollBox CreateScrollBox(Transform parent, string name, float maxHeight,
         float rowHeight = 30f, float spacing = 3f)
     {
@@ -1047,12 +946,6 @@ public class MapEditorUI
 
     // ---- icon grid --------------------------------------------------------------------------
 
-    // scrollHeight: box the cells in a scroll view of their own that tall, instead of letting the
-    // grid grow the whole panel. A catalogue of hundreds pushed the search field and the group
-    // picker off the top of the tool's own column, so reaching them meant scrolling back up past
-    // everything you had just scrolled down through. With the cells boxed, the column above them
-    // does not move and the hovered-name caption stays pinned under the box. Zero keeps the old
-    // grow-to-fit behaviour, which suits the short lists.
     public MapEditorGrid CreateIconGrid(Transform parent, string name, int columns = 4,
         float cellSize = 88f, float scrollHeight = 0f)
     {
@@ -1071,7 +964,6 @@ public class MapEditorUI
         var rootFitter = root.AddComponent<ContentSizeFitter>();
         rootFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Where the cells go: straight into the root, or into a scroll box hung from it.
         var cellParent = root.transform;
         LayoutElement boxElement = null;
 
@@ -1089,8 +981,6 @@ public class MapEditorUI
         cells.transform.SetParent(cellParent, false);
         cells.AddComponent<RectTransform>();
 
-        // Inside a scroll box the grid has to report its own height, or the column that scrolls it
-        // has nothing to measure and the box never scrolls.
         if (scrollHeight > 0f)
         {
             var cellFitter = cells.AddComponent<ContentSizeFitter>();
@@ -1112,14 +1002,11 @@ public class MapEditorUI
 
         var built = new MapEditorGrid(this, root, cells.transform, captionText);
 
-        // The box grows with the list up to its ceiling, rather than reserving the full height for
-        // three icons: a short group should not sit in a pane of empty black.
         if (boxElement != null) built.UseScrollBox(boxElement, scrollHeight, columns, cellSize, 6f);
 
         return built;
     }
 
-    // One square icon cell; the letter tile shows until an icon arrives.
     public GameObject CreateIconButton(Transform parent, Sprite icon, string label, Action onClick,
         out Image selectionBorder, float size = 60f, string hoverText = null)
     {
@@ -1134,7 +1021,6 @@ public class MapEditorUI
         element.minWidth = size;
         element.minHeight = size;
 
-        // Drawn first and slightly larger than the plate, so only its rim shows.
         var border = new GameObject("Border");
         border.transform.SetParent(cell.transform, false);
         var borderRt = border.AddComponent<RectTransform>();
@@ -1187,7 +1073,6 @@ public class MapEditorUI
         return cell;
     }
 
-    // One control prompt in the game's key-cap style.
     public GameObject CreateKeyHint(Transform parent, string key, string action)
     {
         var row = new GameObject("Hint_" + action);
@@ -1203,7 +1088,6 @@ public class MapEditorUI
         plate.color = new Color(0f, 0f, 0f, 0.62f);
         plate.raycastTarget = false;
 
-        // Wide enough for "Ctrl" and "Del" without the cap turning into a bar.
         var capWidth = Mathf.Clamp(22f + (key?.Length ?? 1) * 9f, 30f, 76f);
 
         var cap = new GameObject("Cap");
@@ -1249,7 +1133,6 @@ public class MapEditorUI
         return row;
     }
 
-    // Short enough to fit a tile: first letters of the first two words.
     public static string Initials(string label)
     {
         if (string.IsNullOrEmpty(label)) return "?";
@@ -1261,13 +1144,10 @@ public class MapEditorUI
     }
 }
 
-// Toggle state kept separate from the button, so tools can push a value without re-entering
-// their own change handler.
 public class MapEditorToggle : MonoBehaviour
 {
     public Action<bool> OnValueChanged;
 
-    // The editor's own check box, or the game's settings toggle. Exactly one of them.
     public Image Fill;
     public Lamb.UI.MMToggle Vanilla;
 
@@ -1286,45 +1166,32 @@ public class MapEditorToggle : MonoBehaviour
         if (Fill != null)
             Fill.color = value ? MapEditorUI.SliderFill : new Color(0.05f, 0.05f, 0.04f, 1f);
 
-        // Its setter animates on a change and stays quiet on a match, and it never calls back - so
-        // a value the player set on the control itself lands here without bouncing.
         if (Vanilla != null) Vanilla.Value = value;
 
         if (notify) OnValueChanged?.Invoke(value);
     }
 }
 
-// How loudly a button asks to be pressed.
-//
-// Action is the thing the panel is for - place this, save that. Quiet is everything that undoes,
-// clears or backs out: still one click away, but not what the eye should land on first. A panel
-// where every button is accented has no accent at all.
 public enum MapEditorEmphasis
 {
     Action,
     Quiet
 }
 
-// Marks a container whose buttons are rows in a list rather than things to press: they wear the
-// quiet cut of the button art, so a list of twenty does not read as twenty invitations.
 public class MapEditorQuietArea : MonoBehaviour
 {
 }
 
-// Brightens a plate under the cursor and feeds the status bar (the editor has no tooltips).
 public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     public Image Plate;
     public Color Idle;
     public Color Hover;
 
-    // Shown in the status bar while hovered; null means this widget says nothing.
     public string HoverText;
 
-    // Set by grids, whose cells are reused across groups and change what they represent.
     public Func<string> HoverTextProvider;
 
-    // Lets a container react too - the icon grids echo the hovered name in their own caption.
     public Action<bool> OnHover;
 
     private bool _hovered;
@@ -1334,7 +1201,6 @@ public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitH
 
     private void OnDisable()
     {
-        // A panel hidden under the cursor never gets its exit event.
         if (_hovered) Apply(false);
     }
 
@@ -1347,7 +1213,6 @@ public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitH
         var text = HoverTextProvider != null ? HoverTextProvider() : HoverText;
         if (string.IsNullOrEmpty(text)) return;
 
-        // Whichever editor owns the screen right now; they are never open together.
         var host = MapEditorUI.CurrentHost;
         if (host == null) return;
 

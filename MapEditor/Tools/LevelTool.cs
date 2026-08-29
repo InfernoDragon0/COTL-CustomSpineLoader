@@ -1,19 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-// Authors a level: the rooms it is made of, and the shape they stand in.
-//
-// The dock panel is the list of levels and nothing else - picking one goes straight to the screen,
-// the dungeon builder's arrangement, because a half-open state with a second set of controls in it
-// is a page nobody is ever on.
-//
-// A level either lays its own floor out - a cell per room and a door per side, which the generator
-// then builds exactly (see LevelLayout) - or leaves the shape to the game, which is the original
-// behaviour and what every blueprint written before this did. The toggle for that is on the screen.
 public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTool,
     IMapEditorEscapeHandler
 {
@@ -88,8 +79,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         _dynamic.Add(_ui.CreateButton(_panel, "New Level Blueprint", CreateNew));
 
-        // Hubs are not dungeon content: they are authored in the game's town room from the F7
-        // panel, and would only be half-editable here.
         var levels = CTLevelSerialization.LoadAll();
         levels.RemoveAll(level => level is { IsHub: true });
 
@@ -125,8 +114,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
             AuthoredLayout = true,
             Rooms =
             [
-                // The smallest thing that is already a whole level: arrive in the south of one room,
-                // through a door into the next, and out of the top of that one.
                 new CTLevelRoom
                 {
                     Role = "Entrance", X = 0, Y = 0,
@@ -162,9 +149,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         TeardownCanvas();
         if (_level == null || _ui == null) return;
 
-        // Ends first: it can insert rooms, and every room it inserts needs a cell of its own. A
-        // blueprint written before layouts existed has no cells at all - every room sits on (0, 0),
-        // which would draw as one plate with the whole level hidden under it.
         if (_level.AuthoredLayout)
         {
             EnsureCells(_level);
@@ -202,8 +186,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
     private bool HasUnsavedEdits =>
         _level != null && !string.Equals(ToJson(_level), _savedJson, StringComparison.Ordinal);
 
-    // One way out, whether it was pressed, clicked or F4'd: dismiss the prompt, else ask about
-    // unsaved work, else close.
     public bool RequestClose()
     {
         if (_canvas == null || !_canvas.IsOpen) return false;
@@ -233,8 +215,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     private void TeardownCanvas()
     {
-        // By hand, because the grid spends part of its life parented to nothing (DetachPoolGrid) and
-        // closing the canvas would not take it with it.
         DestroyPoolGrid();
 
         _canvas?.Close();
@@ -242,8 +222,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         _dragging = false;
     }
 
-    // Closing the screen closes the level: the dock panel is the list of levels and nothing else, so
-    // there is no half-open state for it to show.
     public void CloseOverlay()
     {
         var open = _level;
@@ -326,10 +304,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         _ui.CloseTransientUi();
 
-        // The grid steps out of the way before the column is wiped and steps back in below, so
-        // selecting a room does not tear down and refill a hundred cells that were already correct.
-        // Its contents are every saved room, which does not depend on which room is selected - only
-        // the lit ones do, and that is one call.
         DetachPoolGrid();
 
         for (var i = column.childCount - 1; i >= 0; i--)
@@ -341,9 +315,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         if (_selected == null)
         {
-            // The empty level is the one case worth a word, because there is nothing on the grid to
-            // click and no way to guess that ctrl is what adds a room. With rooms on screen the
-            // grid speaks for itself.
             if (_level.Rooms.Count == 0) Note(column, "No rooms yet - ctrl+click a cell to add one.");
             return;
         }
@@ -353,14 +324,8 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         BuildEndControls(column, index);
 
-        // Doors are not listed. Every side that faces another room is toggled by right-clicking the
-        // pair, which is both quicker than finding the side in a list and impossible to get the
-        // wrong way round - so a column of dropdowns saying the same thing was only a second place
-        // to look.
         if (_level.AuthoredLayout) BuildKindControl(column);
 
-        // A prefab room has no pool to pick from: it is that room, and the podiums or the exit
-        // platform standing in it are the reason it is there.
         if (_selected.VanillaRoom == CTLevelRoom.Generated)
         {
             _ui.CreateHeader(column, "- Maps -", 20);
@@ -368,13 +333,9 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         }
         else if (_selected.VanillaRoom == CTLevelRoom.PodiumRoom)
         {
-            // The podiums take themselves away past the first floor of a run - the game's rule, not
-            // ours - and a room that arrives empty reads as a broken feature unless it is said here.
             Note(column, "The podiums only appear on the first floor of a run.");
         }
 
-        // Last, under the room list. It is one dropdown against a grid of rooms, and putting it
-        // above pushed the list - the thing this panel is mostly for - off the bottom of the screen.
         BuildModifierControl(column);
     }
 
@@ -391,8 +352,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
             _selected.Modifier = Modifiers[i];
 
-            // The room's border is drawn from this, so the grid is repainted - but the column is
-            // left alone, since nothing in it has changed.
             _canvas?.RebuildVisuals();
             _canvas?.HighlightRoom(_selected);
         });
@@ -400,17 +359,8 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         picker.SetSelected(Array.IndexOf(Modifiers, _selected.Modifier));
     }
 
-    // Which room the run starts in and which one has the way out are the first and last in the
-    // level, so these say where this room sits in it. The doors themselves are placed by
-    // LevelLayout - there is nothing here to wire.
-    //
-    // Tickboxes rather than buttons, because being the entrance is a STATE of the room and a
-    // button could only ever say what it would do, never what is true. Unticking is refused: a
-    // level has a first room and a last room whether anyone chose them or not, so there is no such
-    // thing as taking the entrance away - only giving it to a different room.
     private void BuildEndControls(RectTransform column, int index)
     {
-        // Under a random walk the ends are the game's own rooms and their position is not a choice.
         if (!_level.AuthoredLayout) return;
 
         var first = index == 0;
@@ -448,9 +398,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         AfterMutation($"Room {_level.Rooms.IndexOf(room) + 1} {became}.");
     }
 
-    // Whether this room is generated - the kind a blueprint is pasted onto - or one of the game's
-    // own finished rooms. Only meaningful with a layout: without one the game places its own
-    // entrance and end-of-floor rooms and never consults ours.
     private void BuildKindControl(RectTransform column)
     {
         Label(column, "Room kind");
@@ -472,13 +419,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         picker.SetSelected(at < 0 ? 0 : at);
     }
 
-    // Every saved room as a picture, the ones in the pool lit up.
-    //
-    // This was a dropdown of names plus an X row per member, which asked you to know what a room
-    // looked like from its name and split one question - "which rooms can appear here?" - across two
-    // controls that disagreed about what was in the list. A grid of snapshots answers it in one
-    // place, the way the structure tool does: click to add, click again to remove, and the lit
-    // cells ARE the pool.
     private MapEditorGrid _poolGrid;
     private GameObject _poolNote;
 
@@ -486,27 +426,16 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     private void BuildPoolControls(RectTransform column, CTLevelRoom room)
     {
-        // Above the grid, as in the structure tool. A save folder grows without limit and the room
-        // you want is rarely the one your eye lands on; the grid stays live underneath so a result
-        // can still be hovered for the big picture.
         _poolSearch = new MapEditorSearchRow(_editor, _ui, column, ShowPoolSearch, ShowPoolAll);
 
-        // Built once per session and kept. The cells are every saved room, which is the same list
-        // whichever room is selected - so the only thing a new selection changes is which of them
-        // are lit.
         if (_poolGrid == null)
         {
-            // Three across at a larger cell, and each cell carries its room's name: these are rooms
-            // the author made and named, so the name is half of what identifies one - a grid of
-            // near-identical dungeon snapshots is not.
             _poolGrid = _ui.CreateIconGrid(column, "PoolGrid", columns: 3, cellSize: 132f,
                 scrollHeight: PoolGridHeight);
             _poolGrid.ShowNames = true;
 
             var entries = new List<MapEditorGrid.Entry>
             {
-                // <vanilla> = the room the game would have generated. First, because it is the
-                // answer for "anything, I do not mind" and that is a common thing to want.
                 new()
                 {
                     Id = CTLevelRoom.VanillaNode,
@@ -515,13 +444,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
                 }
             };
 
-            // Names off the file system rather than out of the blueprints: parsing every saved room
-            // to read its name back was a stall on every selection.
-            //
-            // Hubs are left out. A hub's room is an ordinary blueprint file, so the folder listing
-            // cannot tell one from a dungeon room - only the hub record beside it can, which is what
-            // BlueprintNames reads back. Dealt into a floor a town arrives with no doors, and the run
-            // stops in it.
             var hubBlueprints = HubSession.BlueprintNames();
 
             foreach (var name in MapEditorSerialization.SavedNames())
@@ -535,8 +457,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
                     Display = captured,
                     OnClick = () =>
                     {
-                        // Picking one ends the search, the way it does in the structure tool: the
-                        // filter has done its job and the pool is easier to read whole.
                         _poolSearch?.Confirm();
                         TogglePool(captured);
                     }
@@ -551,8 +471,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
             _poolGrid.Root.transform.SetParent(column, false);
             _poolGrid.Root.SetActive(true);
 
-            // Measured again in its new parent - see Reflow. Without this the box keeps the height
-            // it had before it was lifted out, and the first row is clipped.
             _poolGrid.Reflow();
         }
 
@@ -564,7 +482,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         MapEditorUI.FitLabelHeight(_poolNote);
     }
 
-    // The full list, built once; the grid shows all of it or the part that matches a query.
     private List<MapEditorGrid.Entry> _poolEntries;
     private MapEditorSearchRow _poolSearch;
 
@@ -581,8 +498,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         _poolGrid.Populate(_editor, shown, RequestRoomIcon);
 
-        // Membership survives a filter: the pool is what it was, the grid is just showing less of
-        // it, so the cells that come back must come back lit.
         if (_selected != null) _poolGrid.SetSelectedMany(_selected.NodePool);
     }
 
@@ -606,8 +521,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
             ? "Empty - any saved map can appear here."
             : $"{room.NodePool.Count} map(s) can appear here.";
 
-    // Off the column, not destroyed: BuildOptionsColumn wipes its children and this has to survive
-    // that. Parented to nothing it is a scene root, which is why TeardownCanvas destroys it by hand.
     private void DetachPoolGrid()
     {
         if (_poolGrid?.Root == null) return;
@@ -623,10 +536,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         _poolNote = null;
     }
 
-    // Repaints the marks and the grid, NOT the column. Rebuilding the column would destroy the grid
-    // under the pointer and throw the scroll position away on every click, which for a control
-    // whose whole purpose is picking several things in a row is the one thing it must not do - so
-    // the note is written here rather than left to a rebuild that never comes.
     private void TogglePool(string key)
     {
         var room = _selected;
@@ -661,11 +570,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         RefreshChrome();
     }
 
-    // A room's own snapshot as its icon, so the grid shows rooms rather than filenames - and the
-    // grid's hover preview then blows up the picture of the room, which is the thing worth seeing.
-    //
-    // Read through UnityWebRequestTexture, which decodes off the main thread: these are full-screen
-    // pngs and forty of them decoded inline is the stall the load browser was fixed for.
     private static readonly Dictionary<string, Sprite> _roomIcons = [];
 
     private void RequestRoomIcon(string id)
@@ -689,8 +593,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     private System.Collections.IEnumerator LoadRoomIcon(string mapName)
     {
-        // Remembered as "looked and found nothing" too, so a room with no snapshot is not re-read
-        // every time a pool is drawn.
         _roomIcons[mapName] = null;
 
         var path = MapEditorSerialization.SnapshotPathFor(mapName);
@@ -733,15 +635,11 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         if (authored)
         {
-            // Coming back to a grid the level may never have had. A level that has no way in has
-            // never been laid out, so it gets the straight line its room order always described.
             if (LevelLayout.Rooms(_level, CTLevelRoom.WayIn).Count == 0) LayOutAsLine();
             LevelLayout.Normalize(_level);
         }
         else
         {
-            // Without a layout the level is a sequence again, and the game builds its two ends -
-            // which it may have to insert, and anything inserted needs a cell of its own.
             EnsureEndRooms(_level);
             EnsureCells(_level);
         }
@@ -750,8 +648,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         AfterMutation(authored ? "The floor is this grid." : "Random walk.");
     }
 
-    // Entrance at the origin, each room north of the last, the way out off the top: the shape a flat
-    // room list always described.
     private void LayOutAsLine()
     {
         for (var i = 0; i < _level.Rooms.Count; i++)
@@ -785,7 +681,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         var before = Snapshot();
 
-        // Both rooms, or Normalize hands the door straight back - see LevelLayout.SetShared.
         LevelLayout.SetShared(_level, room, side, value);
         LevelLayout.Normalize(_level);
 
@@ -807,15 +702,11 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         if (_level.AuthoredLayout)
         {
-            // Placed before wiring: WireRoom reads the level to find what this room touches, and a
-            // room not in it yet touches nothing.
             _level.Rooms.Add(room);
             LevelLayout.WireRoom(_level, room);
         }
         else
         {
-            // Without a layout the order is the level, and the last room is the one with the way
-            // out - so a new room goes before it rather than after, the way Add Room always did.
             _level.Rooms.Insert(Mathf.Max(0, _level.Rooms.Count - 1), room);
             EnsureEndRooms(_level);
         }
@@ -837,9 +728,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
             return;
         }
 
-        // Refused rather than honoured and undone: the walk cannot lay out a floor with nothing
-        // between its ends, so EnsureEndRooms would put a room straight back and the delete would
-        // look like it had done nothing but move a room onto the podiums.
         if (!_level.AuthoredLayout && _level.Rooms.Count <= 3)
         {
             Hint("A random walk needs at least one room between the two the game builds.",
@@ -898,9 +786,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         AfterMutation(opening ? "Door opened." : "Door closed.");
     }
 
-    // Moving a room changes what it touches, so its doors are worked out again from where it now
-    // is: doors to everything it has arrived next to, walls where it has parted company, and the
-    // two end doors re-placed on whatever sides are free.
     private void CommitMove(Vector2Int from, Vector2Int to)
     {
         if (from == to)
@@ -920,20 +805,10 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         AfterMutation($"Moved to ({to.x}, {to.y}).");
     }
 
-    // A random walk always builds two rooms of its own, whatever the level says: PlaceEntranceAndExit
-    // makes the room the player arrives in the EntranceRoomPath prefab - the weapon podiums - and
-    // appends the EndOfFloorRoomPath room with the way out. They were always on the floor; the level
-    // just did not know about them, which is why its first blueprint was being loaded over the
-    // podiums and its last over the exit platform.
-    //
-    // So the level owns them. They are the first and last entries, they carry no pool, and they
-    // cannot be deleted - the floor has them whether or not the author wants them.
     private static void EnsureEndRooms(CTLevelBlueprint level)
     {
         if (level.AuthoredLayout) return;
 
-        // A hub is one room that is both the way in and the way out; the entrance/exit pair does
-        // not apply to it.
         if (level.IsHub)
         {
             if (level.Rooms.Count == 0) level.Rooms.Add(new CTLevelRoom());
@@ -944,8 +819,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
         var inserted = false;
 
-        // Inserted, never repurposed: a blueprint written before this has real rooms at both ends
-        // with pools the author chose, and taking those over would throw two of them away.
         if (!HasFixedEnds(level))
         {
             level.Rooms.Insert(0, Fresh(level, CTLevelRoom.PodiumRoom));
@@ -953,18 +826,12 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
             inserted = true;
         }
 
-        // The walk cannot be asked for fewer than two rooms of its own (PlaceEntranceAndExit reads
-        // rooms with exactly one connection, and a lone room has none), so there is always at least
-        // one room of the author's between the ends.
         if (level.Rooms.Count < 3)
         {
             level.Rooms.Insert(1, Fresh(level, CTLevelRoom.Generated));
             inserted = true;
         }
 
-        // The grid says nothing about the shape under a random walk, but it does say the order - so
-        // when the list has been restructured the column is drawn to match it, rather than leaving
-        // rooms the author never placed sitting wherever there happened to be a gap.
         if (inserted) LineUpInOrder(level);
 
         level.Rooms[0].Role = "Entrance";
@@ -993,16 +860,10 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         }
     }
 
-    // A new room standing somewhere of its own. A CTLevelRoom defaults to cell (0, 0), which is
-    // almost always where another room already is - and a room drawn on top of another one is one
-    // the author can neither see nor click. Called before the room joins the list, so the search
-    // cannot find the room it is placing.
     private static CTLevelRoom Fresh(CTLevelBlueprint level, string kind)
     {
         var room = new CTLevelRoom { VanillaRoom = kind };
 
-        // Straight up the column from the origin: under a random walk the arrangement means
-        // nothing, so the only requirement is that the cell is empty.
         for (var y = 0; y < 1000; y++)
         {
             if (LevelLayout.At(level, 0, y) != null) continue;
@@ -1020,14 +881,10 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         level.Rooms[0].VanillaRoom == CTLevelRoom.PodiumRoom &&
         level.Rooms[^1].VanillaRoom == CTLevelRoom.EndOfFloorRoom;
 
-    // The two the game builds; the author's rooms are the ones between them.
     private bool IsFixedEnd(CTLevelRoom room) =>
         !_level.AuthoredLayout && _level.Rooms.Count > 0 &&
         (ReferenceEquals(room, _level.Rooms[0]) || ReferenceEquals(room, _level.Rooms[^1]));
 
-    // A blueprint written before layouts existed has every room on cell (0, 0). The grid is how
-    // rooms are seen and picked in both modes, so it has to mean something even when the shape does
-    // not: rooms with no cells of their own are strung out in a line, in their own order.
     private static void EnsureCells(CTLevelBlueprint level)
     {
         var seen = new HashSet<(int, int)>();
@@ -1048,9 +905,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     // ---- undo ------------------------------------------------------------------------------------------
 
-    // Undo works on a snapshot of the whole grid rather than an inverse of each edit. The grid is a
-    // handful of small structs and every edit renormalises the rooms around it, so an inverse would
-    // have to carry the neighbours' sides too - at which point it is a snapshot with extra steps.
     private string Snapshot() => ToJson(_level);
 
     private void PushUndo(string description, string before)
@@ -1074,8 +928,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         });
     }
 
-    // Deliberately no _editor.MarkEdited(): that is the *room* editor's dirty flag, and a level
-    // edit is not an unsaved room. This screen keeps its own, against what was last written.
     private void AfterMutation(string message)
     {
         _canvas?.RebuildVisuals();
@@ -1123,8 +975,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
     {
         if (_canvas == null || !_canvas.IsOpen || !_canvas.Visible || _level == null) return;
 
-        // A drag whose release was never seen - the name dialog stops this update for a few frames
-        // - would otherwise resume against a stale anchor and fling the room at the next press.
         if (_dragging && !Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0)) DropDrag();
 
         if (_ui.TransientUiOpen) return;
@@ -1136,7 +986,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
             return;
         }
 
-        // Polled, not EventSystem: Rewired drops right clicks.
         if (Input.GetMouseButtonDown(1) && !_canvas.PointerOverChrome())
         {
             var clicked = _canvas.HitRoom(_canvas.PointerContent());
@@ -1182,7 +1031,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         var dragged = _selected;
         if (_dragging && dragged != null && Input.GetMouseButton(0))
         {
-            // Moved by reference: a redraw per frame would destroy the very rect being dragged.
             if (_canvas.RoomRects.TryGetValue(dragged, out var rect) && rect != null)
                 rect.anchoredPosition =
                     _dragStartPosition + (_canvas.PointerContent() - _dragStartPointer);
@@ -1205,8 +1053,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         var cell = _canvas.CellAt(_canvas.PointerContent());
         var occupant = LevelLayout.At(_level, cell.x, cell.y);
 
-        // Off the window or onto another room: the room goes back where it was. The rect is put
-        // straight rather than left where the cursor dropped it.
         if (!_canvas.InWindow(cell) || (occupant != null && !ReferenceEquals(occupant, room)))
         {
             _movePreState = null;
@@ -1235,7 +1081,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         _canvas?.SetHint(message, severity);
     }
 
-    // Says it wherever it can be seen: the screen's own bar while it is up, the editor's otherwise.
     private void Report(string message, StatusSeverity severity = StatusSeverity.Info)
     {
         if (_canvas != null && _canvas.IsOpen) Hint(message, severity);

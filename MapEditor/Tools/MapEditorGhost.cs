@@ -29,7 +29,6 @@ public static class MapEditorGhost
             }
         }
 
-        // Out of the holder before it is destroyed; the surviving components wake here.
         ghost.transform.SetParent(null, true);
         ghost.SetActive(true);
         UnityEngine.Object.Destroy(holder);
@@ -58,13 +57,9 @@ public static class MapEditorGhost
             if (interaction == null) continue;
             hadPodium |= interaction is Interaction_WeaponSelectionPodium;
 
-            // Immediate, so OnDisable/OnDestroy deregistration happens before Interactor's next
-            // Update rather than at end of frame.
             UnityEngine.Object.DestroyImmediate(interaction);
         }
 
-        // The podium registered itself into its static list on wake; OnDestroy does not clean
-        // that list, and a dead entry breaks the doors-open check real podiums run.
         if (hadPodium)
             Interaction_WeaponSelectionPodium.Podiums.RemoveAll(p => p == null);
 

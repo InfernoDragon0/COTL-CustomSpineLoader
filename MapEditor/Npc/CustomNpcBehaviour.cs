@@ -12,7 +12,6 @@ public class CustomNpcBehaviour : MonoBehaviour
     {
         Definition = definition;
 
-        // No dialogue, no prompt: an NPC with nothing to say is scenery with an idle animation.
         if (definition?.Dialogue != null)
         {
             var interaction = gameObject.AddComponent<CustomNpcInteraction>();
@@ -21,8 +20,6 @@ public class CustomNpcBehaviour : MonoBehaviour
     }
 }
 
-// The "E - Talk" prompt. Interactor scans the static Interaction list by distance, so no
-// collider is needed; the base class handles prompt display, bark closing and player capture.
 public class CustomNpcInteraction : Interaction
 {
     public CustomNpcBehaviour Owner;
@@ -31,7 +28,6 @@ public class CustomNpcInteraction : Interaction
 
     private void Start()
     {
-        // Required, or Label is blanked pre-tutorial and the prompt never appears in a dungeon.
         IgnoreTutorial = true;
         ActivateDistance = 2f;
         UpdateLocalisation();
@@ -47,7 +43,6 @@ public class CustomNpcInteraction : Interaction
         }
         catch (System.Exception)
         {
-            // The fallback label is already set.
         }
     }
 
@@ -59,13 +54,11 @@ public class CustomNpcInteraction : Interaction
 
     public override void OnInteract(StateMachine state)
     {
-        // Required: closes open barks, records the interacting player, plays the confirm SFX.
         base.OnInteract(state);
 
         var definition = Owner != null ? Owner.Definition : null;
         if (definition == null) return;
 
-        // Belt and braces - the editor already suppresses Interactor.Update while open.
         if (RuntimeMapEditor.Active != null && RuntimeMapEditor.Active.IsEditing) return;
 
         try

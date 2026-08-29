@@ -4,8 +4,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.ModUI;
 
-// The build's own watermark, in the shape of the game's `PrereleaseWatermark`: a translucent box
-// that hops between the four corners so it can never be cropped out of a screenshot for long.
 public class PreReleaseBanner : MonoBehaviour
 {
     private enum Corner
@@ -16,11 +14,8 @@ public class PreReleaseBanner : MonoBehaviour
         BottomLeft
     }
 
-    // Vanilla's own dwell time and colour.
     private const float SecondsPerCorner = 10f;
 
-    // Tight against the screen edge: the watermark has to stay visible, not take up room the
-    // game's own HUD wants.
     private const float Margin = 2f;
 
     public static bool Hidden;
@@ -34,15 +29,12 @@ public class PreReleaseBanner : MonoBehaviour
     {
         get
         {
-            // Built on the first paint: GUI.skin is only valid inside OnGUI.
             if (_style == null)
             {
                 _style = new GUIStyle(GUI.skin.box)
                 {
                     fontSize = Mathf.Max(9, Screen.currentResolution.height / 110),
                     alignment = TextAnchor.MiddleLeft,
-                    // The skin's box padding is sized for buttons; CalcSize adds it to the text,
-                    // so trimming it is most of what shrinks the plate.
                     padding = new RectOffset(4, 4, 2, 2),
                     normal = { textColor = new Color(1f, 1f, 1f, 0.5f) }
                 };
@@ -56,8 +48,6 @@ public class PreReleaseBanner : MonoBehaviour
         _message = $"{Plugin.PluginName} {Plugin.PluginVer} PRE-RELEASE; User: {SteamName()}";
     }
 
-    // Steam is reached by name: the plugin does not reference the Steamworks assembly, and a build
-    // without it (or a player running offline) should still get the banner.
     private static string SteamName()
     {
         try
@@ -79,8 +69,6 @@ public class PreReleaseBanner : MonoBehaviour
 
     private void Update()
     {
-        // Unscaled: the editors and the map screen hold the game at timeScale 0, and a watermark
-        // that stops moving there is one that can be parked in a corner and cropped.
         _timer += Time.unscaledDeltaTime;
         if (_timer < SecondsPerCorner) return;
 

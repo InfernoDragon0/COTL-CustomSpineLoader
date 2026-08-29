@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using COTL_API.CustomStructures;
 using CustomSpineLoader.SpineLoaderHelper;
@@ -34,8 +34,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         public bool FogThrough;
     }
 
-    // Armed for the next placement, the way the scatter setting is: what is placed while these are
-    // ticked comes out that way. Anything already down is changed from the Select tool instead.
     private bool _placeSeeThrough;
     private bool _placeFogThrough;
 
@@ -73,9 +71,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         ui.CreateToggle(panel, "Multi-select randomised placement", false, SetScatterMode);
 
-        // The crystal tree's two looks, on anything, and separately: one lets the player show
-        // through, the other lets the weather through. Anything already down is changed with the
-        // Select tool.
         ui.CreateToggle(panel, "Place see-through", false, on =>
         {
             _placeSeeThrough = on;
@@ -107,9 +102,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     // ---- randomised placement -------------------------------------------------------------------
 
-    // Gather several things, then let each click choose between them. Filling a treeline or a field
-    // of rubble one structure at a time produces rows that read as rows; the point of the mode is
-    // that the variety costs nothing to place.
     private class Pick
     {
         public string Id;
@@ -126,9 +118,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         _scatter = on;
 
-        // The single pending selection and the gathered set are two answers to the same question,
-        // so only one of them is ever live. Switching modes drops the other rather than leaving it
-        // to fire on the next click.
         _picks.Clear();
         _grid?.SetSelectedMany(null);
 
@@ -142,8 +131,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             : "Back to placing one at a time.");
     }
 
-    // Returns true when the click was consumed by the gathering, so the caller does not also make
-    // it the single selection.
     private bool TogglePick(string id, string label, bool isProp, string path, StructureBrain.TYPES type)
     {
         if (!_scatter) return false;
@@ -164,9 +151,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return true;
     }
 
-    // No cursor ghost here, and that is deliberate: a ghost would have to show one of the picks,
-    // and whichever it showed would be wrong most of the time. The status line carries the count
-    // instead, so what the click will do is stated rather than mimed.
     private void UpdateScatterPlacement()
     {
         if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
@@ -178,8 +162,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         else Place(pick.Type, world);
     }
 
-    // Tall enough to browse in, short enough that the search field and the group picker
-    // above it never leave the screen.
     private const float GridHeight = 620f;
 
     private MapEditorGrid _grid;
@@ -198,15 +180,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         });
     }
 
-    // The build-menu structures as grid entries. Shared with the search, which has to match on the
-    // same names the group view shows.
     private List<MapEditorGrid.Entry> StructureEntries()
     {
         var entries = new List<MapEditorGrid.Entry>();
         var seen = new HashSet<StructureBrain.TYPES>();
 
-        // First in the list, and only in a hub: it is the one entry here that is not a building but
-        // the thing that lets the player put buildings up for themselves.
         if (HubSession.Active) entries.Add(TotemEntry());
 
         var host = Object.FindObjectOfType<TypeAndPlacementObjects>();
@@ -223,7 +201,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             }
         }
 
-        // Modded structures may not be in the scene's placement list; fold them in explicitly.
         foreach (var pair in CustomStructureManager.CustomStructureList)
         {
             if (pair.Value == null || !seen.Add(pair.Key)) continue;
@@ -235,9 +212,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     // ---- the hub's build totem ------------------------------------------------------------------
 
-    // Placed by hand like anything else in this tool: pick it, a ghost follows the cursor, click to
-    // stand it up. What it does at play time is the game's own build menu - the player walks up to
-    // it, opens it, and puts real buildings on the hub's ground for real resources.
     public const string TotemId = "hub:buildtotem";
     private const string TotemLabel = "Build Totem";
 
@@ -327,7 +301,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _totemGhost = null;
     }
 
-    // For the loader: a totem rebuilt from the blueprint is the one this tool now owns.
     public void AdoptTotem(GameObject totem) => _placedTotem = totem;
 
     private readonly Dictionary<string, StructureBrain.TYPES> _typesById = [];
@@ -343,8 +316,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             Display = label,
             OnClick = () =>
             {
-                // Picking one is the end of the search; the status set below is what should be
-                // left on screen, so this goes first.
                 _search?.Confirm();
 
                 if (TogglePick(id, label, isProp: false, path: null, type: type)) return;
@@ -366,7 +337,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _search = new MapEditorSearchRow(_editor, ui, panel, ShowSearchResults, ShowCurrentGroup);
     }
 
-    // Back to whichever group the dropdown is on, for a cleared or cancelled search.
     private void ShowCurrentGroup()
     {
         var index = _groupDropdown != null ? _groupDropdown.SelectedIndex : -1;
@@ -380,8 +350,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         else ShowPropGroup(_groupKeys[index]);
     }
 
-    // Every group at once: the catalog is filed by Addressables folder, so the same word turns up
-    // in several and searching one at a time would be searching the wrong one.
     private void ShowSearchResults(string needle)
     {
         if (_grid == null) return;
@@ -433,12 +401,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     private string _propPreviewPath;
     private bool _propPreviewPending;
 
-    // Group name -> prop prefab paths.
     private static SortedDictionary<string, List<string>> _propGroups;
 
     private const string PropPrefix = "Assets/Prefabs/";
 
-    // Enemies have their own tool.
     private static readonly HashSet<string> ExcludedPropFolders =
         ["Enemies", "UI", "Fonts", "Audio", "Materials", "Shaders", "Player", "Followers"];
 
@@ -527,7 +493,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         if (_grid == null || !PropGroups().TryGetValue(group, out var paths)) return;
 
-        // Icons still loading for the previous group would fill cells that no longer exist.
         MapEditorIcons.CancelPendingPropIcons();
 
         var entries = new List<MapEditorGrid.Entry>(paths.Count);
@@ -550,8 +515,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     private void SelectProp(string path, string label)
     {
-        // Picking one is the end of the search; the status set below is what should be left on
-        // screen, so this goes first.
         _search?.Confirm();
 
         if (TogglePick(path, label, isProp: true, path: path, type: StructureBrain.TYPES.NONE)) return;
@@ -617,7 +580,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                     return;
                 }
 
-                // A selection made while this was in flight wins.
                 if (_propPath != _propPreviewPath) { Object.Destroy(go); return; }
 
                 Fade(go, 0.6f);
@@ -645,7 +607,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         if (_propPreview != null)
         {
-            // Pooled instances recycle; the ghost's fade must come off before this one goes back.
             Fade(_propPreview, 1f);
             Object.Destroy(_propPreview);
         }
@@ -655,7 +616,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void OnEnter()
     {
-        // TypeAndPlacementObjects does not exist yet when the panels are built in Awake.
         if (_grid != null && _groupDropdown != null && _groupDropdown.SelectedIndex < 0)
         {
             _groupDropdown.SetSelected(0);
@@ -691,16 +651,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         CancelTotem();
     }
 
-    // The room snapshot skips objects this tool already serializes.
     public bool IsTracked(GameObject go)
     {
-        // Cursor ghosts are live pooled objects in the room; the snapshot must skip them too.
         if (go != null && (go == _preview || go == _propPreview || go == _totemGhost)) return true;
 
-        // The totem round-trips as a position on the blueprint, and it is rebuilt from the base's
-        // own on every load. Unclaimed, the snapshot took it for authored scenery - its name does
-        // not end in "(Clone)" - and wrote it into KeptAuthored as well, which is a second way to
-        // bring back an object that already has one.
         if (go != null && _placedTotem != null && go == _placedTotem) return true;
 
         foreach (var placed in _placed)
@@ -708,9 +662,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return false;
     }
 
-    // What this tool would call the object if it saved it now - the name that goes in the blueprint
-    // and that other mods' folders are keyed by. The Select tool shows it; a clone dragged off a
-    // placed structure is tracked too, so it answers for those as well.
     public bool TryGetPlacedName(GameObject go, out string internalName)
     {
         internalName = null;
@@ -725,9 +676,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return false;
     }
 
-    // The Select tool's two boxes. Only a structure this tool placed can answer, because only those
-    // round-trip through the blueprint - the flags have to be written down as well as applied, or
-    // they would be gone the next time the map is loaded.
     public bool CanSetSeeThrough(GameObject go) => IndexOfPlaced(go) >= 0;
 
     public bool IsSeeThrough(GameObject go)
@@ -752,8 +700,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         SeeThrough.Set(placed.Instance, player, fog);
 
-        // Read back rather than assumed: a sprite an effect could not attach to leaves the boxes
-        // saying what actually happened.
         placed.SeeThrough = SeeThrough.IsPlayerThrough(placed.Instance);
         placed.FogThrough = SeeThrough.IsFogThrough(placed.Instance);
         return true;
@@ -768,7 +714,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return -1;
     }
 
-    // Keeps the serialised mirror flag in step with a transform flip (select tool's flip button).
     public bool TryFlip(GameObject go)
     {
         foreach (var placed in _placed)
@@ -780,7 +725,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return false;
     }
 
-    // Adopts a ctrl-drag clone of one of our placed structures so it saves with its type.
     public bool TryAdoptClone(GameObject source, GameObject clone)
     {
         foreach (var placed in _placed)
@@ -794,8 +738,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 Rotation = placed.Rotation,
                 FlipX = placed.FlipX,
 
-                // A ctrl-drag copy is a copy of the whole thing, the looks included - Unity copied
-                // the components and materials with it.
                 SeeThrough = placed.SeeThrough,
                 FogThrough = placed.FogThrough
             });
@@ -862,9 +804,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     {
         var isCustom = CustomStructureManager.CustomStructureList.ContainsKey(type);
 
-        // Not ResolvePrefabPath for custom structures: their path is not a real addressable key.
-        // COTL_API swaps it inside InstantiateAsync only, so LoadAssetAsync throws
-        // InvalidKeyException; load the base prefab and dress it here instead.
         var prefabPath = isCustom ? CustomStructureBasePrefab : ResolvePrefabPath(type, false);
 
         GameObject prefab = null;
@@ -891,7 +830,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         _previewPending = false;
 
-        // The selection moved on while the asset was loading.
         if (_previewType != type) yield break;
 
         GameObject ghost = null;
@@ -906,7 +844,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         if (ghost == null)
         {
-            // Nothing loadable; the flat icon at least shows what is armed.
             ghost = new GameObject("CultTweaker_PlacementPreview");
             var renderer = ghost.AddComponent<SpriteRenderer>();
             renderer.sprite = MapEditorIcons.GetStructureIcon(type);
@@ -938,12 +875,9 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _editor.StartCoroutine(PlaceAt(type, isCustom, position, 0f, false, deferNav: false));
     }
 
-    // What COTL_API instantiates for every custom structure before swapping its sprite.
     private const string CustomStructureBasePrefab =
         "Assets/Prefabs/Structures/Buildings/Decoration Wreath Stick.prefab";
 
-    // Replicates COTL_API's InstantiateAsync dressing (sprite, plus our skeleton) for the
-    // preview, which bypasses that patch.
     private static void DressCustomStructure(GameObject go, StructureBrain.TYPES type, float ghostAlpha)
     {
         if (!CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom)) return;
@@ -953,13 +887,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             var renderer = go.GetComponentInChildren<SpriteRenderer>(true);
             var sprite = custom.Sprite;
 
-            // Bottom-centre re-pivot, same as COTL_API: a structure stands on its tile.
             if (renderer != null && sprite != null)
                 renderer.sprite = Sprite.Create(sprite.texture, sprite.rect, new Vector2(0.5f, 0f));
 
             StructureSpineHelper.TryAttach(go, type);
 
-            // Sprite-tint fading misses the skeleton mesh; Spine carries its own colour.
             if (ghostAlpha < 1f)
             {
                 var spine = go.GetComponentInChildren<Spine.Unity.SkeletonAnimation>(true);
@@ -973,10 +905,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         }
     }
 
-    // A vanilla building re-skinned by a BuildingOverrides folder gets its new look from a postfix
-    // on Structure.Start. The ghost never wakes that behaviour, so without this it shows the stock
-    // art while you aim and the override only after the click - the one moment you are choosing by
-    // eye is the one moment it lies.
     private static void DressOverriddenBuilding(GameObject ghost, StructureBrain.TYPES type)
     {
         var overrides = StructureBuildingOverrideHelper.GetOverridesForBuilding(type.ToString());
@@ -986,8 +914,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         {
             CustomStructureManager.OverrideStructureBuilding(ghost, overrides);
 
-            // The ghost was faded on the way out of MapEditorGhost.Create; these renderers are
-            // newer than that pass.
             foreach (var renderer in ghost.GetComponentsInChildren<SpriteRenderer>(true))
                 renderer.color = new Color(renderer.color.r, renderer.color.g, renderer.color.b, 0.6f);
         }
@@ -1044,7 +970,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             yield break;
         }
 
-        // timeScale is 0 while editing, so this must not depend on scaled time.
         while (!handle.IsDone) yield return null;
 
         if (handle.Status != AsyncOperationStatus.Succeeded || handle.Result == null)
@@ -1058,8 +983,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         go.transform.position = position;
         go.name = $"CultTweaker_Placed_{type}";
 
-        // The spine patch hangs off LocationManager.PlaceStructure; the editor instantiates its
-        // own, so it must attach the skeleton itself.
         if (isCustom) StructureSpineHelper.TryAttach(go, type);
 
         if (Mathf.Abs(rotation) > 0.001f)
@@ -1070,13 +993,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             go.transform.localScale = new Vector3(-s.x, s.y, s.z);
         }
 
-        // After the flip and the scale, and after a custom structure has had its own art attached:
-        // both looks read the sprite that is there when they are applied.
         if (seeThrough || fogThrough) SeeThrough.Set(go, seeThrough, fogThrough);
 
-        // In the base, a structure is meant to be a building rather than a picture of one: the bed
-        // gets slept in, the plot gets farmed. That takes a brain, which the game will make without
-        // filing it in the player's save.
         BaseDelta.GiveBrain(go, type, position);
 
         var placed = new PlacedStructure
@@ -1102,7 +1020,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _editor.SetStatus($"Placed {type}.");
     }
 
-    // Everything this tool put in the room, for the clear tool.
     public int ClearPlaced()
     {
         var removed = 0;
@@ -1126,7 +1043,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return removed;
     }
 
-    // For the loader: the spawn routines are coroutines and hand nothing back.
     public GameObject LastPlacedInstance =>
         _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
 
@@ -1135,8 +1051,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void ContributeTo(CTNodeBlueprint map)
     {
-        // Destroyed with the Select tool rather than un-placed, so the check is for the object
-        // still being there, not for a flag somebody remembered to clear.
         map.BuildTotem = _placedTotem == null
             ? null
             : new MapTotemData { Position = MapEditorSerialization.V3(_placedTotem.transform.position) };
@@ -1147,8 +1061,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             if (placed.Instance == null) continue;
             map.Structures.Add(new MapStructureData
             {
-                // InternalName, not ToString(): a GuidManager-minted enum prints a bare integer
-                // that resolves differently next launch.
                 TypeName = placed.IsCustom ? CustomInternalName(placed.Type) : placed.Type.ToString(),
                 IsCustom = placed.IsCustom,
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
@@ -1157,8 +1069,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 SeeThrough = placed.SeeThrough,
                 FogThrough = placed.FogThrough,
 
-                // Absolute: FlipX is stored separately and re-applied on load; a negative X
-                // here would cancel it out.
                 Scale = MapEditorSerialization.V3(Abs(placed.Instance.transform.lossyScale))
             });
         }
@@ -1166,21 +1076,15 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     private static string CustomInternalName(StructureBrain.TYPES type) => InternalNameOf(type);
 
-    // The name a structure is written down by, whoever is doing the writing - a blueprint, a hub's
-    // building file, the Select tool's readout. A GuidManager-minted enum prints a bare integer
-    // that resolves differently next launch, so a custom structure answers with the name its own
-    // mod gave it.
     public static string InternalNameOf(StructureBrain.TYPES type) =>
         CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom) && custom != null
             ? custom.InternalName
             : type.ToString();
 
-    // For callers that saved a name without recording whether it was custom.
     public static bool TryResolveAnyType(string typeName, out StructureBrain.TYPES type) =>
         TryResolveType(typeName, isCustom: true, out type) ||
         TryResolveType(typeName, isCustom: false, out type);
 
-    // Resolves a saved TypeName back to a live enum value.
     public static bool TryResolveType(string typeName, bool isCustom, out StructureBrain.TYPES type)
     {
         type = StructureBrain.TYPES.NONE;
@@ -1195,7 +1099,6 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 return true;
             }
 
-            // Old saves wrote the raw enum integer; honour it if the value still exists.
             if (int.TryParse(typeName, out var raw) &&
                 CustomStructureManager.CustomStructureList.ContainsKey((StructureBrain.TYPES)raw))
             {

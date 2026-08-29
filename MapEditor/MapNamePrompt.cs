@@ -9,15 +9,8 @@ namespace CustomSpineLoader.MapEditor;
 
 public static class MapNamePrompt
 {
-    // Map names are paths, not cult names - the vanilla 16-character limit is too tight.
     private const int NameLimit = 40;
 
-    // How many of these are open at once. It is only ever 0 or 1 for most of the editor, but the
-    // trigger tool's screen text asks two questions in a row and opens the second from the
-    // first's confirm callback - so the second is opened while the first is still alive, and the
-    // first's own close then cleared the editor's modal flag out from under it a moment later.
-    // The dialog stayed on screen with the editor reading WASD and tool shortcuts underneath,
-    // which is what "controls go through while typing" was.
     private static int _openCount;
 
     private static void OpenModal(IMapEditorHost editor)
@@ -32,13 +25,8 @@ public static class MapNamePrompt
         if (_openCount == 0) editor.ModalOpen = false;
     }
 
-    // A scene change kills TrackLifetime before it can close its dialog, and the count is
-    // static - the next scene's editor would start with ModalOpen latched and every input
-    // ignored. The editor host calls this from OnDestroy.
     public static void ResetModalState() => _openCount = 0;
 
-    // existsCheck/existsNoun drive the overwrite warning; the default is the map store, because
-    // that is what the prompt was built for. The lighting tool passes its own profile store.
     public static void Show(IMapEditorHost editor, string prefill, string title,
         Action<string> onConfirmed, Action onClosed = null,
         Func<string, bool> existsCheck = null, string existsNoun = "map", int characterLimit = NameLimit)
@@ -98,8 +86,6 @@ public static class MapNamePrompt
             return;
         }
 
-        // showDisclaimer keeps the disclaimer object alive so its text can be swapped for the
-        // overwrite warning; it is hidden again immediately unless the prefill already collides.
         menu.Show(prefill ?? "", cancellable: true, showDisclaimer: true);
         menu.SetTitle(title);
         menu.RequiresName = true;
@@ -112,7 +98,6 @@ public static class MapNamePrompt
         }
         catch (Exception)
         {
-            // Field layout differs in some build; the vanilla limit still produces a usable name.
         }
 
         SetUpWarning(menu, existsCheck, existsNoun);
@@ -123,13 +108,6 @@ public static class MapNamePrompt
         editor.StartCoroutine(TrackLifetime(editor, menu, onClosed));
     }
 
-    // The cult-naming screen dresses itself in the game's ritual red - a full-screen backdrop
-    // plus a red confirm highlight - which glares when it pops over the editor's muted panels.
-    // Every near-full-screen image is pressed to translucent black instead (a black tint turns
-    // red art into a dark silhouette, so the criterion is size, not colour), and the highlight
-    // swaps to the black sprite the controller already ships. Styling only, one frame after
-    // Show so the stretch-anchored rects have a layout to measure; the dialog works fine red
-    // if any of this ever misses.
     private static IEnumerator MuteBackdrop(UICultNameMenuController menu)
     {
         yield return null;
@@ -167,7 +145,6 @@ public static class MapNamePrompt
         var deadline = Time.unscaledTime + 5f;
         while (menu != null && menu.IsShowing && Time.unscaledTime < deadline) yield return null;
 
-        // One more frame so the navigator's own selection lands first and ours replaces it.
         yield return null;
         if (menu != null) FocusField(menu);
     }
@@ -229,8 +206,6 @@ public static class MapNamePrompt
         Refresh(field != null ? field.text : "");
     }
 
-    // The modal destroys itself on hide, and a cancel reports nothing - so the close is detected
-    // by watching for the object to go rather than by a callback.
     private static IEnumerator TrackLifetime(IMapEditorHost editor, UICultNameMenuController menu,
         Action onClosed)
     {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -14,8 +14,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 {
     public string Name => "NPCs";
 
-    // Both spellings are accepted: the shipped catalog uses the singular folder, and nothing
-    // guarantees a future update keeps it that way.
     private static readonly string[] PrefabPrefixes = ["Assets/Prefabs/NPC/", "Assets/Prefabs/NPCs/"];
 
     private static readonly string[] RoomPrefixes = ["Assets/_Rooms/", "Assets/Prefabs/Rescue Rooms/"];
@@ -31,8 +29,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         ("Special Rooms", ["Special ", "Rescue Room", "Fishing", "NPC ", "Healing Room"])
     ];
 
-    // How a character entry names its source; also the marker that tells the spawner to dig into
-    // a room prefab rather than instantiate an addressable directly.
     private const string RoomKeyPrefix = "room:";
 
     private readonly RuntimeMapEditor _editor;
@@ -41,8 +37,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     private static List<NpcGroup> _groups;
 
     private MapEditorDropdown _groupDropdown;
-    // Tall enough to browse in, short enough that the search field and the group picker
-    // above it never leave the screen.
     private const float GridHeight = 620f;
 
     private MapEditorGrid _grid;
@@ -55,15 +49,11 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     {
         public string Label;
 
-        // Set for a bucket of source rooms; its characters are not known until those prefabs
-        // have been opened, which is why Entries fills in progressively rather than up front.
         public List<string> RoomKeys;
 
         public List<(string label, string key)> Entries;
         public bool Scanned;
 
-        // Mod-registered NPCs; entries are read live from CustomNpcManager on every open, since
-        // mods register at their own pace.
         public bool IsCustom;
     }
 
@@ -110,15 +100,10 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         ShowGroupAt(index < 0 ? 0 : index);
     }
 
-    // NPCs are found by opening room prefabs, which is slow enough to be indexed on disk - so a
-    // search covers what has been scanned so far plus the custom list, and says as much rather
-    // than pretending to have looked everywhere. Open a group once and its characters are
-    // searchable from then on, in this session and the next.
     private void ShowSearchResults(string needle)
     {
         if (_grid == null) return;
 
-        // Whatever a running scan was still filling in belongs to a grid that is about to go.
         _scanToken++;
         EnemyThumbnails.CancelPending();
         _grid.Clear();
@@ -170,7 +155,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         var groups = Groups();
         if (_grid == null || index < 0 || index >= groups.Count) return;
 
-        // Whatever a previous scan was still filling in belongs to a grid that is about to go.
         _scanToken++;
 
         var group = groups[index];
@@ -272,8 +256,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     {
         _grid.AddCell(key, label, null, () =>
         {
-            // Picking one is the end of the search; the status set below is what should be left on
-            // screen, so this goes first.
             _search?.Confirm();
 
             _pendingKey = key;
@@ -282,8 +264,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _editor.SetStatus($"Selected {label}.");
         });
 
-        // isCustom routes the thumbnail renderer through the custom-skin lookup (generalized in
-        // EnemyTool.TryGetCustomSkin to cover NPCs too), so the tile wears the override.
         EnemyThumbnails.Request(_editor, key, isCustom,
             sprite => _grid?.SetCellIcon(key, sprite), ResolveRoutine);
     }
@@ -326,15 +306,12 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     // ---- placement ----------------------------------------------------------------------------
 
-    // Also the loader's entry point: self-registers so load then save round-trips.
     public IEnumerator SpawnNpcRoutine(string key, Vector3 position, bool isCustom = false)
     {
         GameObject go = null;
 
         if (isCustom)
         {
-            // The prefab list fills from a coroutine at plugin load; a blueprint loading very
-            // early can outrun it.
             var deadline = Time.unscaledTime + 10f;
             while (!APIHelper.CustomNpcManager.CustomNpcPrefabList.ContainsKey(key) &&
                    APIHelper.CustomNpcManager.CustomNpcList.ContainsKey(key) &&
@@ -369,8 +346,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
             try
             {
-                // A child of a prefab asset instantiates on its own, which is the whole point:
-                // the character comes across without the room around it.
                 go = UnityEngine.Object.Instantiate(source, SceneRefs.ContentRoot);
                 go.SetActive(true);
             }
@@ -447,8 +422,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return slash >= 0 ? path.Substring(slash + 1) : path;
     }
 
-    // Turns either kind of key into a prefab. Shared by the grid thumbnails, the cursor preview
-    // and placement, so all three agree on what a key means.
     internal static IEnumerator ResolveRoutine(string key, Action<GameObject> done)
     {
         if (APIHelper.CustomNpcManager.CustomNpcList.ContainsKey(key))
@@ -509,7 +482,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
         _groups = [];
 
-        // 1. The handful of standalone NPC prefabs, grouped by their folder.
         var byFolder = new SortedDictionary<string, List<(string label, string key)>>();
         var rooms = new Dictionary<string, List<string>>();
 
@@ -532,7 +504,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
                     continue;
                 }
 
-                // 2. Rooms that hold authored characters, pooled into their bucket.
                 if (!RoomPrefixes.Any(key.StartsWith)) continue;
 
                 var name = Path.GetFileNameWithoutExtension(key);
@@ -550,8 +521,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _groups.Add(new NpcGroup { Label = pair.Key, Entries = pair.Value, Scanned = true });
         }
 
-        // Bucket order follows the declaration, not the alphabet: the named characters are what
-        // anyone opening this tool is looking for.
         foreach (var bucket in RoomBuckets)
         {
             if (!rooms.TryGetValue(bucket.Label, out var keys)) continue;
@@ -559,7 +528,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             _groups.Add(new NpcGroup { Label = bucket.Label, RoomKeys = keys });
         }
 
-        // Always present, contents read live when opened - mods register at their own pace.
         _groups.Add(new NpcGroup { Label = "Custom (mods)", IsCustom = true });
 
         Plugin.Log.LogInfo($"MapEditor: NPC catalog holds {byFolder.Sum(g => g.Value.Count)} standalone prefab(s) " +
@@ -676,8 +644,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             if (IsRoomStructure(current.gameObject) || ContainsRoomStructure(current.gameObject)) break;
             if (current.GetComponentsInChildren<Transform>(true).Length > MaxCharacterTransforms) break;
 
-            // A few rigs is a character with an effect or a companion; a dozen is a crowd, and
-            // taking the node above a crowd is how this starts swallowing the room again.
             if (current.GetComponentsInChildren<SkeletonAnimation>(true).Length > MaxSkeletonsPerCharacter) break;
 
             best = current;
@@ -778,10 +744,8 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         GameObject prefab = null;
         yield return ResolveRoutine(key, p => prefab = p);
 
-        // Selection changed while loading.
         if (_previewKey != key || prefab == null) yield break;
 
-        // A cursor preview of a whole room is as bad as placing one; the same guard decides.
         if (!IsSafeToSpawn(prefab, out _)) yield break;
 
         var ghost = MapEditorGhost.Create(prefab, _editor.transform, "CultTweaker_NpcPreview",
@@ -791,13 +755,9 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         ghost.transform.position = _editor.MouseWorld();
 
         var spine = EnemyTool.MainSkeleton(ghost);
-        // The custom NPC's ghost is its mimic; the skin override is what makes it look like
-        // itself. The generalized lookup covers NPC keys.
         if (isCustom) EnemyTool.ApplyCustomSkin(spine, key);
         if (spine?.Skeleton != null) spine.Skeleton.A = 0.6f;
 
-        // Two of these can overlap when the selection changes mid-load; only the one still
-        // matching the current key may install its ghost.
         if (_previewKey != key)
         {
             UnityEngine.Object.Destroy(ghost);
@@ -817,7 +777,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     // ---- bookkeeping ---------------------------------------------------------------------------
 
-    // The room snapshot skips objects this tool already serializes.
     public bool IsTracked(GameObject go)
     {
         foreach (var placed in _placed)
@@ -827,7 +786,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public void ResetTracking() => _placed.Clear();
 
-    // Everything this tool put in the room, for the clear tool.
     public int ClearPlaced()
     {
         var removed = 0;
@@ -842,8 +800,6 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return removed;
     }
 
-    // The instance the last spawn produced, so a loader can finish setting it up without
-    // every spawn routine having to hand one back.
     public GameObject LastPlacedInstance =>
         _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
 

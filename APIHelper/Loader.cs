@@ -26,9 +26,6 @@ public class Loader<T>
 
     public string RootPath => Path.Combine(Plugin.PluginPath, FolderName);
 
-    // Scans each subfolder for a single "config.json" and deserializes it to T. Our own folder and
-    // the same folder inside any other mod's CultTweaker folder (see ModContentPaths), so a mod can
-    // ship content for this loader without shipping any code.
     public List<LoaderResult<T>> LoadAll()
     {
         var results = new List<LoaderResult<T>>();

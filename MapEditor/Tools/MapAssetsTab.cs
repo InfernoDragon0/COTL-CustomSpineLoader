@@ -21,7 +21,6 @@ public static class MapAssetsTab
     public static bool IsOurCategory(AestheticCategory category) =>
         _ourCategory != null && ReferenceEquals(category, _ourCategory);
 
-    // Runtime-minted enum values do not appear in Enum.GetValues, hence the union.
     public static List<StructureBrain.TYPES> BuildCatalog()
     {
         var all = new HashSet<StructureBrain.TYPES>();
@@ -51,7 +50,6 @@ public static class MapAssetsTab
                 return false;
             }
 
-            // Inactive holder: MMTab.Awake would bind the clone to the original menu before rewiring.
             var holder = new GameObject("CultTweaker_TabHolder");
             holder.SetActive(false);
             holder.transform.SetParent(source.transform.parent, false);
@@ -72,7 +70,6 @@ public static class MapAssetsTab
 
             RelabelTab(tab, "Map Assets");
 
-            // Replicate what MMTabNavigatorBase.Start does for tabs that existed at startup.
             var tabs = new List<BuildMenuTab>(navigator._tabs) { tab };
             navigator._tabs = tabs.ToArray();
             tab.Configure();
@@ -100,7 +97,6 @@ public static class MapAssetsTab
         if (tab.Alert != null) tab.Alert.SetActive(false);
     }
 
-    // Fills our cloned page with the full catalog instead of the aesthetic content.
     public static void PopulateMapAssets(AestheticCategory category)
     {
         HideIfPresent(category._dlcHeader, category._majorDlcHeader, category._majorDlcWoolhavenHeader,
@@ -151,7 +147,6 @@ public static class MapAssetsTab
         return false;
     }
 
-    // The gates that decide whether an entry is listed at all and whether it is clickable.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(StructuresData), nameof(StructuresData.GetUnlocked))]
     private static void StructuresData_GetUnlocked(ref bool __result)
@@ -166,7 +161,6 @@ public static class MapAssetsTab
         if (ForceUnlockAll) __result = false;
     }
 
-    // These only greyed entries out.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(StructuresData), nameof(StructuresData.RequiresTempleToBuild))]
     private static void StructuresData_RequiresTempleToBuild(ref bool __result)

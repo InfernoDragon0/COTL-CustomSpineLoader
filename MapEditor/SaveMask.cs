@@ -6,22 +6,6 @@ using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor;
 
-// The safeguard, enforced.
-//
-// A building the base editor moved has to be moved in the game's own terms - the grid it is stamped
-// on, and the position every follower navigates by, both live on the save's own StructuresData. So
-// for the game to behave, that data must say the new place; for the player's save to stay untouched,
-// the file must say the old one. Both are true, at different moments.
-//
-// The moment that matters is the write. The save is serialized from the live object on a background
-// thread, so nothing can be masked "around Save()" without racing the serializer. Instead this hooks
-// the writer itself: the call that spawns that thread is on the main thread, and its prefix puts
-// every moved building back where the player left it. When the write reports itself done - also on
-// the main thread, marshalled there by the game - the moves go back on.
-//
-// The window is a few frames, only exists while a save is in flight, and the state it leaves behind
-// if anything goes wrong is the vanilla layout, which is safe by construction: the moves re-apply on
-// the next arrival from our own file.
 public static class SaveMask
 {
     private class Entry
@@ -30,7 +14,6 @@ public static class SaveMask
         public Vector3 Original;
         public Vector2Int OriginalCell;
 
-        // What the mask lifted, so it can be put back.
         public Vector3 Live;
         public Vector2Int LiveCell;
     }
@@ -40,8 +23,6 @@ public static class SaveMask
     private static bool _subscribed;
     private static Coroutine _watchdog;
 
-    // How long a save may take before the mask lifts itself. The callback is reliable, but a mask
-    // left engaged would mean a moved building silently standing back where it started.
     private const float WriteTimeoutSeconds = 20f;
 
     public static bool Anything => _entries.Count > 0;
@@ -52,9 +33,6 @@ public static class SaveMask
     {
         if (data == null) return;
 
-        // A backstop, not a policy - BaseDelta already refuses to move these. A scene-anchored
-        // building is found on load by its position matching a scene object exactly, so its position
-        // is not a fact this mod may write at all, masked or otherwise.
         if (data.DontLoadMe)
         {
             Plugin.Log.LogWarning($"Base editor: refusing to mask {data.Type} - it is anchored to " +
@@ -65,7 +43,6 @@ public static class SaveMask
         var existing = _entries.Find(e => ReferenceEquals(e.Data, data));
         if (existing != null)
         {
-            // The original stays the original however many times it is moved after that.
             existing.Original = originalPosition;
             existing.OriginalCell = originalCell;
             return;
@@ -81,18 +58,6 @@ public static class SaveMask
         EnsureSubscribed();
     }
 
-    // Stop tracking these buildings - and leave the game holding exactly what it started with.
-    //
-    // This used to lift the mask first, which was precisely backwards and cost a player a temple.
-    // Lifting it writes the moved positions back into the live save data, and the entries that would
-    // have hidden them again are then thrown away - so the very next save wrote a moved position
-    // into the player's file. For a scene-anchored building (a temple, a shrine) that is fatal: the
-    // game binds those to their scene object by exact position equality on load, finds nothing where
-    // the save says to look, and deletes the entry.
-    //
-    // Forgetting therefore means putting everything back, whether or not a write is in flight. The
-    // original is what the file holds and what the scene object stands at, so it is the only state
-    // that is safe to walk away from.
     public static void Forget()
     {
         foreach (var entry in _entries)
@@ -109,7 +74,6 @@ public static class SaveMask
 
     // ---- the mask -------------------------------------------------------------------------------
 
-    // Called from the writer's prefix, on the main thread, before the serializing thread starts.
     public static void Engage()
     {
         if (_masked || _entries.Count == 0) return;
@@ -186,9 +150,6 @@ public static class SaveMask
 
     // ---- the writer -----------------------------------------------------------------------------
 
-    // The completion signal is a field on the read-writer the game holds privately, and both the
-    // success and the error path are marshalled onto the main thread before they fire. Subscribed
-    // once, the first time anything is registered - a game with no base moves never touches it.
     private static void EnsureSubscribed()
     {
         if (_subscribed) return;
