@@ -29,17 +29,36 @@ public class MapEditorUI
 
     public static readonly Color TrackColour = new(0.05f, 0.05f, 0.04f, 0.95f);
 
-    private RuntimeMapEditor _editor;
+    private IMapEditorHost _editor;
     private RectTransform _canvasRoot;
 
     public RectTransform CanvasRoot => _canvasRoot;
-    public RuntimeMapEditor Editor => _editor;
+    public IMapEditorHost Editor => _editor;
+
+    // Whichever host built UI last. Static because the widgets that need it - MapEditorHover,
+    // AttachButton - are static helpers on components the host never sees.
+    //
+    // Every editor attaches itself as it opens, so this is current whenever one is up. It can be
+    // left pointing at a closed editor, which is the same no-op the two-host version had: a
+    // status line written to a bar that is not on screen. Destroyed is the case that matters, and
+    // CurrentHost answers that in Unity's terms rather than C#'s.
+    private static IMapEditorHost _host;
+
+    internal static IMapEditorHost CurrentHost
+    {
+        get
+        {
+            if (_host is MonoBehaviour behaviour) return behaviour == null ? null : _host;
+            return _host;
+        }
+    }
 
     // Must run before any dropdown or grid is built.
-    public void Attach(RuntimeMapEditor editor, RectTransform canvasRoot)
+    public void Attach(IMapEditorHost editor, RectTransform canvasRoot)
     {
         _editor = editor;
         _canvasRoot = canvasRoot;
+        if (editor != null) _host = editor;
         WarmFonts();
     }
 
@@ -457,11 +476,9 @@ public class MapEditorUI
     {
         void Handle()
         {
-            // Both editors poll the mouse themselves, and a click on a widget must not also read as
-            // a click on the map underneath it.
-            RuntimeMapEditor.Active?.BlockWorldClicks();
-            if (WorldMap.WorldMapEditor.Instance != null && WorldMap.WorldMapEditor.Instance.IsEditing)
-                WorldMap.WorldMapEditor.Instance.BlockWorldClicks();
+            // The editors poll the mouse themselves, and a click on a widget must not also read as
+            // a click on whatever is underneath it.
+            CurrentHost?.BlockWorldClicks();
 
             onClick?.Invoke();
         }
@@ -1331,18 +1348,10 @@ public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitH
         if (string.IsNullOrEmpty(text)) return;
 
         // Whichever editor owns the screen right now; they are never open together.
-        var world = WorldMap.WorldMapEditor.Instance;
-        if (world != null && world.IsEditing)
-        {
-            if (hovered) world.ShowHoverStatus(text);
-            else world.ClearHoverStatus();
-            return;
-        }
+        var host = MapEditorUI.CurrentHost;
+        if (host == null) return;
 
-        var editor = RuntimeMapEditor.Active;
-        if (editor == null) return;
-
-        if (hovered) editor.ShowHoverStatus(text);
-        else editor.ClearHoverStatus();
+        if (hovered) host.ShowHoverStatus(text);
+        else host.ClearHoverStatus();
     }
 }

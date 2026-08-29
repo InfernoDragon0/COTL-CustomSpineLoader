@@ -714,6 +714,15 @@ public class PlayerSpineLoader
         return entry != null && entry.State == SpineState.Ready;
     }
 
+    // The skeleton behind a registered spine, for anything that wants to draw one somewhere other
+    // than on a player - the main menu's centrepiece. Null while it is still parsing and for a name
+    // nothing registered, so callers pair this with EnsureLoaded rather than polling it.
+    public static SkeletonDataAsset LoadedAsset(string name)
+    {
+        var entry = FindEntry(name);
+        return entry != null && entry.State == SpineState.Ready ? entry.Asset : null;
+    }
+
     // The panel's picker: every wearable "<spine>/<skin>" key, loaded or not - the same keys
     // AddPlayerSpine mints, one per skin, so selection works exactly as it always did.
     public static List<string> RegisteredSpineNames()

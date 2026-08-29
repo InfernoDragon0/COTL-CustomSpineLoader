@@ -65,6 +65,11 @@ namespace CustomSpineLoader
         public static ConfigEntry<bool> MapEditorVanillaWidgets { get; set; }
         public static ConfigEntry<bool> MapEditorFullWeather { get; set; }
 
+        // The authored main menu. These two are what a player who never opens the editor is using:
+        // the preset is re-applied on every menu load whether or not anything is looking.
+        public static ConfigEntry<bool> MainMenuEnabled { get; set; }
+        public static ConfigEntry<string> MainMenuPreset { get; set; }
+
         public static ConfigEntry<bool> FleeceCyclingEnabled { get; set; }
 
         // Per seat rather than one switch for everybody: a spine that dresses its own body wants
@@ -93,6 +98,10 @@ namespace CustomSpineLoader
         // stands up in the base. RuntimeMapEditor keeps the live one in a static of its own.
         private static RuntimeMapEditor RoomEditor => RuntimeMapEditor.Active;
 
+        // The menu editor takes the whole title screen, and every one of the mod's hotkeys would
+        // either do nothing there or do something unwanted.
+        private static bool MenuEditorOpen => ModUI.MenuEditor.MainMenuEditor.IsOpen;
+
         // The F7 panel. Unlike the map editor it is not scoped to a dungeon - fleeces and spines
         // are just as worth setting in the base - so it lives on its own persistent host.
         private ModUI.CultTweakerPanel cultTweakerPanel;
@@ -120,7 +129,8 @@ namespace CustomSpineLoader
                 "CustomInventoryItems", "CustomMeals", "CustomTarotCards", "CustomStructures",
                 "CustomNpcs", "CustomEnemies", "CustomCutscenes", "CustomShapeProfiles",
                 MapEditor.MapEditorSerialization.FolderName, MapEditor.CTLevelSerialization.FolderName,
-                MapEditor.CTDungeonMapSerialization.FolderName, MapEditor.CTWorldMapSerialization.FolderName);
+                MapEditor.CTDungeonMapSerialization.FolderName, MapEditor.CTWorldMapSerialization.FolderName,
+                MapEditor.CTMenuPresetSerialization.FolderName);
 
             SpineMemory.Phase("PlayerSpines", () => PlayerSpineLoader.LoadAllPlayerSpines());
             Log.LogInfo("Cult Tweaker is loading! For more information or templates on how to use this mod, go to the NexusMods page!");
@@ -184,6 +194,13 @@ namespace CustomSpineLoader
                 "MapEditor", "FullWeather", true,
                 "Offer every strength of every weather the game has art for, building the ones it does not ship (extreme wind, say) from the nearest one it does. The weather a player gets on a normal day is unaffected either way.");
 
+            MainMenuEnabled = Config.Bind(
+                "MainMenu", "Enabled", true,
+                "Let a saved main menu preset dress the title screen. Off leaves the menu exactly as the game draws it, and hides the Customize Menu button.");
+            MainMenuPreset = Config.Bind(
+                "MainMenu", "Preset", "",
+                "Which saved preset the title screen wears, by folder name. Empty is the game's own menu; the editor writes this when a preset is made active.");
+
             for (var i = 0; i < FleeceTransmog.Length; i++)
                 FleeceTransmog[i] = Config.Bind("Fleece", $"FleeceTransmogP{i + 1}",
                     FleeceCyclingEnabled.Value,
@@ -229,6 +246,18 @@ namespace CustomSpineLoader
             worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapScreen>();
             worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapEditor>();
 
+            // The menu editor's host outlives the menu scene for the same reason: it is reached
+            // from a button inside that scene, but the scene is thrown away and rebuilt on every
+            // quit-to-menu, and a host that went with it would have to be found again each time.
+            MapEditor.CTMenuPresetSerialization.EnsureRootFolder();
+            var mainMenuHost = new GameObject("MainMenuEditorHost");
+            DontDestroyOnLoad(mainMenuHost);
+            mainMenuHost.AddComponent<ModUI.MenuEditor.MainMenuEditor>();
+
+            // sceneLoaded does not fire for the scene that is already running, so the menu the game
+            // booted into is dressed here - the same reason TryCreateRuntimeEditor is called above.
+            OnMenuScene(SceneManager.GetActiveScene());
+
             var customTestDungeon = new CustomDungeon();
 
             // Registered for the map editor's enemy picker. Deliberately NOT added to
@@ -272,14 +301,17 @@ namespace CustomSpineLoader
             // pickers and the mod's own information. F8 keeps the one-key cycle.
             if (Input.GetKeyDown(KeyCode.F7))
             {
-                if (cultTweakerPanel != null) cultTweakerPanel.Toggle();
+                if (cultTweakerPanel != null && !MenuEditorOpen) cultTweakerPanel.Toggle();
             }
             // if (Input.GetKeyDown(KeyCode.F8))
             // {
             //     Log.LogInfo("F8 Pressed - Fleece Cycle Player 2");
             //     TestApplySpineOverride(1);
             // }
-            if (Input.GetKeyDown(KeyCode.F5) && !MapEditor.WorldMap.WorldMapScreen.IsOpen)
+            // F5 on the title screen used to enter the test dungeon straight out of the menu, with
+            // nothing loaded and no way back; the menu editor being open is one more reason not to.
+            if (Input.GetKeyDown(KeyCode.F5) && !MapEditor.WorldMap.WorldMapScreen.IsOpen &&
+                !MenuEditorOpen && !ModUI.MenuEditor.MenuSceneRefs.InMenuScene)
             {
                 // Inside the map editor F5 resets the room; the test-dungeon shortcut would
                 // otherwise throw away the room being edited without so much as a warning.
@@ -299,7 +331,7 @@ namespace CustomSpineLoader
             // F6 hides the chrome of whichever editor is up, leaving the paused scene to be looked
             // at (or screenshotted): on the world map that is the play view, in the room editor the
             // panels simply go away and come back.
-            if (Input.GetKeyDown(KeyCode.F6))
+            if (Input.GetKeyDown(KeyCode.F6) && !MenuEditorOpen)
             {
                 if (MapEditor.WorldMap.WorldMapScreen.IsOpen &&
                     MapEditor.WorldMap.WorldMapEditor.Instance != null)
@@ -370,6 +402,8 @@ namespace CustomSpineLoader
             // No map has asked this scene's weather controller for anything yet.
             MapEditor.Tools.WeatherControl.Forget();
 
+            OnMenuScene(scene);
+
             if (scene.name == "Dungeon1")
             {
                 TryCreateRuntimeEditor(scene);
@@ -385,6 +419,29 @@ namespace CustomSpineLoader
                 // not outlive its room - and OnRoomGenerated re-arms it per room.
                 MapEditor.LevelPlayback.ClearContentSuppression();
             }
+        }
+
+        // Pass A of dressing the title screen: bind to the scene, then put on everything the game
+        // will not write over later - the title, the centrepiece and the scene effects. The palette
+        // waits for pass B in MainMenuPatches, because MainMenuController.Start has not run yet and
+        // would overwrite it.
+        //
+        // On any other scene this lets go and puts the menu's own look back. The Stylizer belongs to
+        // the menu scene, so in practice there is nothing left to restore - but the palettes it
+        // points at are shared assets that outlive the scene, and being careless with them is how a
+        // gold title screen would follow somebody into a dungeon.
+        private void OnMenuScene(Scene scene)
+        {
+            if (scene.name != ModUI.MenuEditor.MenuSceneRefs.SceneName)
+            {
+                ModUI.MenuEditor.MainMenuEditor.Instance?.ForceClose();
+                ModUI.MenuEditor.MenuSceneRefs.Forget();
+                return;
+            }
+
+            ModUI.MenuEditor.MenuSceneRefs.Bind();
+            ModUI.MenuEditor.MenuPresetApplier.LoadConfigured();
+            ModUI.MenuEditor.MenuPresetApplier.ApplyStructural();
         }
 
         private void TryCreateRuntimeEditor(Scene scene)

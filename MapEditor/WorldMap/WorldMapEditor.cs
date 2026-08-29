@@ -235,6 +235,9 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
     private void Update()
     {
         if (!IsEditing || Screen == null) return;
+
+        SettleOptions();
+
         if (ModalOpen) return;
 
         var ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
@@ -324,7 +327,10 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
     private void BuildUi()
     {
         var canvasRoot = Screen.CanvasRoot;
-        _ui.Attach(null, canvasRoot);
+
+        // Itself, not null: the shared widgets route their hover lines and their blocker rects
+        // through the attached host, and passing null used to drop both on the floor here.
+        _ui.Attach(this, canvasRoot);
         _blockers.Clear();
 
         // Dock: one flat row of icons across the bottom, the room editor's shape. F6 leaves edit
@@ -622,6 +628,26 @@ public class WorldMapEditor : MonoBehaviour, IMapEditorHost
     // A widget click and the tools' own polling both see the same frame, and a dropdown list can
     // stand outside every registered rect - so pressing a widget also shuts the world out briefly.
     public void BlockWorldClicks() => _worldClickBlockedUntil = Time.unscaledTime + 0.2f;
+
+    private int _optionsRebuildFrames;
+
+    // The options panel here is a fixed height, so unlike the room editor's this only has to settle
+    // the content inside the active column. Three frames: Destroy defers to the end of the frame,
+    // and a staggered grid fill may still be adding cells.
+    public void RequestOptionsResize() => _optionsRebuildFrames = 3;
+
+    private void SettleOptions()
+    {
+        if (_optionsRebuildFrames <= 0) return;
+        _optionsRebuildFrames--;
+
+        foreach (var panel in _panels)
+        {
+            if (panel.tool != _activeTool || panel.content == null) continue;
+            LayoutRebuilder.ForceRebuildLayoutImmediate(panel.content);
+            return;
+        }
+    }
 
     public bool PointerOverEditorUi()
     {

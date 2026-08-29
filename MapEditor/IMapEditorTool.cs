@@ -7,11 +7,31 @@ namespace CustomSpineLoader.MapEditor;
 // What a modal dialog needs from whoever hosts it: a way to block that host's input, a status
 // line, and a coroutine runner. RuntimeMapEditor always had all three; the world map editor is
 // the second host, and the shared dialogs (MapNamePrompt) talk to this instead of to either.
+//
+// The rest is what the shared WIDGETS need, and it is here for the same reason. MapEditorUI used
+// to name the two hosts outright - MapEditorHover reached for RuntimeMapEditor.Active or
+// WorldMapEditor.Instance to show a line, AttachButton for the same two to shut the world out for
+// a moment - so a third host got plates that lit up and said nothing, and dropdowns whose blocker
+// rects went nowhere. Routing both through the host the UI was attached to costs nothing and means
+// the next editor works by being built, not by being added to a list.
 public interface IMapEditorHost
 {
     bool ModalOpen { get; set; }
     void SetStatus(string message, StatusSeverity severity = StatusSeverity.Info);
     Coroutine StartCoroutine(IEnumerator routine);
+
+    // A hovered widget's line, and the cursor leaving it.
+    void ShowHoverStatus(string message);
+    void ClearHoverStatus();
+
+    // A rect the host's own pointer polling must treat as "not the world".
+    void RegisterUiBlocker(RectTransform rect);
+
+    // A widget was pressed: whatever is under it must not read that as a click too.
+    void BlockWorldClicks();
+
+    // Something in the options panel changed size and the layout needs another pass.
+    void RequestOptionsResize();
 }
 
 public interface IMapEditorTool
