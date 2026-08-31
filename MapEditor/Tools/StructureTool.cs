@@ -32,10 +32,15 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         public bool FlipX;
         public bool SeeThrough;
         public bool FogThrough;
+        public bool Wind;
     }
 
     private bool _placeSeeThrough;
     private bool _placeFogThrough;
+    private bool _placeWind;
+
+    private MapEditorToggle _seeThroughToggle;
+    private MapEditorToggle _windToggle;
 
     public StructureTool(RuntimeMapEditor editor)
     {
@@ -71,13 +76,13 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         ui.CreateToggle(panel, "Multi-select randomised placement", false, SetScatterMode);
 
-        ui.CreateToggle(panel, "Place see-through", false, on =>
+        _seeThroughToggle = ui.CreateToggle(panel, "Place see-through", false, on =>
         {
             _placeSeeThrough = on;
             _editor.SetStatus(on
                 ? "New objects will show the player through."
                 : "New objects will hide the player.");
-        });
+        }).GetComponent<MapEditorToggle>();
 
         ui.CreateToggle(panel, "Place fog pass-through", false, on =>
         {
@@ -86,6 +91,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 ? "New objects will take the fog."
                 : "New objects will ignore the fog.");
         });
+
+        _windToggle = ui.CreateToggle(panel, "Place affected by wind", false, on =>
+        {
+            _placeWind = on;
+            _editor.SetStatus(on
+                ? "New objects will sway with the biome's wind."
+                : "New objects will stand still.");
+        }).GetComponent<MapEditorToggle>();
 
         ui.CreateButton(panel, "Clear Selection", () =>
         {
@@ -690,7 +703,13 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         return index >= 0 && _placed[index].FogThrough;
     }
 
-    public bool TrySetSeeThrough(GameObject go, bool player, bool fog)
+    public bool IsWind(GameObject go)
+    {
+        var index = IndexOfPlaced(go);
+        return index >= 0 && _placed[index].Wind;
+    }
+
+    public bool TrySetSeeThrough(GameObject go, bool player, bool fog, bool wind = false)
     {
         var index = IndexOfPlaced(go);
         if (index < 0) return false;
@@ -698,10 +717,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         var placed = _placed[index];
         if (placed.Instance == null) return false;
 
-        SeeThrough.Set(placed.Instance, player, fog);
+        SeeThrough.Set(placed.Instance, player, fog, wind);
 
         placed.SeeThrough = SeeThrough.IsPlayerThrough(placed.Instance);
         placed.FogThrough = SeeThrough.IsFogThrough(placed.Instance);
+        placed.Wind = SeeThrough.IsWind(placed.Instance);
         return true;
     }
 
@@ -739,7 +759,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 FlipX = placed.FlipX,
 
                 SeeThrough = placed.SeeThrough,
-                FogThrough = placed.FogThrough
+                FogThrough = placed.FogThrough,
+                Wind = placed.Wind
             });
             return true;
         }
@@ -939,10 +960,12 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public IEnumerator PlaceAt(StructureBrain.TYPES type, bool isCustom, Vector3 position,
         float rotation, bool flipX, bool deferNav) =>
-        PlaceAt(type, isCustom, position, rotation, flipX, deferNav, _placeSeeThrough, _placeFogThrough);
+        PlaceAt(type, isCustom, position, rotation, flipX, deferNav, _placeSeeThrough,
+            _placeFogThrough, _placeWind);
 
     public IEnumerator PlaceAt(StructureBrain.TYPES type, bool isCustom, Vector3 position,
-        float rotation, bool flipX, bool deferNav, bool seeThrough, bool fogThrough)
+        float rotation, bool flipX, bool deferNav, bool seeThrough, bool fogThrough,
+        bool wind = false)
     {
         var root = SceneRefs.ContentRoot;
         if (root == null)
@@ -983,7 +1006,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         go.transform.position = position;
         go.name = $"CultTweaker_Placed_{type}";
 
-        if (isCustom) StructureSpineHelper.TryAttach(go, type);
+        if (isCustom)
+        {
+            StructureSpineHelper.TryAttach(go, type);
+            APIHelper.StructureShadows.TryEnable(go, type);
+        }
 
         if (Mathf.Abs(rotation) > 0.001f)
             go.transform.eulerAngles = new Vector3(0f, rotation, 0f);
@@ -993,9 +1020,16 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             go.transform.localScale = new Vector3(-s.x, s.y, s.z);
         }
 
-        if (seeThrough || fogThrough) SeeThrough.Set(go, seeThrough, fogThrough);
+        if (seeThrough || fogThrough || wind) SeeThrough.Set(go, seeThrough, fogThrough, wind);
 
         BaseDelta.GiveBrain(go, type, position);
+
+        // The brain brings sprites of its own, and they arrive after the look was applied.
+        if (seeThrough || fogThrough || wind)
+        {
+            yield return null;
+            if (go != null) SeeThrough.Set(go, seeThrough, fogThrough, wind);
+        }
 
         var placed = new PlacedStructure
         {
@@ -1005,7 +1039,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             Rotation = rotation,
             FlipX = flipX,
             SeeThrough = seeThrough,
-            FogThrough = fogThrough
+            FogThrough = fogThrough,
+            Wind = SeeThrough.IsWind(go)
         };
         _placed.Add(placed);
         _editor.History.Push($"place {type}", () =>
@@ -1068,6 +1103,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 FlipX = placed.FlipX,
                 SeeThrough = placed.SeeThrough,
                 FogThrough = placed.FogThrough,
+                Wind = placed.Wind,
 
                 Scale = MapEditorSerialization.V3(Abs(placed.Instance.transform.lossyScale))
             });

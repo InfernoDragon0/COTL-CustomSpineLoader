@@ -1,3 +1,4 @@
+using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.SpineLoaderHelper;
 using HarmonyLib;
 using UnityEngine;
@@ -13,6 +14,7 @@ namespace CustomSpineLoader.Patches
         {
             if (structure == null) return;
             StructureSpineHelper.TryAttach(g, structure.Type);
+            StructureShadows.TryEnable(g, structure.Type);
         }
     }
 }

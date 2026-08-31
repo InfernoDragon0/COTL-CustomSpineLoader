@@ -353,7 +353,8 @@ public static class BaseDelta
 
                 yield return structureTool.PlaceAt(type, s.IsCustom,
                     MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
-                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough);
+                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough,
+                    wind: s.Wind);
 
                 var instance = structureTool.LastPlacedInstance;
                 if (instance != null && s.Scale != null && s.Scale.X != 0f)
@@ -374,7 +375,8 @@ public static class BaseDelta
         {
             foreach (var t in file.Content.Triggers)
                 triggerTool.CreateTrigger(MapEditorSerialization.ToVector3(t.Position),
-                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl);
+                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl,
+                    t.Blocking);
             report.Add($"{file.Content.Triggers.Count} trigger(s)");
         }
 

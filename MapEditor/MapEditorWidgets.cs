@@ -538,6 +538,21 @@ public class MapEditorGrid
         if (cell.Letter != null) cell.Letter.SetActive(false);
     }
 
+    public void SetCellLetter(string id, string text)
+    {
+        if (!_byId.TryGetValue(id, out var cell) || cell.Letter == null) return;
+
+        var label = cell.Letter.GetComponent<TMP_Text>();
+        if (label == null) return;
+
+        label.text = text ?? "";
+        label.fontSize = 14f;
+        label.enableWordWrapping = true;
+
+        cell.Letter.SetActive(true);
+        if (cell.Icon != null) cell.Icon.enabled = false;
+    }
+
     public bool Has(string id) => _byId.ContainsKey(id);
 
     public IEnumerable<string> Ids => _byId.Keys;

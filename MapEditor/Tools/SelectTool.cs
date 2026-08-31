@@ -46,6 +46,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     private MapEditorToggle _seeThroughToggle;
     private GameObject _fogThroughGO;
     private MapEditorToggle _fogThroughToggle;
+    private GameObject _windGO;
+    private MapEditorToggle _windToggle;
 
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
@@ -58,13 +60,20 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         var flip = ui.CreateToggle(panel, "Flipped horizontally", false, SetFlipped);
         _flipToggle = flip.GetComponent<MapEditorToggle>();
 
-        _seeThroughGO = ui.CreateToggle(panel, "See-through", false, on => SetLook(player: on, fog: null));
+        _seeThroughGO = ui.CreateToggle(panel, "See-through", false,
+            on => SetLook(player: on, fog: null, wind: null));
         _seeThroughToggle = _seeThroughGO.GetComponent<MapEditorToggle>();
         _seeThroughGO.SetActive(false);
 
-        _fogThroughGO = ui.CreateToggle(panel, "Fog pass-through", false, on => SetLook(player: null, fog: on));
+        _fogThroughGO = ui.CreateToggle(panel, "Fog pass-through", false,
+            on => SetLook(player: null, fog: on, wind: null));
         _fogThroughToggle = _fogThroughGO.GetComponent<MapEditorToggle>();
         _fogThroughGO.SetActive(false);
+
+        _windGO = ui.CreateToggle(panel, "Affected by Wind", false,
+            on => SetLook(player: null, fog: null, wind: on));
+        _windToggle = _windGO.GetComponent<MapEditorToggle>();
+        _windGO.SetActive(false);
 
         RefreshDetails();
     }
@@ -153,6 +162,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             _flipToggle?.SetValue(false, notify: false);
             _seeThroughGO?.SetActive(false);
             _fogThroughGO?.SetActive(false);
+            _windGO?.SetActive(false);
             if (resize) _editor.RequestOptionsResize();
             return;
         }
@@ -161,10 +171,12 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         var canSeeThrough = structures?.CanSetSeeThrough(_selected) == true;
         _seeThroughGO?.SetActive(canSeeThrough);
         _fogThroughGO?.SetActive(canSeeThrough);
+        _windGO?.SetActive(canSeeThrough);
         if (canSeeThrough)
         {
             _seeThroughToggle?.SetValue(structures.IsSeeThrough(_selected), notify: false);
             _fogThroughToggle?.SetValue(structures.IsFogThrough(_selected), notify: false);
+            _windToggle?.SetValue(structures.IsWind(_selected), notify: false);
         }
 
         var transform = _selected.transform;
@@ -873,42 +885,55 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         _editor.SetStatus($"{_selected.name} Z: {z:0.###}");
     }
 
-    private void SetLook(bool? player, bool? fog)
+    private void SetLook(bool? player, bool? fog, bool? wind)
     {
         var structures = _editor.GetTool<StructureTool>();
         if (_selected == null || structures == null) return;
 
         var wasPlayer = structures.IsSeeThrough(_selected);
         var wasFog = structures.IsFogThrough(_selected);
+        var wasWind = structures.IsWind(_selected);
 
         var wantPlayer = player ?? wasPlayer;
         var wantFog = fog ?? wasFog;
-        if (wantPlayer == wasPlayer && wantFog == wasFog) return;
+        var wantWind = wind ?? wasWind;
 
-        if (!structures.TrySetSeeThrough(_selected, wantPlayer, wantFog))
+        if (wantPlayer == wasPlayer && wantFog == wasFog && wantWind == wasWind) return;
+
+        if (!structures.TrySetSeeThrough(_selected, wantPlayer, wantFog, wantWind))
         {
             _editor.SetStatus("This one cannot take those looks.", StatusSeverity.Warning);
             _seeThroughToggle?.SetValue(wasPlayer, notify: false);
             _fogThroughToggle?.SetValue(wasFog, notify: false);
+            _windToggle?.SetValue(wasWind, notify: false);
             return;
         }
 
         var nowPlayer = structures.IsSeeThrough(_selected);
         var nowFog = structures.IsFogThrough(_selected);
+        var nowWind = structures.IsWind(_selected);
         _seeThroughToggle?.SetValue(nowPlayer, notify: false);
         _fogThroughToggle?.SetValue(nowFog, notify: false);
+        _windToggle?.SetValue(nowWind, notify: false);
 
         var target = _selected;
         _editor.History.Push("appearance", () =>
         {
             if (target == null) return false;
-            structures.TrySetSeeThrough(target, wasPlayer, wasFog);
+            structures.TrySetSeeThrough(target, wasPlayer, wasFog, wasWind);
             if (_selected == target) RefreshDetails();
             return true;
         });
 
-        _editor.SetStatus(nowPlayer || nowFog
-            ? $"See-through {(nowPlayer ? "on" : "off")}, fog {(nowFog ? "on" : "off")}."
+        if (wantWind && !nowWind)
+        {
+            _editor.SetStatus("This one has no sprite that can sway.", StatusSeverity.Warning);
+            return;
+        }
+
+        _editor.SetStatus(nowPlayer || nowFog || nowWind
+            ? $"See-through {(nowPlayer ? "on" : "off")}, fog {(nowFog ? "on" : "off")}, " +
+              $"sway {(nowWind ? "on" : "off")}."
             : "Back to normal.");
     }
 

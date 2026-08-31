@@ -29,7 +29,8 @@ public static class MapNamePrompt
 
     public static void Show(IMapEditorHost editor, string prefill, string title,
         Action<string> onConfirmed, Action onClosed = null,
-        Func<string, bool> existsCheck = null, string existsNoun = "map", int characterLimit = NameLimit)
+        Func<string, bool> existsCheck = null, string existsNoun = "map", int characterLimit = NameLimit,
+        Func<string, string> validate = null)
     {
         if (editor == null || onConfirmed == null) return;
 
@@ -50,7 +51,7 @@ public static class MapNamePrompt
             var task = uiManager.LoadCultNameAssets();
             editor.StartCoroutine(UIManager.LoadAssets(task,
                 () => Build(editor, uiManager, prefill, title, onConfirmed, onClosed,
-                    existsCheck ?? MapEditorSerialization.Exists, existsNoun, characterLimit)));
+                    existsCheck ?? MapEditorSerialization.Exists, existsNoun, characterLimit, validate)));
         }
         catch (Exception e)
         {
@@ -62,7 +63,8 @@ public static class MapNamePrompt
     }
 
     private static void Build(IMapEditorHost editor, UIManager uiManager, string prefill, string title,
-        Action<string> onConfirmed, Action onClosed, Func<string, bool> existsCheck, string existsNoun, int characterLimit)
+        Action<string> onConfirmed, Action onClosed, Func<string, bool> existsCheck, string existsNoun,
+        int characterLimit, Func<string, string> validate = null)
     {
         UICultNameMenuController menu;
         try
@@ -100,9 +102,15 @@ public static class MapNamePrompt
         {
         }
 
-        SetUpWarning(menu, existsCheck, existsNoun);
+        SetUpWarning(menu, existsCheck, existsNoun, validate);
 
-        menu.OnNameConfirmed += result => onConfirmed(result);
+        if (validate != null) editor.StartCoroutine(KeepConfirmable(menu, validate));
+
+        menu.OnNameConfirmed += result =>
+        {
+            if (validate != null && validate(result) != null) return;
+            onConfirmed(result);
+        };
 
         editor.StartCoroutine(FocusWhenShown(menu));
         editor.StartCoroutine(TrackLifetime(editor, menu, onClosed));
@@ -175,8 +183,31 @@ public static class MapNamePrompt
         }
     }
 
+    private static IEnumerator KeepConfirmable(UICultNameMenuController menu, Func<string, string> validate)
+    {
+        while (menu != null)
+        {
+            try
+            {
+                var field = menu._nameInputField;
+                var text = field != null ? field.text : "";
+                var button = menu._confirmButton;
+
+                if (button != null)
+                    button.Confirmable = validate(text) == null &&
+                                         (!menu.RequiresName || !string.IsNullOrWhiteSpace(text));
+            }
+            catch (Exception)
+            {
+                yield break;
+            }
+
+            yield return null;
+        }
+    }
+
     private static void SetUpWarning(UICultNameMenuController menu, Func<string, bool> existsCheck,
-        string existsNoun)
+        string existsNoun, Func<string, string> validate = null)
     {
         GameObject holder;
         TMP_Text label;
@@ -196,6 +227,14 @@ public static class MapNamePrompt
 
         void Refresh(string text)
         {
+            var problem = validate?.Invoke(text);
+            if (problem != null)
+            {
+                holder.SetActive(true);
+                if (label != null) label.text = problem;
+                return;
+            }
+
             var exists = !string.IsNullOrWhiteSpace(text) && existsCheck(text);
             holder.SetActive(exists);
             if (exists && label != null)

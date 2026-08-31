@@ -27,6 +27,16 @@ Everything new since pre-release 2.
 - Added a Title tool: replace the logo with any png, move, resize or hide it, and set, move,
   recolour or hide the edition line
 
+## Follower skin editor
+
+- Added a follower skin editor on F8, editing the same `FollowerSkins/` folders the mod loads
+- Added a left panel: skin and variant picking, new skins and variants, base skin, animation
+  preview, colour sets, and the list of overridden slots
+- Added a right panel for the selected layer: its slot, the image covering it, hide, placement
+  sliders and its colour
+- Added `skin/variant` naming, so one prompt saves either a new variant or a whole new skin
+- Added live reload: a saved skin can be worn by followers without restarting the game
+
 ## Editor look
 
 - Improved every editor panel with the game's own artwork

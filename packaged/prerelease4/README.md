@@ -1,4 +1,4 @@
-# CultTweaker 2.0 — Pre-Release 3 (Experimental)
+# CultTweaker 2.0 — Pre-Release 4 (Experimental)
 
 > ⚠️ **Experimental build.** Bugs may corrupt or lose save data. **Back up your game saves**
 > (`AppData/LocalLow/Massive Monster/Cult Of The Lamb/saves`) — ideally play on a spare slot —
@@ -6,22 +6,19 @@
 > `CustomLevelBlueprints`, `CustomDungeonMaps`, `CustomWorldMaps`, `CustomBaseMaps`,
 > `CustomMainMenus`, `CustomShapeProfiles`, `LightingProfiles.json`.
 
-## New in pre-release 3
+## New in pre-release 4
 
 The full list is in `CHANGES.md`.
 
-- Added editing of your own base town, without ever touching the game's save
-- Added a build totem for hubs — the game's own build menu, building the game's own structures
-- Added a **main menu editor**: a "Customize Menu" button on the title screen for the palette and
-  background colour, the lamb (or a custom spine), the logo and the edition line, kept as presets
 - Added a **follower skin editor** (**F8** in your cult): build a custom follower skin from a base
   skin, override parts with your own pngs, set colour sets, and watch it animate before saving
-- Improved every editor with the game's own artwork: panels, toggles, sliders, headers and the
-  pause menu's button ribbons
-- Added per-room **weather** to the Lighting tool, at every strength the game has art for
-- Added a Camera shake trigger action
+- Added **Affected by wind** to the Structure and Select tools: a structure or prop sways with the
+  biome's own wind, whole rather than in pieces, and can be see-through at the same time
+- Added **shadows** to custom structures, which used to cast none
+- Added **Blocking volume** to the Trigger tool: an invisible wall to players and enemies, drawn in
+  red, with enemy pathfinding kept in step as you move and resize it
 
-Maps, levels, worlds and hubs saved in pre-release 2 still open.
+Maps, levels, worlds, hubs, base edits and menu presets saved in pre-release 3 still open.
 
 ## The Worldshaper
 

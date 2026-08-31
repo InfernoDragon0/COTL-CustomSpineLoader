@@ -308,6 +308,7 @@ public class CultTweakerPanel : MonoBehaviour
         BuildHubSection();
         BuildBaseSection();
         BuildWorldMapSection();
+        BuildSkinEditorSection();
 
         _ui.CreateHeader(_content, "- Extras -", 22);
         _ui.CreateButton(_content, "Dump Follower Spine Atlas", DumpFollowerSlots);
@@ -372,6 +373,26 @@ public class CultTweakerPanel : MonoBehaviour
         }
 
         _ui.CreateButton(_content, "New Hub", () => BeginHub(MapEditor.HubSession.FreeName()));
+    }
+
+    private void BuildSkinEditorSection()
+    {
+        var blocked = SkinEditor.FollowerSkinEditor.WhyNot(ignorePanel: true);
+
+        if (blocked != null)
+        {
+            Note("Follower skin editor: " + blocked);
+            return;
+        }
+
+        _ui.CreateButton(_content, "Custom Follower Skin Editor", OpenSkinEditor);
+        Note("Also on F8. Builds follower skins from your own pngs, in the folders the mod loads.");
+    }
+
+    private void OpenSkinEditor()
+    {
+        Close();
+        SkinEditor.FollowerSkinEditor.Instance?.Open();
     }
 
     private void BuildBaseSection()

@@ -114,7 +114,8 @@ public class BlueprintLoader
                 }
                 yield return structureTool.PlaceAt(type, s.IsCustom,
                     MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
-                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough);
+                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough,
+                    wind: s.Wind);
                 ApplySavedScale(structureTool.LastPlacedInstance, s.Scale);
             }
         }
@@ -186,7 +187,8 @@ public class BlueprintLoader
         {
             foreach (var t in bp.Triggers)
                 triggerTool.CreateTrigger(MapEditorSerialization.ToVector3(t.Position),
-                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl);
+                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl,
+                    t.Blocking);
         }
 
         yield return null;

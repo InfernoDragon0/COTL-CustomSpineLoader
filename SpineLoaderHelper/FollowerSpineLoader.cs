@@ -95,78 +95,19 @@ public class FollowerSpineLoader
         }
     }
 
+    public const string FolderName = "FollowerSkins";
+
     public static void LoadAllNonSpineSkins()
     {
-        var followerFolder = Path.Combine(Plugin.PluginPath, "FollowerSkins");
+        var followerFolder = Path.Combine(Plugin.PluginPath, FolderName);
         if (!Directory.Exists(followerFolder))
             Directory.CreateDirectory(followerFolder);
 
-        var folders = APIHelper.ModContentPaths.DirectoriesIn("FollowerSkins");
+        var folders = APIHelper.ModContentPaths.DirectoriesIn(FolderName);
 
         foreach (var folder in folders)
         {
-            var followerSkinName = Path.GetFileName(folder);
-            Plugin.Log.LogInfo("Loading Follower Override Skin: " + followerSkinName);
-            List<string> completedSkins = [];
-
-            foreach (var variant in Directory.GetDirectories(folder))
-            {
-                Plugin.Log.LogInfo("Creating Variant: " + Path.GetFileName(variant));
-                var overrides = Directory.GetFiles(variant, "*.png", SearchOption.TopDirectoryOnly);
-                var config = Directory.GetFiles(variant, "config.json", SearchOption.TopDirectoryOnly);
-                Plugin.Log.LogInfo("Variant has a total of " + overrides.Length + " overrides.");
-                if (config.Length > 0)
-                {
-                    var configJson = new TextAsset(File.ReadAllText(config[0]));
-                    var configObj = JsonConvert.DeserializeObject<FollowerSkinConfig>(configJson.text);
-                    if (configObj == null)
-                    {
-                        Plugin.Log.LogWarning("Failed to deserialize config.json for follower skin " + followerSkinName + " variant: " + variant + ", please check syntax.");
-                        continue;
-                    }
-                    Plugin.Log.LogInfo("Variant will be created using base skin: " + configObj.OverrideBaseSkin);
-
-                    List<Tuple<int, string, Texture2D, FollowerSkinPartConfig>> skinOverrideList = []; //slot name, part name, texture
-                    foreach (var partConfig in configObj.PartConfigs)
-                    {
-                        var fileName = partConfig.Key;
-                        var partConfigVal = partConfig.Value;
-                        var textureFile = Path.Combine(variant, fileName + ".png");
-                        Texture2D tex = null;
-
-                        if (!File.Exists(textureFile))
-                        {
-                            Plugin.Log.LogWarning("Part config " + fileName + " does not have a corresponding PNG file in the variant folder, using only config values!");
-                        }
-                        else
-                        {
-                            Plugin.Log.LogInfo("Reading texture from " + Path.GetFileName(textureFile));
-                            tex = TextureHelper.CreateTextureFromPath(textureFile);
-                            tex.name = Path.GetFileNameWithoutExtension(textureFile);
-                        }
-                        
-                        skinOverrideList.Add(new(partConfigVal.SlotIndex, partConfigVal.PartName, tex, partConfigVal)); //tex is now nullable
-                    }
-                    Plugin.Log.LogInfo(followerSkinName + " variant " + variant + " has a total of " + overrides.Length + " and " + skinOverrideList.Count + " were registered successfully.");
-                    FollowerSkinOverrides.Add(followerSkinName + "_" + Path.GetFileName(variant), skinOverrideList);
-                    FollowerSlotColors.Add(followerSkinName + "_" + Path.GetFileName(variant), BuildColorsByIndex(configObj));
-                    var skinname = BuildCustomOverrideSkin(followerSkinName + "_" + Path.GetFileName(variant), configObj.OverrideBaseSkin);
-
-                    if (skinname != null)
-                        completedSkins.Add(skinname);
-                }
-                else
-                {
-                    Plugin.Log.LogWarning("No config.json found for follower skin " + followerSkinName + " variant: " + variant + ", please create one.");
-                    continue;
-                }
-
-            }
-            if (completedSkins.Count > 0)
-            {
-                Plugin.Log.LogInfo("Creating Follower Skin " + followerSkinName + " with " + completedSkins.Count + " variant(s).");
-                CreateNewFollowerType(completedSkins[0], completedSkins, FollowerSlotColors[completedSkins[0]]); //TODO: all variants to add one function before
-            }
+            LoadSkinFolder(folder);
 
             // if (spineSkeleton.Length > 0 && spineTextures.Length > 0 && spineAtlas.Length > 0)
             // {
@@ -199,6 +140,102 @@ public class FollowerSpineLoader
         }
     }
 
+    public static void LoadSkinFolder(string folder)
+    {
+        var followerSkinName = Path.GetFileName(folder);
+        Plugin.Log.LogInfo("Loading Follower Override Skin: " + followerSkinName);
+        List<string> completedSkins = [];
+
+        foreach (var variant in Directory.GetDirectories(folder))
+        {
+            Plugin.Log.LogInfo("Creating Variant: " + Path.GetFileName(variant));
+            var overrides = Directory.GetFiles(variant, "*.png", SearchOption.TopDirectoryOnly);
+            var config = Directory.GetFiles(variant, "config.json", SearchOption.TopDirectoryOnly);
+            Plugin.Log.LogInfo("Variant has a total of " + overrides.Length + " overrides.");
+            if (config.Length > 0)
+            {
+                var configJson = new TextAsset(File.ReadAllText(config[0]));
+                var configObj = JsonConvert.DeserializeObject<FollowerSkinConfig>(configJson.text);
+                if (configObj == null)
+                {
+                    Plugin.Log.LogWarning("Failed to deserialize config.json for follower skin " + followerSkinName + " variant: " + variant + ", please check syntax.");
+                    continue;
+                }
+                Plugin.Log.LogInfo("Variant will be created using base skin: " + configObj.OverrideBaseSkin);
+
+                List<Tuple<int, string, Texture2D, FollowerSkinPartConfig>> skinOverrideList = []; //slot name, part name, texture
+                foreach (var partConfig in configObj.PartConfigs ?? [])
+                {
+                    var fileName = partConfig.Key;
+                    var partConfigVal = partConfig.Value;
+                    var textureFile = Path.Combine(variant, fileName + ".png");
+                    Texture2D tex = null;
+
+                    if (!File.Exists(textureFile))
+                    {
+                        Plugin.Log.LogWarning("Part config " + fileName + " does not have a corresponding PNG file in the variant folder, using only config values!");
+                    }
+                    else
+                    {
+                        Plugin.Log.LogInfo("Reading texture from " + Path.GetFileName(textureFile));
+                        tex = TextureHelper.CreateTextureFromPath(textureFile);
+                        tex.name = Path.GetFileNameWithoutExtension(textureFile);
+                    }
+
+                    skinOverrideList.Add(new(partConfigVal.SlotIndex, partConfigVal.PartName, tex, partConfigVal)); //tex is now nullable
+                }
+                Plugin.Log.LogInfo(followerSkinName + " variant " + variant + " has a total of " + overrides.Length + " and " + skinOverrideList.Count + " were registered successfully.");
+                FollowerSkinOverrides[followerSkinName + "_" + Path.GetFileName(variant)] = skinOverrideList;
+                FollowerSlotColors[followerSkinName + "_" + Path.GetFileName(variant)] = BuildColorsByIndex(configObj);
+                var skinname = BuildCustomOverrideSkin(followerSkinName + "_" + Path.GetFileName(variant), configObj.OverrideBaseSkin);
+
+                if (skinname != null)
+                    completedSkins.Add(skinname);
+            }
+            else
+            {
+                Plugin.Log.LogWarning("No config.json found for follower skin " + followerSkinName + " variant: " + variant + ", please create one.");
+                continue;
+            }
+
+        }
+        if (completedSkins.Count > 0)
+        {
+            Plugin.Log.LogInfo("Creating Follower Skin " + followerSkinName + " with " + completedSkins.Count + " variant(s).");
+            CreateNewFollowerType(completedSkins[0], completedSkins, FollowerSlotColors[completedSkins[0]]); //TODO: all variants to add one function before
+        }
+    }
+
+    public static bool Reload(string followerSkinName)
+    {
+        if (string.IsNullOrWhiteSpace(followerSkinName) || WorshipperData.Instance == null) return false;
+
+        var prefix = followerSkinName + "_";
+        foreach (var key in CustomFollowerSkins.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+        {
+            CustomFollowerSkins.Remove(key);
+            FollowerSkinOverrides.Remove(key);
+            FollowerSlotColors.Remove(key);
+        }
+
+        WorshipperData.Instance.Characters.RemoveAll(c =>
+            c != null && c.Skin != null && c.Skin.Any(s => s.Skin != null && s.Skin.StartsWith(prefix, StringComparison.Ordinal)));
+
+        var folder = Path.Combine(Plugin.PluginPath, FolderName, followerSkinName);
+        if (!Directory.Exists(folder)) return false;
+
+        try
+        {
+            LoadSkinFolder(folder);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogError($"Follower skin '{followerSkinName}' could not be reloaded: {e}");
+            return false;
+        }
+    }
+
     public static string BuildCustomOverrideSkin(string skinVariantName, string baseSkinName)
     {
         if (CustomFollowerSkins.ContainsKey(skinVariantName))
@@ -208,6 +245,53 @@ public class FollowerSpineLoader
         }
 
         var skinData = FollowerSkinOverrides[skinVariantName];
+        var finalSkin = ComposeSkin(skinVariantName, baseSkinName, skinData);
+        if (finalSkin == null) return null;
+
+        Plugin.Log.LogInfo("Successfully created skin variant " + skinVariantName);
+
+        var repackedSkin = finalSkin.GetRepackedSkin(skinVariantName, WorshipperData.Instance.SkeletonData.SkeletonDataAsset.atlasAssets[0].PrimaryMaterial, out var one, out var two);
+        CustomFollowerSkins.Add(skinVariantName, repackedSkin);
+        DataManager.SetFollowerSkinUnlocked(skinVariantName);
+
+        foreach (var built in skinData)
+            SpineFolderLoader.Seal(built.Item3);
+
+        return skinVariantName;
+    }
+
+    private static SpineAtlasAsset AtlasFor(string skinVariantName, string partName, Texture2D texture,
+        Dictionary<string, SpineAtlasAsset> cache, Material template)
+    {
+        var key = texture.GetInstanceID() + ":" + partName;
+        if (cache != null && cache.TryGetValue(key, out var cached) && cached != null &&
+            cached.materials != null && cached.materials.Length > 0 &&
+            cached.materials[0] != null && cached.materials[0].mainTexture == texture)
+            return cached;
+
+        var mat = template != null ? new Material(template) : new Material(SpineFolderLoader.SpineShader());
+        mat.mainTexture = texture;
+        mat.name = skinVariantName + "_" + partName;
+        SpineFolderLoader.Keep(mat);
+        SpineFolderLoader.Keep(texture);
+
+        Material[] mats = [mat];
+        var atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(
+            GenerateAtlasText(
+                skinVariantName + "_" + partName,
+                partName,
+                texture.width.ToString(),
+                texture.height.ToString()),
+                mats,
+                true);
+        if (cache != null) cache[key] = atlasAsset;
+        return atlasAsset;
+    }
+
+    public static Skin ComposeSkin(string skinVariantName, string baseSkinName,
+        List<Tuple<int, string, Texture2D, FollowerSkinPartConfig>> skinData,
+        Dictionary<string, SpineAtlasAsset> atlasCache = null, Material materialTemplate = null)
+    {
         var baseSkin = WorshipperData.Instance.SkeletonData.Skeleton.Data.FindSkin(baseSkinName);
 
         if (baseSkin == null)
@@ -215,6 +299,8 @@ public class FollowerSpineLoader
             Plugin.Log.LogWarning($"Could not find base skin {baseSkinName} for variant {skinVariantName}! Defaulting to Cat.");
             baseSkin = WorshipperData.Instance.SkeletonData.Skeleton.Data.FindSkin("Cat");
         }
+        if (baseSkin == null) return null;
+
         var finalSkin = new Skin(skinVariantName);
 
         Plugin.Log.LogInfo($"Attempting to build skin with {skinData.Count} override parts for variant {skinVariantName}");
@@ -228,35 +314,15 @@ public class FollowerSpineLoader
             if (skinOverride.Item4.HideSlot)
             {
                 finalSkin.RemoveAttachment(skinOverride.Item1, skinOverride.Item2);
-                Plugin.Log.LogInfo($"Hiding slot {skinOverride.Item1} for skin variant {skinVariantName}");
                 continue;
             }
 
-            if (skinOverride.Item3 == null)
-            {
-                Plugin.Log.LogWarning($"No texture found for override part {skinOverride.Item2} in slot {skinOverride.Item1} for skin variant {skinVariantName}, apply config values only");
-                continue;
-            }
+            if (skinOverride.Item3 == null) continue;
 
             try
             {
                 skinOverride.Item3.name = skinVariantName + "_" + skinOverride.Item2;
-                Material mat = new(SpineFolderLoader.SpineShader())
-                {
-                    mainTexture = skinOverride.Item3
-                };
-                SpineFolderLoader.Keep(mat);
-                SpineFolderLoader.Keep(skinOverride.Item3);
-
-                Material[] mats = [mat];
-                var atlasAsset = SpineAtlasAsset.CreateRuntimeInstance( //TODO: build this first, then cache
-                    GenerateAtlasText(
-                        skinVariantName + "_" + skinOverride.Item2,
-                        skinOverride.Item2,
-                        skinOverride.Item3.width.ToString(),
-                        skinOverride.Item3.height.ToString()),
-                        mats,
-                        true);
+                var atlasAsset = AtlasFor(skinVariantName, skinOverride.Item2, skinOverride.Item3, atlasCache, materialTemplate);
 
                 var baseAttachment = baseSkin.GetAttachment(skinOverride.Item1, skinOverride.Item2);
 
@@ -307,21 +373,24 @@ public class FollowerSpineLoader
                             regionAttachment.ScaleY = scaleY;
                             regionAttachment.Width = diffX;
                             regionAttachment.Height = diffY;
+                            regionAttachment.UpdateOffset();
                             finalSkin.SetAttachment(skinOverride.Item1, skinOverride.Item2, regionAttachment);
                             break;
 
                         }
                     case RegionAttachment regionAttachment:
                         regionAttachment.Name = skinVariantName + "_" + skinOverride.Item2;
-                        atlasAsset.GetAtlas().regions[0].name = "Custom" + atlasAsset.GetAtlas().regions[0].name;
+                        var region = atlasAsset.GetAtlas().regions[0];
+                        if (!region.name.StartsWith("Custom")) region.name = "Custom" + region.name;
 
-                        regionAttachment.SetRegion(atlasAsset.GetAtlas().regions[0]);
+                        regionAttachment.SetRegion(region);
 
                         regionAttachment.X += translationX;
                         regionAttachment.Y += translationY;
                         regionAttachment.ScaleX = scaleX;
                         regionAttachment.ScaleY = scaleY;
                         regionAttachment.rotation = rotation;
+                        regionAttachment.UpdateOffset();
 
                         finalSkin.SetAttachment(skinOverride.Item1, skinOverride.Item2, regionAttachment);
                     break;
@@ -330,7 +399,6 @@ public class FollowerSpineLoader
                         $"Attachment {baseAttachment.Name} is not a MeshAttachment or RegionAttachment, skipping...");
                     break;
                 }
-                Plugin.Log.LogInfo("Attached override part " + skinOverride.Item2 + " to slot " + skinOverride.Item1 + " for skin variant " + skinVariantName);
             }
             catch (Exception ex)
             {
@@ -338,18 +406,22 @@ public class FollowerSpineLoader
                 return null;
             }
         }
-        Plugin.Log.LogInfo("Successfully created skin variant " + skinVariantName);
-        
-        var repackedSkin = finalSkin.GetRepackedSkin(skinVariantName, WorshipperData.Instance.SkeletonData.SkeletonDataAsset.atlasAssets[0].PrimaryMaterial, out var one, out var two);
-        CustomFollowerSkins.Add(skinVariantName, repackedSkin);
-        DataManager.SetFollowerSkinUnlocked(skinVariantName);
 
-        foreach (var built in skinData)
-            SpineFolderLoader.Seal(built.Item3);
-
-        return skinVariantName;
+        return finalSkin;
     }
-    
+
+    public static void ApplyColours(Skeleton skeleton, FollowerSkinConfig config, int colourSet)
+    {
+        if (skeleton == null || config?.PartConfigs == null) return;
+
+        foreach (var part in config.PartConfigs.Values)
+        {
+            if (part?.ColorChoices == null || part.ColorChoices.Count == 0 || string.IsNullOrEmpty(part.PartName)) continue;
+            var hex = part.ColorChoices[Mathf.Clamp(colourSet, 0, part.ColorChoices.Count - 1)];
+            skeleton.FindSlot(part.PartName)?.SetColor(HexToColor(hex));
+        }
+    }
+
     public static void CreateNewFollowerType(string name, List<string> variantNames,
         List<WorshipperData.SlotsAndColours> colors,
         bool hidden = false, bool twitchPremium = false, bool invariant = false)

@@ -104,6 +104,7 @@ public class MapStructureData
 
     public bool SeeThrough;
     public bool FogThrough;
+    public bool Wind;
 }
 
 [Serializable]
@@ -151,6 +152,8 @@ public class MapTriggerData
     public List<MapTriggerActionData> Actions = [];
 
     public bool LockPlayerControl = true;
+
+    public bool Blocking;
 }
 
 [Serializable]
@@ -170,6 +173,8 @@ public class MapTriggerActionData
     public float Amount;
 
     public string Subtext = "";
+
+    public bool FreezeAtEnd;         // PlayObjectAnimation: hold the last frame instead of resuming
 }
 
 [Serializable]

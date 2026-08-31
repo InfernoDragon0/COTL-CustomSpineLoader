@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.MapEditor.Npc;
 using MMTools;
+using Spine.Unity;
 using UnityEngine;
 
 namespace CustomSpineLoader.MapEditor.Tools;
@@ -13,6 +14,7 @@ public enum TriggerActionType
     MovePlayersToObject,
     StartConversation,
     PlayPlayerAnimation,
+    PlayObjectAnimation,
 
     ApplyLighting,
 
@@ -62,6 +64,8 @@ public class TriggerAction
 
     public string Subtext = "";
 
+    public bool FreezeAtEnd;
+
     public bool NeedsPlayerInput => Type == TriggerActionType.StartConversation;
 
     public const float DefaultLightingFade = 1.5f;
@@ -75,6 +79,9 @@ public class TriggerAction
         TriggerActionType.StartConversation => $"Talk to {ShortName(Target)}",
         TriggerActionType.PlayPlayerAnimation =>
             $"Play '{Target}'" + (Loop ? $" (loop {Duration:0.#}s)" : ""),
+        TriggerActionType.PlayObjectAnimation =>
+            $"{ShortName(Target)} plays '{Subtext}'" + (Loop ? $" (loop {Duration:0.#}s)" : "") +
+            (FreezeAtEnd ? ", holds" : ""),
         TriggerActionType.ApplyLighting =>
             (string.IsNullOrEmpty(Target) ? "Lighting: vanilla" : $"Lighting: {Target}") +
             (LightingFade > 0f ? $" ({LightingFade:0.#}s)" : " (instant)"),
@@ -184,6 +191,11 @@ public static class TriggerActions
 
             case TriggerActionType.PlayPlayerAnimation:
                 yield return Animate(action.Target, action.Loop, action.Duration, keepLocked);
+                break;
+
+            case TriggerActionType.PlayObjectAnimation:
+                yield return AnimateObject(action.Target, action.Subtext, action.Loop, action.Duration,
+                    action.FreezeAtEnd);
                 break;
 
             case TriggerActionType.ApplyLighting:
@@ -483,6 +495,123 @@ public static class TriggerActions
         return names;
     }
 
+    // ---- animating something in the room --------------------------------------------------------
+
+    public static Spine.SkeletonData SkeletonDataOf(GameObject go)
+    {
+        if (go == null) return null;
+
+        var animation = go.GetComponentInChildren<SkeletonAnimation>(true);
+        if (animation != null)
+        {
+            var data = animation.Skeleton?.Data;
+            if (data != null) return data;
+            if (animation.skeletonDataAsset != null) return animation.skeletonDataAsset.GetSkeletonData(true);
+        }
+
+        var graphic = go.GetComponentInChildren<SkeletonGraphic>(true);
+        if (graphic == null) return null;
+
+        var graphicData = graphic.Skeleton?.Data;
+        if (graphicData != null) return graphicData;
+
+        return graphic.skeletonDataAsset != null ? graphic.skeletonDataAsset.GetSkeletonData(true) : null;
+    }
+
+    public static bool HasSpine(GameObject go) => SkeletonDataOf(go) != null;
+
+    private static string Leaf(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "the object";
+        var cut = path.LastIndexOf('/');
+        return cut >= 0 && cut < path.Length - 1 ? path.Substring(cut + 1) : path;
+    }
+
+    public static List<string> ObjectAnimationNames(GameObject go)
+    {
+        var names = new List<string>();
+
+        var data = SkeletonDataOf(go);
+        if (data?.Animations == null) return names;
+
+        foreach (var animation in data.Animations)
+            if (animation != null && !string.IsNullOrEmpty(animation.Name)) names.Add(animation.Name);
+
+        names.Sort(System.StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    private static Spine.AnimationState AnimationStateOf(GameObject go)
+    {
+        if (go == null) return null;
+
+        var animation = go.GetComponentInChildren<SkeletonAnimation>(true);
+        if (animation != null) return animation.AnimationState;
+
+        var graphic = go.GetComponentInChildren<SkeletonGraphic>(true);
+        return graphic != null ? graphic.AnimationState : null;
+    }
+
+    private static IEnumerator AnimateObject(string path, string animation, bool loop, float duration,
+        bool freezeAtEnd)
+    {
+        if (string.IsNullOrEmpty(animation)) yield break;
+
+        var go = ResolveObject(path);
+        if (go == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: animation action targets '{path}', which is not in this room.");
+            yield break;
+        }
+
+        var state = AnimationStateOf(go);
+        var data = SkeletonDataOf(go);
+        if (state == null || data == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: '{Leaf(path)}' has no spine to animate.");
+            yield break;
+        }
+
+        var wanted = data.FindAnimation(animation);
+        if (wanted == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: '{Leaf(path)}' has no animation '{animation}'.");
+            yield break;
+        }
+
+        string was = null;
+        var wasLooping = true;
+        try
+        {
+            var current = state.GetCurrent(0);
+            if (current?.Animation != null)
+            {
+                was = current.Animation.Name;
+                wasLooping = current.Loop;
+            }
+
+            state.SetAnimation(0, animation, loop);
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"MapEditor: '{animation}' would not play on {Leaf(path)}: {e.Message}");
+            yield break;
+        }
+
+        var length = duration > 0f ? duration : wanted.Duration > 0f ? wanted.Duration : 1f;
+        yield return new WaitForSeconds(length);
+
+        if (freezeAtEnd || was == null || go == null) yield break;
+
+        try
+        {
+            state.SetAnimation(0, was, wasLooping);
+        }
+        catch (System.Exception)
+        {
+        }
+    }
+
     // ---- conversation -------------------------------------------------------------------------
 
     private static IEnumerator Converse(string internalName)
@@ -607,7 +736,8 @@ public static class TriggerActions
                 Loop = entry.Loop,
                 Duration = entry.Duration,
                 Amount = entry.Amount,
-                Subtext = entry.Subtext ?? ""
+                Subtext = entry.Subtext ?? "",
+                FreezeAtEnd = entry.FreezeAtEnd
             });
         }
 
@@ -631,7 +761,8 @@ public static class TriggerActions
                 Loop = action.Loop,
                 Duration = action.Duration,
                 Amount = action.Amount,
-                Subtext = action.Subtext ?? ""
+                Subtext = action.Subtext ?? "",
+                FreezeAtEnd = action.FreezeAtEnd
             });
         }
 

@@ -83,6 +83,19 @@ namespace CustomSpineLoader
 
         private static bool MenuEditorOpen => ModUI.MenuEditor.MainMenuEditor.IsOpen;
 
+        private static bool SkinEditorOpen => ModUI.SkinEditor.FollowerSkinEditor.IsOpen;
+
+        private static string WhyNotTestDungeon()
+        {
+            if (ModUI.MenuEditor.MenuSceneRefs.InMenuScene)
+                return "the test dungeon starts in game, not on the title screen.";
+            if (PlayerFarming.Instance == null)
+                return "the test dungeon starts in game, not here.";
+            if (MMTools.MMTransition.IsPlaying)
+                return "wait for the current transition to finish.";
+            return null;
+        }
+
         private ModUI.CultTweakerPanel cultTweakerPanel;
 
         private void Awake()
@@ -204,6 +217,11 @@ namespace CustomSpineLoader
             DontDestroyOnLoad(mainMenuHost);
             mainMenuHost.AddComponent<ModUI.MenuEditor.MainMenuEditor>();
 
+            ModUI.SkinEditor.CTFollowerSkinSerialization.EnsureRootFolder();
+            var skinEditorHost = new GameObject("FollowerSkinEditorHost");
+            DontDestroyOnLoad(skinEditorHost);
+            skinEditorHost.AddComponent<ModUI.SkinEditor.FollowerSkinEditor>();
+
             OnMenuScene(SceneManager.GetActiveScene());
 
             var customTestDungeon = new CustomDungeon();
@@ -235,15 +253,22 @@ namespace CustomSpineLoader
 
             if (Input.GetKeyDown(KeyCode.F7))
             {
-                if (cultTweakerPanel != null && !MenuEditorOpen) cultTweakerPanel.Toggle();
+                if (cultTweakerPanel != null && !MenuEditorOpen && !SkinEditorOpen) cultTweakerPanel.Toggle();
             }
-            // if (Input.GetKeyDown(KeyCode.F8))
-            // {
-            //     Log.LogInfo("F8 Pressed - Fleece Cycle Player 2");
-            //     TestApplySpineOverride(1);
-            // }
+
+            if (Input.GetKeyDown(KeyCode.F8))
+            {
+                var skinEditor = ModUI.SkinEditor.FollowerSkinEditor.Instance;
+                if (skinEditor != null)
+                {
+                    var why = SkinEditorOpen ? null : ModUI.SkinEditor.FollowerSkinEditor.WhyNot();
+                    if (why != null) Log.LogInfo("F8: " + why);
+                    else skinEditor.Toggle();
+                }
+            }
+
             if (Input.GetKeyDown(KeyCode.F5) && !MapEditor.WorldMap.WorldMapScreen.IsOpen &&
-                !MenuEditorOpen && !ModUI.MenuEditor.MenuSceneRefs.InMenuScene)
+                !MenuEditorOpen && !SkinEditorOpen)
             {
                 if (RoomEditor != null && RoomEditor.IsEditing)
                 {
@@ -251,14 +276,19 @@ namespace CustomSpineLoader
                 }
                 else
                 {
-                    Log.LogInfo("F5 Pressed - Test Custom Dungeon");
-                    var editorDungeon = CustomDungeonManager.CustomDungeonList.Values.FirstOrDefault();
-                    if (editorDungeon != null) editorDungeon.EnterDungeon();
-                    else Log.LogWarning("No custom dungeon is registered; nothing to enter.");
+                    var why = WhyNotTestDungeon();
+                    if (why != null) Log.LogInfo("F5: " + why);
+                    else
+                    {
+                        Log.LogInfo("F5 Pressed - Test Custom Dungeon");
+                        var editorDungeon = CustomDungeonManager.CustomDungeonList.Values.FirstOrDefault();
+                        if (editorDungeon != null) editorDungeon.EnterDungeon();
+                        else Log.LogWarning("No custom dungeon is registered; nothing to enter.");
+                    }
                 }
             }
 
-            if (Input.GetKeyDown(KeyCode.F6) && !MenuEditorOpen)
+            if (Input.GetKeyDown(KeyCode.F6) && !MenuEditorOpen && !SkinEditorOpen)
             {
                 if (MapEditor.WorldMap.WorldMapScreen.IsOpen &&
                     MapEditor.WorldMap.WorldMapEditor.Instance != null)
@@ -269,7 +299,7 @@ namespace CustomSpineLoader
 
             if (Input.GetKeyDown(KeyCode.F4) && RoomEditor != null &&
                 (cultTweakerPanel == null || !cultTweakerPanel.IsOpen) &&
-                !MapEditor.WorldMap.WorldMapScreen.IsOpen)
+                !MapEditor.WorldMap.WorldMapScreen.IsOpen && !SkinEditorOpen)
             {
                 RoomEditor.ToggleEditor();
             }
@@ -317,6 +347,8 @@ namespace CustomSpineLoader
             MapEditor.BaseSession.OnSceneLoaded(scene);
 
             MapEditor.Tools.WeatherControl.Forget();
+
+            ModUI.SkinEditor.FollowerSkinEditor.Instance?.ForceClose();
 
             OnMenuScene(scene);
 

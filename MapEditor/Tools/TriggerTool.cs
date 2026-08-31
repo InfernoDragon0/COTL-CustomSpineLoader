@@ -18,6 +18,10 @@ public class CTMapTrigger : MonoBehaviour
 
     public bool LockPlayerControl = true;
 
+    // A blocking volume is an invisible wall: a solid collider on the Obstacles layer, which is what
+    // both the player and the enemies (and the grid graph, once rescanned) treat as terrain.
+    public bool Blocking;
+
     public static event System.Action<CTMapTrigger> Entered;
 
     public static readonly List<CTMapTrigger> All = [];
@@ -27,6 +31,8 @@ public class CTMapTrigger : MonoBehaviour
     public bool Tripped { get; private set; }
 
     private BoxCollider2D _box;
+    private GameObject _blocker;
+    private BoxCollider2D _blockerBox;
     private GameObject _gizmo;
     private LineRenderer _outline;
     private SpriteRenderer _fillRenderer;
@@ -80,6 +86,7 @@ public class CTMapTrigger : MonoBehaviour
         Size = new Vector2(Mathf.Max(0.5f, Size.x), Mathf.Max(0.5f, Size.y));
 
         if (_box != null) _box.size = Size;
+        ApplyBlocking();
         if (_gizmo == null) return;
 
         if (_fill != null) _fill.localScale = new Vector3(Size.x, Size.y, 1f);
@@ -93,6 +100,33 @@ public class CTMapTrigger : MonoBehaviour
             new Vector3(half.x, half.y, z),
             new Vector3(-half.x, half.y, z)
         ]);
+    }
+
+    public void ApplyBlocking()
+    {
+        if (!Blocking)
+        {
+            if (_blocker != null && _blocker.activeSelf) _blocker.SetActive(false);
+            return;
+        }
+
+        if (_blocker == null) BuildBlocker();
+        if (_blockerBox != null) _blockerBox.size = Size;
+        if (_blocker != null && !_blocker.activeSelf) _blocker.SetActive(true);
+    }
+
+    private void BuildBlocker()
+    {
+        _blocker = new GameObject("Blocker");
+        _blocker.transform.SetParent(transform, false);
+
+        // Standing on its own - no composite, no rigidbody - the box is a static solid, the same
+        // trick the door plugs use to seal a doorway.
+        var obstacles = LayerMask.NameToLayer("Obstacles");
+        if (obstacles >= 0) _blocker.layer = obstacles;
+
+        _blockerBox = _blocker.AddComponent<BoxCollider2D>();
+        _blockerBox.size = Size;
     }
 
     public void ShowGizmo(bool toolVisible)
@@ -121,10 +155,10 @@ public class CTMapTrigger : MonoBehaviour
     {
         if (_outline == null) return;
 
-        var colour = Once ? Idle : Repeating;
+        var colour = Blocking ? Blocked : Once ? Idle : Repeating;
         if (_flashUntil > Time.unscaledTime) colour = Firing;
         else if (_highlighted) colour = Selected;
-        else if (Tripped) colour = Once ? Spent : Fired;
+        else if (Tripped && !Blocking) colour = Once ? Spent : Fired;
 
         _outline.startColor = _outline.endColor = colour;
         if (_fillRenderer != null)
@@ -138,6 +172,7 @@ public class CTMapTrigger : MonoBehaviour
     private static readonly Color Firing = new(0.35f, 1f, 0.4f, 1f);
     private static readonly Color Spent = new(0.45f, 0.6f, 0.5f, 0.75f);
     private static readonly Color Fired = new(0.5f, 0.4f, 0.62f, 0.75f);
+    private static readonly Color Blocked = new(1f, 0.24f, 0.2f, 0.95f);
 
     private void BuildGizmo()
     {
@@ -361,6 +396,20 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 : $"{_selected.Id} leaves the players in control.");
         }).GetComponent<MapEditorToggle>();
 
+        _blockToggle = ui.CreateToggle(panel, "Blocking volume", false, value =>
+        {
+            if (_syncingWidgets || _selected == null) return;
+            _selected.Blocking = value;
+
+            _selected.ApplyBlocking();
+            _selected.RefreshTint();
+            SceneRefs.RescanNavigation();
+
+            _editor.SetStatus(value
+                ? $"{_selected.Id} is an invisible wall to players and enemies."
+                : $"{_selected.Id} is walk-through again.");
+        }).GetComponent<MapEditorToggle>();
+
         ui.CreateToggle(panel, "Show volumes in play", CTMapTrigger.ShowInPlay, value =>
         {
             CTMapTrigger.ShowInPlay = value;
@@ -396,6 +445,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private MapEditorToggle _onceToggle;
     private MapEditorToggle _lockToggle;
+    private MapEditorToggle _blockToggle;
 
     public int LiveCount()
     {
@@ -433,6 +483,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             TriggerActionType.MovePlayersToObject,
             TriggerActionType.StartConversation,
             TriggerActionType.PlayPlayerAnimation,
+            TriggerActionType.PlayObjectAnimation,
             TriggerActionType.HubSpawnPoint
         ],
         [
@@ -468,6 +519,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         TriggerActionType.MovePlayersToObject => "Move players to object",
         TriggerActionType.StartConversation => "Talk to custom NPC",
         TriggerActionType.PlayPlayerAnimation => "Play animation on players",
+        TriggerActionType.PlayObjectAnimation => "Play animation on object",
         TriggerActionType.ApplyLighting => "Apply lighting",
         TriggerActionType.OpenWorldMap => "Open world map",
         TriggerActionType.ReturnToBase => "Return to base",
@@ -496,6 +548,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Npc,
         Animation,
         AnimationMode,
+        ObjectAnimation,
+        ObjectAnimationMode,
+        ObjectAnimationEnd,
         Lighting,
         LightingFade,
         Music,
@@ -752,6 +807,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.CameraLookAtObject:
             case TriggerActionType.MovePlayersToObject:
+            case TriggerActionType.PlayObjectAnimation:
             {
                 var go = ResolveTargetCached(action, () => TriggerActions.ResolveObject(action.Target));
                 if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
@@ -872,6 +928,11 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             case TriggerActionType.MovePlayersToObject:
                 _pickingObject = true;
                 _editor.SetStatus("Click the object in the world to move the players to.");
+                break;
+
+            case TriggerActionType.PlayObjectAnimation:
+                _pickingObject = true;
+                _editor.SetStatus("Click the object to animate - it needs a spine.");
                 break;
 
             case TriggerActionType.CameraLookAtObject:
@@ -1075,6 +1136,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     }
 
     private static readonly string[] AnimationModes = ["Play once", "Loop 2 seconds", "Loop 5 seconds", "Loop 10 seconds"];
+    private bool _pendingLoop;
+    private float _pendingDuration;
+
+    private static readonly string[] AnimationEndModes = ["Resume original animation on end", "Freeze last frame on end"];
     private static readonly float[] AnimationDurations = [0f, 2f, 5f, 10f];
 
     private static readonly string[] LightingFadeModes =
@@ -1107,6 +1172,32 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             case TargetStage.Animation:
                 _pendingAnimation = value;
                 OpenTargets(TargetStage.AnimationMode, AnimationModes);
+                break;
+
+            case TargetStage.ObjectAnimation:
+                _pendingAnimation = value;
+                OpenTargets(TargetStage.ObjectAnimationMode, AnimationModes);
+                break;
+
+            case TargetStage.ObjectAnimationMode:
+                _pendingLoop = index > 0;
+                _pendingDuration = index >= 0 && index < AnimationDurations.Length ? AnimationDurations[index] : 0f;
+                OpenTargets(TargetStage.ObjectAnimationEnd, AnimationEndModes);
+                break;
+
+            case TargetStage.ObjectAnimationEnd:
+                AddAction(new TriggerAction
+                {
+                    Type = TriggerActionType.PlayObjectAnimation,
+                    Target = _pendingTarget ?? "",
+                    Subtext = _pendingAnimation,
+                    Position = _pendingPosition,
+                    Loop = _pendingLoop,
+                    Duration = _pendingDuration,
+                    FreezeAtEnd = index > 0
+                });
+                _pendingAnimation = null;
+                _pendingTarget = null;
                 break;
 
             case TargetStage.AnimationMode:
@@ -1381,6 +1472,23 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         _pickingObject = false;
 
+        if (_pendingType == TriggerActionType.PlayObjectAnimation)
+        {
+            var animations = TriggerActions.ObjectAnimationNames(picked);
+            if (animations.Count == 0)
+            {
+                _pickingObject = true;
+                _editor.SetStatus($"'{picked.name}' has no spine animations - pick another object.",
+                    StatusSeverity.Warning);
+                return false;
+            }
+
+            _pendingTarget = TriggerActions.PathOf(picked);
+            _pendingPosition = picked.transform.position;
+            OpenTargets(TargetStage.ObjectAnimation, animations);
+            return true;
+        }
+
         if (_pendingType == TriggerActionType.CameraLookAtObject)
         {
             _pendingTarget = TriggerActions.PathOf(picked);
@@ -1490,7 +1598,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         var clone = CreateTrigger(source.transform.position, source.Size.x, source.Size.y,
             id: null, action: source.Action, once: source.Once,
             actions: TriggerActions.ToData(source.Actions),
-            lockPlayerControl: source.LockPlayerControl);
+            lockPlayerControl: source.LockPlayerControl, blocking: source.Blocking);
 
         if (clone == null) return false;
 
@@ -1532,7 +1640,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     public CTMapTrigger CreateTrigger(Vector3 position, float width, float height,
         string id = null, string action = "", bool once = true,
-        List<MapTriggerActionData> actions = null, bool lockPlayerControl = true)
+        List<MapTriggerActionData> actions = null, bool lockPlayerControl = true,
+        bool blocking = false)
     {
         var parent = SceneRefs.ContentRoot;
         if (parent == null)
@@ -1550,6 +1659,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         trigger.Action = action ?? "";
         trigger.Once = once;
         trigger.LockPlayerControl = lockPlayerControl;
+        trigger.Blocking = blocking;
         trigger.Actions.AddRange(TriggerActions.FromData(actions, trigger.Id));
         trigger.Size = new Vector2(Mathf.Max(0.5f, width), Mathf.Max(0.5f, height));
         trigger.Refresh();
@@ -1653,6 +1763,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _syncingWidgets = true;
         _onceToggle?.SetValue(_selected.Once, notify: false);
         _lockToggle?.SetValue(_selected.LockPlayerControl, notify: false);
+        _blockToggle?.SetValue(_selected.Blocking, notify: false);
         _syncingWidgets = false;
     }
 
@@ -1791,6 +1902,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         if (target.transform.position == position && target.Size == size) return;
 
+        // A wall that moved is a wall the enemies have to path around somewhere else.
+        if (target.Blocking) SceneRefs.RescanNavigation();
+
         _editor.MarkEdited();
         _editor.History.Push($"{label} {target.Id}", () =>
         {
@@ -1862,7 +1976,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 Height = trigger.Size.y,
                 Once = trigger.Once,
                 Actions = TriggerActions.ToData(trigger.Actions),
-                LockPlayerControl = trigger.LockPlayerControl
+                LockPlayerControl = trigger.LockPlayerControl,
+                Blocking = trigger.Blocking
             });
         }
     }
