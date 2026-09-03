@@ -31,6 +31,10 @@ public class FollowerSkinEditor : MonoBehaviour, IMapEditorHost
 
     public readonly FollowerSkinPreview Preview = new();
 
+    /// What the preview is dressed in. It rides along with the editor, not the document: a costume is
+    /// something to look at the skin under, and is never written to config.json.
+    public SkinCostume Costume { get; } = new();
+
     public string SelectedLayer { get; set; }
 
     private readonly MapEditorUI _ui = new();
@@ -72,8 +76,6 @@ public class FollowerSkinEditor : MonoBehaviour, IMapEditorHost
     private float _previewDueAt;
     private const float PreviewDebounce = 0.12f;
 
-    private float _prebakeAt = float.MaxValue;
-    private const float PrebakeIdle = 1.5f;
 
     private bool _cursorWasVisible;
     private CursorLockMode _cursorLock;
@@ -438,7 +440,7 @@ public class FollowerSkinEditor : MonoBehaviour, IMapEditorHost
         Document.NormaliseColourSets();
         ColourSet = Mathf.Clamp(ColourSet, 0, Document.ColourSetCount - 1);
 
-        var problem = Preview.Show(Document, ColourSet, !HasUnsavedEdits);
+        var problem = Preview.Show(Document, ColourSet, Costume, !HasUnsavedEdits);
         if (problem != null)
         {
             _busy = false;
@@ -453,9 +455,7 @@ public class FollowerSkinEditor : MonoBehaviour, IMapEditorHost
         Preview.Play(Animation, Loop, Speed);
 
         if (_previewCaption != null)
-            _previewCaption.text = $"{Document.ShownName}   colour set {ColourSet + 1} of {Document.ColourSetCount}";
-
-        _prebakeAt = Preview.WearingRegistered ? Time.unscaledTime + PrebakeIdle : float.MaxValue;
+            _previewCaption.text = $"{Document.ShownName}   color set {ColourSet + 1} of {Document.ColourSetCount}";
     }
 
     public void LoadDocument(CTFollowerSkinDocument document, string busyMessage = null)
@@ -497,7 +497,6 @@ public class FollowerSkinEditor : MonoBehaviour, IMapEditorHost
         SettleOptions();
 
         if (_previewDirty && Time.unscaledTime >= _previewDueAt) RefreshNow();
-        else if (!_busy && !ModalOpen && Time.unscaledTime >= _prebakeAt) Prebake();
 
         Preview.Tick();
 
@@ -532,34 +531,6 @@ public class FollowerSkinEditor : MonoBehaviour, IMapEditorHost
                 Plugin.Log.LogError($"SkinEditor: panel '{side.Tool?.Name}' failed: {e}");
             }
         }
-    }
-
-    private void Prebake()
-    {
-        _prebakeAt = float.MaxValue;
-        if (!Preview.WearingRegistered) return;
-
-        SetBusy($"Getting {Document.SkinName} ready to edit - one pause now instead of on your first edit.");
-        StartCoroutine(PrebakeAfterPaint());
-    }
-
-    private IEnumerator PrebakeAfterPaint()
-    {
-        yield return null;
-        yield return null;
-
-        if (!_open) yield break;
-
-        var problem = Preview.Show(Document, ColourSet);
-        if (problem != null)
-        {
-            _busy = false;
-            PaintPlate();
-            SetStatus(problem, StatusSeverity.Warning);
-            yield break;
-        }
-
-        ClearBusy();
     }
 
     private void SettleOptions()

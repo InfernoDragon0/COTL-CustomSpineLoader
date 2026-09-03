@@ -21,6 +21,13 @@ public class MapEditorDropdown
     public GameObject Root { get; }
     public int SelectedIndex { get; private set; } = -1;
 
+    /// The rect the floating option list measures and lines itself up against. It is the field
+    /// itself by default; a labelled dropdown points it at the whole row, so sharing the row with a
+    /// label does not squeeze the list down to half width and clip the option text.
+    internal RectTransform ListFrom;
+
+    private RectTransform Anchor => ListFrom != null ? ListFrom : _row;
+
     private const float OptionHeight = 34f;
     private const float MaxListHeight = 460f;
 
@@ -95,7 +102,7 @@ public class MapEditorDropdown
     private void BuildList(RectTransform canvas)
     {
         var height = Mathf.Min(_options.Count * (OptionHeight + 4f) + 16f, MaxListHeight);
-        var width = Mathf.Max(_row.rect.width, 220f);
+        var width = Mathf.Max(Anchor.rect.width, 220f);
 
         var panel = new GameObject("Options");
         panel.transform.SetParent(_floating.transform, false);
@@ -122,7 +129,7 @@ public class MapEditorDropdown
     private void PositionList(RectTransform canvas, RectTransform panel, float height)
     {
         var corners = new Vector3[4];
-        _row.GetWorldCorners(corners);
+        Anchor.GetWorldCorners(corners);
 
         var below = RectTransformUtility.WorldToScreenPoint(null, corners[0]); // bottom-left
         var above = RectTransformUtility.WorldToScreenPoint(null, corners[1]); // top-left

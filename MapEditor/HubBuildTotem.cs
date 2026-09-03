@@ -230,7 +230,11 @@ public static class HubBuildTotem
         var structure = go.AddComponent<Structure>();
         structure.Type = StructureBrain.TYPES.PLACEMENT_REGION;
 
-        EmptyList(structure, "ObstructionColldiers");
+        // Set by name until the project moved off the 1.5.15 game assemblies, which did not declare
+        // this list; 1.5.26 does. It has no initialiser and the pathfinding update walks it without a
+        // null check, so it has to be a list before the region is built. The name's typo is the
+        // game's own.
+        structure.ObstructionColldiers ??= [];
 
         var region = go.AddComponent<PlacementRegion>();
         region.SetAsInstance = false;
@@ -246,25 +250,6 @@ public static class HubBuildTotem
         CopyFields(source, region);
         go.AddComponent<HubBuildRegion>();
         return region;
-    }
-
-    private static void EmptyList(Component target, string fieldName)
-    {
-        var field = target.GetType().GetField(fieldName, System.Reflection.BindingFlags.Instance |
-                                                         System.Reflection.BindingFlags.Public |
-                                                         System.Reflection.BindingFlags.NonPublic);
-        if (field == null) return;
-
-        try
-        {
-            if (field.GetValue(target) == null)
-                field.SetValue(target, System.Activator.CreateInstance(field.FieldType));
-        }
-        catch (System.Exception e)
-        {
-            Plugin.Log.LogWarning($"Hub totem: '{fieldName}' could not be given an empty list: " +
-                                  e.Message);
-        }
     }
 
     private static void CopyFields(PlacementRegion source, PlacementRegion target)

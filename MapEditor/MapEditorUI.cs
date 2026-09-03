@@ -919,6 +919,48 @@ public class MapEditorUI
         return dropdown;
     }
 
+    /// <summary>
+    /// A dropdown that sits beside its label the way a toggle does, for a setting whose name cannot be
+    /// read off the value alone. The field takes the right of the row; the floating option list still
+    /// spans the whole row, so long option text stays readable.
+    /// </summary>
+    public MapEditorDropdown CreateLabelledDropdown(Transform parent, string label, string caption,
+        IList<string> options, Action<int, string> onSelected, float split = 0.4f)
+    {
+        const float rowHeight = 44f;
+
+        var row = new GameObject("LabelledDropdown_" + label);
+        row.transform.SetParent(parent, false);
+        var rowRt = row.AddComponent<RectTransform>();
+        rowRt.sizeDelta = new Vector2(360f, rowHeight);
+        ApplyRowLayout(row, rowHeight);
+
+        var title = CreateLabel(row.transform, label, 17);
+        var titleRt = title.GetComponent<RectTransform>();
+        titleRt.anchorMin = Vector2.zero;
+        titleRt.anchorMax = new Vector2(split, 1f);
+        titleRt.offsetMin = new Vector2(4f, 0f);
+        titleRt.offsetMax = new Vector2(-8f, 0f);
+        var titleText = title.GetComponent<TMP_Text>();
+        titleText.enableWordWrapping = false;
+        titleText.overflowMode = TextOverflowModes.Ellipsis;
+        titleText.raycastTarget = false;
+
+        var dropdown = CreateDropdown(row.transform, caption, options, onSelected);
+
+        // The field lays itself out for a column; inside a row it is anchored to the right instead,
+        // and the layout element CreateDropdown left on it goes inert with no layout group above it.
+        var fieldRt = dropdown.Root.GetComponent<RectTransform>();
+        fieldRt.anchorMin = new Vector2(split, 0f);
+        fieldRt.anchorMax = Vector2.one;
+        fieldRt.pivot = new Vector2(0.5f, 0.5f);
+        fieldRt.offsetMin = Vector2.zero;
+        fieldRt.offsetMax = Vector2.zero;
+
+        dropdown.ListFrom = rowRt;
+        return dropdown;
+    }
+
     private MapEditorDropdown _openDropdown;
 
     internal void NotifyDropdownOpened(MapEditorDropdown dropdown)

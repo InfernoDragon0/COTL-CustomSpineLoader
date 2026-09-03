@@ -17,8 +17,14 @@ The full list is in `CHANGES.md`.
 - Added **shadows** to custom structures, which used to cast none
 - Added **Blocking volume** to the Trigger tool: an invisible wall to players and enemies, drawn in
   red, with enemy pathfinding kept in step as you move and resize it
+- Added **HideFromBuildMenu** for custom structures: keep a piece out of the player's build menu and
+  still place it yourself, from the structure tool's new **Custom** group
+- **Starts about 10 seconds faster** with custom follower skins installed, and uses far less memory
+  getting there
 
 Maps, levels, worlds, hubs, base edits and menu presets saved in pre-release 3 still open.
+
+Built for Cult of the Lamb **1.5.26**. Older versions of the game are not supported.
 
 ## The Worldshaper
 

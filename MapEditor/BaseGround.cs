@@ -161,26 +161,14 @@ public static class BaseGround
         ReportCollision();
     }
 
-    private static System.Reflection.FieldInfo _validationField;
-    private static bool _lookedForValidation;
-
+    // Read through reflection until the project moved off the 1.5.15 game assemblies, which did not
+    // declare this collider; 1.5.26 does, so the lookup and its warning are gone.
     private static void RederiveValidationCollider(BiomeBaseManager manager, PolygonCollider2D ground)
     {
         if (manager == null) return;
 
-        if (!_lookedForValidation)
-        {
-            _lookedForValidation = true;
-            _validationField = HarmonyLib.AccessTools.Field(typeof(BiomeBaseManager),
-                "GroundValidationCollider");
-
-            if (_validationField == null)
-                Plugin.Log.LogWarning("Base editor: this game keeps no ground validation collider " +
-                                      "where one was expected; followers may be pulled off added " +
-                                      "ground.");
-        }
-
-        if (_validationField?.GetValue(manager) is not CompositeCollider2D validation) return;
+        var validation = manager.GroundValidationCollider;
+        if (validation == null) return;
 
         var poly = validation.GetComponent<PolygonCollider2D>();
         if (poly == null) return;

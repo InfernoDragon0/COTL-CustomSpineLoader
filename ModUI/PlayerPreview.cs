@@ -193,7 +193,7 @@ public static class PlayerPreview
     private static readonly string[] WorldToggles =
         ["_UseFadeInWoodsColor", "_ReceiveShadow", "_UseEmission"];
 
-    private static bool Untint(SkeletonAnimation spine)
+    internal static bool Untint(SkeletonAnimation spine)
     {
         var renderer = spine != null ? spine.GetComponent<MeshRenderer>() : null;
         if (renderer == null) return false;
@@ -344,7 +344,18 @@ public static class PlayerPreview
 
         _camera.transform.position = portrait.Position + new Vector3(0f, portrait.Size * 0.75f, -100f);
         _camera.orthographicSize = portrait.Size;
-        _camera.targetTexture = portrait.Texture;
+        RenderNeutral(_camera, portrait.Texture);
+    }
+
+    /// <summary>
+    /// Renders one frame with the world's time-of-day tint and exposure switched off, so an offscreen
+    /// portrait looks the same at midnight as at noon. Shared with the UI skeleton mirrors.
+    /// </summary>
+    internal static void RenderNeutral(Camera camera, RenderTexture target)
+    {
+        if (camera == null || target == null) return;
+
+        camera.targetTexture = target;
 
         var timeOfDay = Shader.GetGlobalColor(TimeOfDayColor);
         var highlight = Shader.GetGlobalColor(GlobalHCol);
@@ -357,7 +368,7 @@ public static class PlayerPreview
 
         try
         {
-            _camera.Render();
+            camera.Render();
         }
         finally
         {
@@ -365,7 +376,7 @@ public static class PlayerPreview
             Shader.SetGlobalColor(GlobalHCol, highlight);
             Shader.SetGlobalColor(GlobalSCol, shadow);
             Shader.SetGlobalFloat(GlobalExposure, exposure);
-            _camera.targetTexture = null;
+            camera.targetTexture = null;
         }
     }
 

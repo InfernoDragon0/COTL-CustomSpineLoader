@@ -517,3 +517,9 @@ FodyWeavers.xsd
 ### CultTweaker ###
 # Local build/deploy helpers; paths in them are specific to one machine.
 /tools/
+
+# The game's own assemblies, publicized and stripped, that the project compiles against.
+# Extracted from an installed copy of the game rather than fetched: the CultOfTheLamb.GameLibs
+# NuGet feed stops at 1.5.15.979 and there is no package for a current game. Rebuild them with
+# tools/gamelibs.sh (also untracked) after installing the game or taking an update.
+/lib/GameLibs/

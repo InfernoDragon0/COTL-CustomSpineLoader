@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,6 +19,11 @@ public class FollowerSpineLoader
     public static Dictionary<string, List<Tuple<int, string, Texture2D, FollowerSkinPartConfig>>> FollowerSkinOverrides = []; //name of skin, list of (slot name, part name, texture)
     public static Dictionary<string, List<WorshipperData.SlotsAndColours>> FollowerSlotColors = [];
     public static Dictionary<string, Skin> CustomFollowerSkins = [];
+
+    // Where each baked variant came from, so FollowerSkinCache can find its folder. The key packs the
+    // skin and variant names together with an underscore, which cannot be split back apart reliably --
+    // skin names contain underscores too -- so the folder is remembered rather than derived.
+    public static Dictionary<string, string> FollowerSkinFolders = [];
 
     public static void LoadAllFollowerSpines(Material material = null)
     {
@@ -186,8 +192,10 @@ public class FollowerSpineLoader
                 }
                 Plugin.Log.LogInfo(followerSkinName + " variant " + variant + " has a total of " + overrides.Length + " and " + skinOverrideList.Count + " were registered successfully.");
                 FollowerSkinOverrides[followerSkinName + "_" + Path.GetFileName(variant)] = skinOverrideList;
+                FollowerSkinFolders[followerSkinName + "_" + Path.GetFileName(variant)] = variant;
                 FollowerSlotColors[followerSkinName + "_" + Path.GetFileName(variant)] = BuildColorsByIndex(configObj);
-                var skinname = BuildCustomOverrideSkin(followerSkinName + "_" + Path.GetFileName(variant), configObj.OverrideBaseSkin);
+                var skinname = BuildCustomOverrideSkin(followerSkinName + "_" + Path.GetFileName(variant),
+                    configObj.OverrideBaseSkin);
 
                 if (skinname != null)
                     completedSkins.Add(skinname);
@@ -245,17 +253,41 @@ public class FollowerSpineLoader
         }
 
         var skinData = FollowerSkinOverrides[skinVariantName];
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var finalSkin = ComposeSkin(skinVariantName, baseSkinName, skinData);
         if (finalSkin == null) return null;
+        var composed = clock.ElapsedMilliseconds;
 
         Plugin.Log.LogInfo("Successfully created skin variant " + skinVariantName);
 
-        var repackedSkin = finalSkin.GetRepackedSkin(skinVariantName, WorshipperData.Instance.SkeletonData.SkeletonDataAsset.atlasAssets[0].PrimaryMaterial, out var one, out var two);
-        CustomFollowerSkins.Add(skinVariantName, repackedSkin);
+        // The expensive half of a bake is GetRepackedSkin pulling every region of the base skin out of
+        // the game's 8192x8192 BC7 atlas one at a time, and the result is the same every boot. So the
+        // packed atlas and the rects it produced are kept on disk: a hit re-points the composed skin's
+        // attachments at the saved page and skips the extraction entirely.
+        var fromCache = FollowerSkinCache.TryApply(skinVariantName, finalSkin);
+        Texture2D packed = null;
+
+        if (!fromCache)
+        {
+            finalSkin = finalSkin.GetRepackedSkin(skinVariantName,
+                WorshipperData.Instance.SkeletonData.SkeletonDataAsset.atlasAssets[0].PrimaryMaterial,
+                out _, out packed);
+        }
+
+        clock.Stop();
+        Plugin.Log.LogInfo($"TIMING {skinVariantName}: composed in {composed}ms, " +
+                           (fromCache
+                               ? $"restored from cache in {clock.ElapsedMilliseconds - composed}ms."
+                               : $"repacked in {clock.ElapsedMilliseconds - composed}ms."));
+
+        if (!fromCache) FollowerSkinCache.TrySave(skinVariantName, finalSkin, packed);
+
+        CustomFollowerSkins.Add(skinVariantName, finalSkin);
         DataManager.SetFollowerSkinUnlocked(skinVariantName);
 
-        foreach (var built in skinData)
-            SpineFolderLoader.Seal(built.Item3);
+        foreach (var b in skinData)
+            SpineFolderLoader.Seal(b.Item3);
 
         return skinVariantName;
     }

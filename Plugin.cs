@@ -100,6 +100,7 @@ namespace CustomSpineLoader
 
         private void Awake()
         {
+            var bootClock = System.Diagnostics.Stopwatch.StartNew();
             Log = base.Logger;
             Instance = this;
             PluginPath = Path.GetDirectoryName(Info.Location);
@@ -199,30 +200,33 @@ namespace CustomSpineLoader
             MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.Tools.WeatherControl.OnBiomeRoomChanged;
 
             MMBiomeGeneration.BiomeGenerator.OnBiomeLeftRoom += CustomEnemyDressing.OnBiomeLeftRoom;
-            TryCreateRuntimeEditor(SceneManager.GetActiveScene());
+            SpineMemory.Phase("EditorHosts", () =>
+            {
+                TryCreateRuntimeEditor(SceneManager.GetActiveScene());
 
-            var panelHost = new GameObject("CultTweakerPanelHost");
-            DontDestroyOnLoad(panelHost);
-            cultTweakerPanel = panelHost.AddComponent<ModUI.CultTweakerPanel>();
-            if (PreRelease) panelHost.AddComponent<ModUI.PreReleaseBanner>();
+                var panelHost = new GameObject("CultTweakerPanelHost");
+                DontDestroyOnLoad(panelHost);
+                cultTweakerPanel = panelHost.AddComponent<ModUI.CultTweakerPanel>();
+                if (PreRelease) panelHost.AddComponent<ModUI.PreReleaseBanner>();
 
-            MapEditor.CTWorldMapSerialization.EnsureRootFolder();
-            var worldMapHost = new GameObject("WorldMapHost");
-            DontDestroyOnLoad(worldMapHost);
-            worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapScreen>();
-            worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapEditor>();
+                MapEditor.CTWorldMapSerialization.EnsureRootFolder();
+                var worldMapHost = new GameObject("WorldMapHost");
+                DontDestroyOnLoad(worldMapHost);
+                worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapScreen>();
+                worldMapHost.AddComponent<MapEditor.WorldMap.WorldMapEditor>();
 
-            MapEditor.CTMenuPresetSerialization.EnsureRootFolder();
-            var mainMenuHost = new GameObject("MainMenuEditorHost");
-            DontDestroyOnLoad(mainMenuHost);
-            mainMenuHost.AddComponent<ModUI.MenuEditor.MainMenuEditor>();
+                MapEditor.CTMenuPresetSerialization.EnsureRootFolder();
+                var mainMenuHost = new GameObject("MainMenuEditorHost");
+                DontDestroyOnLoad(mainMenuHost);
+                mainMenuHost.AddComponent<ModUI.MenuEditor.MainMenuEditor>();
 
-            ModUI.SkinEditor.CTFollowerSkinSerialization.EnsureRootFolder();
-            var skinEditorHost = new GameObject("FollowerSkinEditorHost");
-            DontDestroyOnLoad(skinEditorHost);
-            skinEditorHost.AddComponent<ModUI.SkinEditor.FollowerSkinEditor>();
+                ModUI.SkinEditor.CTFollowerSkinSerialization.EnsureRootFolder();
+                var skinEditorHost = new GameObject("FollowerSkinEditorHost");
+                DontDestroyOnLoad(skinEditorHost);
+                skinEditorHost.AddComponent<ModUI.SkinEditor.FollowerSkinEditor>();
 
-            OnMenuScene(SceneManager.GetActiveScene());
+                OnMenuScene(SceneManager.GetActiveScene());
+            });
 
             var customTestDungeon = new CustomDungeon();
 
@@ -243,6 +247,13 @@ namespace CustomSpineLoader
             MapEditor.CTLevelDungeon.Register();
 
             SpineMemory.Phase("MapDungeons", MapEditor.CTMapDungeon.RegisterAll);
+
+            bootClock.Stop();
+            Log.LogWarning($"STARTUP TOTAL: CultTweaker held the game's boot for {bootClock.ElapsedMilliseconds}ms " +
+                           $"({SpineMemory.PhaseMilliseconds}ms of it in the phases above, " +
+                           $"{bootClock.ElapsedMilliseconds - SpineMemory.PhaseMilliseconds}ms in config binds and " +
+                           $"folder scans). Nothing renders until this returns. " +
+                           $"Process has been up {Time.realtimeSinceStartup:0.0}s.");
         }
     
         public void Update()
@@ -340,6 +351,8 @@ namespace CustomSpineLoader
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+
             SpineMemory.TrimRepackCaches("scene change");
 
             MapEditor.HubSession.OnSceneLoaded(scene);
@@ -362,6 +375,11 @@ namespace CustomSpineLoader
 
                 MapEditor.LevelPlayback.ClearContentSuppression();
             }
+
+            clock.Stop();
+            if (clock.ElapsedMilliseconds > 50)
+                Plugin.Log.LogWarning($"SCENE '{scene.name}': CultTweaker spent {clock.ElapsedMilliseconds}ms in " +
+                                      "sceneLoaded, on top of the game's own load.");
         }
 
         private void OnMenuScene(Scene scene)
@@ -372,6 +390,9 @@ namespace CustomSpineLoader
                 ModUI.MenuEditor.MenuSceneRefs.Forget();
                 return;
             }
+
+            Log.LogWarning($"MENU READY at {Time.realtimeSinceStartup:0.0}s since process start " +
+                           "(the gap over STARTUP TOTAL is the game's own splash, addressables and banks).");
 
             ModUI.MenuEditor.MenuSceneRefs.Bind();
 

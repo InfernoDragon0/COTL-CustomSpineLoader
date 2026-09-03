@@ -55,18 +55,27 @@ public static class SpineMemory
         return 0;
     }
 
+    // Every phase is main-thread work inside Plugin.Awake, which BepInEx runs before the game draws
+    // its first frame -- so milliseconds here are milliseconds of blank window. PhaseMilliseconds is
+    // what the phases add up to; Awake reports its own total so the gap (config binds, folder scans,
+    // editor hosts) is visible as one number instead of hiding.
+    public static long PhaseMilliseconds { get; private set; }
+
     public static void Phase(string name, Action work)
     {
         var before = PrivateBytes();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             work();
         }
         finally
         {
+            clock.Stop();
+            PhaseMilliseconds += clock.ElapsedMilliseconds;
+
             var delta = PrivateBytes() - before;
-            if (Math.Abs(delta) > 10L * 1024L * 1024L)
-                Plugin.Log.LogWarning($"STARTUP PHASE {name}: {delta / 1048576}MB private.");
+            Plugin.Log.LogWarning($"STARTUP PHASE {name}: {clock.ElapsedMilliseconds}ms, {delta / 1048576}MB private.");
         }
     }
 

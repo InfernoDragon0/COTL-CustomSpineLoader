@@ -2,7 +2,7 @@
     "name": "CotLSpineLoader",
     "version_number": "2.0.3",
     "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
-    "description": "[PRE-RELEASE 4] CultTweaker 2.0 experimental build: the follower skin editor, wind and shadows for structures, and blocking volumes. Back up your saves!",
+    "description": "[PRE-RELEASE 4] CultTweaker 2.0 experimental build: the follower skin editor, wind and shadows for structures, blocking volumes, and a much faster startup. For Cult of the Lamb 1.5.26. Back up your saves!",
     "dependencies": [
         "xhayper-COTL_API-0.3.4"
     ]

@@ -591,31 +591,9 @@ public static class BaseDelta
         }
     }
 
-    private static System.Reflection.MethodInfo _updateGraphBounds;
-    private static bool _lookedForGraphBounds;
-
-    private static void UpdateGraphBounds(Structure structure)
-    {
-        if (!_lookedForGraphBounds)
-        {
-            _lookedForGraphBounds = true;
-            _updateGraphBounds = HarmonyLib.AccessTools.Method(typeof(Structure), "UpdateGraphBounds",
-                [typeof(bool)]);
-
-            if (_updateGraphBounds == null)
-                Plugin.Log.LogWarning("Base editor: this game has no Structure.UpdateGraphBounds; a " +
-                                      "moved building's footprint will not be re-pathed until the " +
-                                      "next full rescan.");
-        }
-
-        if (_updateGraphBounds == null)
-        {
-            SceneRefs.RescanNavigation();
-            return;
-        }
-
-        _updateGraphBounds.Invoke(structure, [true]);
-    }
+    // Called through reflection until the project moved off the 1.5.15 game assemblies, which had no
+    // such method; 1.5.26 declares it, so the lookup and its full-rescan fallback are gone.
+    private static void UpdateGraphBounds(Structure structure) => structure.UpdateGraphBounds(true);
 
     private static Structure FindStructureObject(StructureBrain brain, Vector3? near = null)
     {

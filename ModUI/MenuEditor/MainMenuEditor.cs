@@ -686,7 +686,7 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
     private static string DockHint(string toolName) => toolName switch
     {
-        "Menu Look" => "Menu Look - Palette, background colour, grain and the glitch effect",
+        "Menu Look" => "Menu Look - Palette, background color, grain and the glitch effect",
         "Menu Centrepiece" => "Menu Centrepiece - Which spine stands on the title screen, and where",
         "Menu Title" => "Menu Title - Replace or move the game's logo",
         "Menu Presets" => "Menu Presets - Save, load and switch between saved menus",

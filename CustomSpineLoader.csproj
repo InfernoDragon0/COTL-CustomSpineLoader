@@ -25,8 +25,68 @@
 
     </ItemGroup>
 
+    <!-- The game's own assemblies for 1.5.26.1057, publicized and stripped to reference-only, in
+         lib\GameLibs. This replaces the CultOfTheLamb.GameLibs NuGet package, which stops at
+         1.5.15.979 (https://nuget.bepinex.dev tops out there), so there is nothing to reference for
+         a 1.5.26 game. Rebuild them with tools/gamelibs.sh after a game update.
+         Newtonsoft.Json comes from the game too, so the compile-time API matches the 13.0.0.0 the
+         game actually loads rather than the 12.0.3 the old package pinned. The two Rewired
+         assemblies are copied untouched; tools/gamelibs.sh says why. -->
     <ItemGroup>
-        <PackageReference Include="CultOfTheLamb.GameLibs" Version="1.5.15.979-r.0" />
+      <Reference Include="Assembly-CSharp-firstpass" Private="false">
+        <HintPath>lib\GameLibs\Assembly-CSharp-firstpass.dll</HintPath>
+      </Reference>
+      <Reference Include="Assembly-CSharp" Private="false">
+        <HintPath>lib\GameLibs\Assembly-CSharp.dll</HintPath>
+      </Reference>
+      <Reference Include="DOTween" Private="false">
+        <HintPath>lib\GameLibs\DOTween.dll</HintPath>
+      </Reference>
+      <Reference Include="FMODUnity" Private="false">
+        <HintPath>lib\GameLibs\FMODUnity.dll</HintPath>
+      </Reference>
+      <Reference Include="GalaxyCSharp" Private="false">
+        <HintPath>lib\GameLibs\GalaxyCSharp.dll</HintPath>
+      </Reference>
+      <Reference Include="LeTai.TranslucentImage" Private="false">
+        <HintPath>lib\GameLibs\LeTai.TranslucentImage.dll</HintPath>
+      </Reference>
+      <Reference Include="Newtonsoft.Json" Private="false">
+        <HintPath>lib\GameLibs\Newtonsoft.Json.dll</HintPath>
+      </Reference>
+      <Reference Include="Rewired_Core" Private="false">
+        <HintPath>lib\GameLibs\Rewired_Core.dll</HintPath>
+      </Reference>
+      <Reference Include="Rewired_Windows" Private="false">
+        <HintPath>lib\GameLibs\Rewired_Windows.dll</HintPath>
+      </Reference>
+      <Reference Include="Sirenix.Serialization" Private="false">
+        <HintPath>lib\GameLibs\Sirenix.Serialization.dll</HintPath>
+      </Reference>
+      <Reference Include="Sirenix.Utilities" Private="false">
+        <HintPath>lib\GameLibs\Sirenix.Utilities.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.Addressables" Private="false">
+        <HintPath>lib\GameLibs\Unity.Addressables.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.Mathematics" Private="false">
+        <HintPath>lib\GameLibs\Unity.Mathematics.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.ProBuilder" Private="false">
+        <HintPath>lib\GameLibs\Unity.ProBuilder.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.ResourceManager" Private="false">
+        <HintPath>lib\GameLibs\Unity.ResourceManager.dll</HintPath>
+      </Reference>
+      <Reference Include="Unity.TextMeshPro" Private="false">
+        <HintPath>lib\GameLibs\Unity.TextMeshPro.dll</HintPath>
+      </Reference>
+      <Reference Include="UnityEngine.UI" Private="false">
+        <HintPath>lib\GameLibs\UnityEngine.UI.dll</HintPath>
+      </Reference>
+      <Reference Include="spine-unity" Private="false">
+        <HintPath>lib\GameLibs\spine-unity.dll</HintPath>
+      </Reference>
     </ItemGroup>
 
     <!-- Decodes a cutscene's audio track through Windows' own codecs. Shipped alongside the

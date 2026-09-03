@@ -97,7 +97,7 @@ public class MenuTitleTool : IMapEditorTool
         {
             Title.TintEdition = v;
             ShowColourRows(v);
-            Touch(v ? null : "The edition line keeps the game's colour.");
+            Touch(v ? null : "The edition line keeps the game's color.");
         });
 
         _colourRows.Add(ui.CreateSlider(panel, "Red", 0f, 1f, Title.EditionColor.R,

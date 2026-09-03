@@ -60,12 +60,12 @@ public class MenuLookTool : IMapEditorTool
 
         ui.CreateHeader(panel, "Background");
 
-        ui.CreateToggle(panel, "Override background colour", Look.OverrideClear, on =>
+        ui.CreateToggle(panel, "Override background color", Look.OverrideClear, on =>
         {
             Look.OverrideClear = on;
             Touch(on
-                ? "The background is this preset's colour."
-                : "The background is the game's own colour.");
+                ? "The background is this preset's color."
+                : "The background is the game's own color.");
         });
 
         ui.CreateSlider(panel, "Red", 0f, 1f, Look.ClearColor.R, v => { Look.ClearColor.R = v; Cleared(); });

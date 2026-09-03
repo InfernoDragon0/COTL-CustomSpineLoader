@@ -49,6 +49,11 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     private const string StructureGroup = "Build Menu Structures";
 
+    // Custom structures get their own group rather than being tacked onto the game's list, and it shows
+    // ALL of them -- including any with hideFromBuildMenu set, which is the point: the player cannot
+    // build those, but a map maker still has to be able to place them.
+    private const string CustomGroup = "Custom";
+
     public void BuildPanel(RectTransform panel, MapEditorUI ui)
     {
         BuildSearchRow(panel, ui);
@@ -59,6 +64,13 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _groupKeys.Add(StructureGroup);
         options.Add(StructureGroup);
 
+        var customCount = CustomStructureManager.CustomStructureList.Count;
+        if (customCount > 0)
+        {
+            _groupKeys.Add(CustomGroup);
+            options.Add($"{CustomGroup} ({customCount})");
+        }
+
         foreach (var group in PropGroups().Keys)
         {
             _groupKeys.Add(group);
@@ -68,8 +80,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _groupDropdown = ui.CreateDropdown(panel, "Choose a group", options, (index, _) =>
         {
             if (index < 0 || index >= _groupKeys.Count) return;
-            if (_groupKeys[index] == StructureGroup) ShowStructureGroup();
-            else ShowPropGroup(_groupKeys[index]);
+            ShowGroup(_groupKeys[index]);
         });
 
         _grid = ui.CreateIconGrid(panel, "PlacementGrid", scrollHeight: GridHeight);
@@ -214,9 +225,28 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             }
         }
 
+        return entries;
+    }
+
+    private void ShowCustomGroup()
+    {
+        if (_grid == null) return;
+
+        MapEditorIcons.CancelPendingPropIcons();
+        _grid.Populate(_editor, CustomEntries(), id =>
+        {
+            if (_typesById.TryGetValue(id, out var type))
+                _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
+        });
+    }
+
+    private List<MapEditorGrid.Entry> CustomEntries()
+    {
+        var entries = new List<MapEditorGrid.Entry>();
+
         foreach (var pair in CustomStructureManager.CustomStructureList)
         {
-            if (pair.Value == null || !seen.Add(pair.Key)) continue;
+            if (pair.Value == null) continue;
             entries.Add(StructureEntry(pair.Key, pair.Value.InternalName));
         }
 
@@ -359,8 +389,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             return;
         }
 
-        if (_groupKeys[index] == StructureGroup) ShowStructureGroup();
-        else ShowPropGroup(_groupKeys[index]);
+        ShowGroup(_groupKeys[index]);
+    }
+
+    private void ShowGroup(string group)
+    {
+        if (group == StructureGroup) ShowStructureGroup();
+        else if (group == CustomGroup) ShowCustomGroup();
+        else ShowPropGroup(group);
     }
 
     private void ShowSearchResults(string needle)
@@ -373,6 +409,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         var total = 0;
 
         foreach (var structure in StructureEntries())
+        {
+            if (structure.Display.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+            total++;
+            if (entries.Count < MapEditorSearchRow.MaxResults) entries.Add(structure);
+        }
+
+        foreach (var structure in CustomEntries())
         {
             if (structure.Display.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
 

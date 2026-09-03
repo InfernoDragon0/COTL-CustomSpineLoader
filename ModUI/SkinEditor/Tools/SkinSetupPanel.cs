@@ -15,6 +15,7 @@ public class SkinSetupPanel : IMapEditorTool
 
     private const string CreateNew = "Create New Skin or Variant";
     private const string AddSlot = "Add an override slot";
+    private const string AddColourSet = "Add color set";
     private const int NameLimit = 60;
 
     private readonly FollowerSkinEditor _editor;
@@ -40,9 +41,10 @@ public class SkinSetupPanel : IMapEditorTool
         Config.PartConfigs ??= [];
 
         BuildSkins(panel, ui);
-        BuildBase(panel, ui);
-        BuildPreview(panel, ui);
         BuildColourSets(panel, ui);
+        BuildBase(panel, ui);
+        BuildCostume(panel, ui);
+        BuildPreview(panel, ui);
         BuildLayers(panel, ui);
     }
 
@@ -229,10 +231,9 @@ public class SkinSetupPanel : IMapEditorTool
 
     private void BuildBase(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateHeader(panel, "Base");
-
         var bases = SkinParts.BaseSkinNames();
-        var picker = ui.CreateDropdown(panel, Config.OverrideBaseSkin ?? "Cat", bases, (_, name) =>
+        var picker = ui.CreateLabelledDropdown(panel, "Base skin", Config.OverrideBaseSkin ?? "Cat", bases,
+            (_, name) =>
         {
             if (string.IsNullOrEmpty(name) || name == Config.OverrideBaseSkin) return;
             Config.OverrideBaseSkin = name;
@@ -248,10 +249,9 @@ public class SkinSetupPanel : IMapEditorTool
 
     private void BuildPreview(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateHeader(panel, "Preview");
-
         var animations = _editor.Preview.Animations();
-        var picker = ui.CreateDropdown(panel, _editor.Animation ?? "Animation", animations, (_, name) =>
+        var picker = ui.CreateLabelledDropdown(panel, "Animation", _editor.Animation ?? "Animation", animations,
+            (_, name) =>
         {
             if (string.IsNullOrEmpty(name) || name == _editor.Animation) return;
             _editor.Animation = name;
@@ -275,49 +275,74 @@ public class SkinSetupPanel : IMapEditorTool
         });
     }
 
-    // ---- colour sets --------------------------------------------------------------------------
+    // ---- costume ------------------------------------------------------------------------------
+
+    private void BuildCostume(RectTransform panel, MapEditorUI ui)
+    {
+        var costume = _editor.Costume;
+        var outfits = SkinCostume.Outfits();
+        var labels = outfits.Select(o => o.Label).ToList();
+        var at = Mathf.Max(0, outfits.FindIndex(o => o.Value == costume.Outfit));
+
+        // The dropdown repaints its own caption, so a pick needs no panel rebuild.
+        var picker = ui.CreateLabelledDropdown(panel, "Outfit", labels[at], labels, (index, label) =>
+        {
+            if (index < 0 || index >= outfits.Count) return;
+            costume.Outfit = outfits[index].Value;
+            Touch($"Outfit: {label}.");
+        });
+        picker.SetSelected(at);
+    }
+
+    // ---- color sets ---------------------------------------------------------------------------
 
     private void BuildColourSets(RectTransform panel, MapEditorUI ui)
     {
-        ui.CreateHeader(panel, "Colour sets");
-
         var setCount = Document.ColourSetCount;
-        var setNames = new List<string>();
-        for (var i = 0; i < setCount; i++) setNames.Add("Set " + (i + 1));
+        var options = new List<string> { AddColourSet };
+        for (var i = 0; i < setCount; i++) options.Add("Set " + (i + 1));
 
-        var picker = ui.CreateDropdown(panel, "Set " + (_editor.ColourSet + 1), setNames, (index, _) =>
+        var picker = ui.CreateLabelledDropdown(panel, "Color set", "Set " + (_editor.ColourSet + 1), options,
+            (index, _) =>
         {
-            if (index == _editor.ColourSet) return;
-            _editor.ColourSet = index;
-            Touch($"Colour set {index + 1} is showing on the preview.");
-            _editor.RebuildPanels();
-        });
-        picker.SetSelected(Mathf.Clamp(_editor.ColourSet, 0, setCount - 1));
-
-        ui.CreateButton(panel, "Add colour set", () =>
-        {
-            foreach (var part in Config.PartConfigs.Values)
+            if (index <= 0)
             {
-                part.ColorChoices ??= [];
-                part.ColorChoices.Add(part.ColorChoices.Count > 0 ? part.ColorChoices[^1] : "#FFFFFF");
+                AddSet();
+                return;
             }
 
-            _editor.ColourSet = Document.ColourSetCount - 1;
-            Touch($"Colour set {Document.ColourSetCount} added; it starts as a copy of the last one.");
+            var wanted = index - 1;
+            if (wanted == _editor.ColourSet || wanted >= setCount) return;
+            _editor.ColourSet = wanted;
+            Touch($"Color set {wanted + 1} is showing on the preview.");
             _editor.RebuildPanels();
-        }, 36f);
+        });
+        picker.SetSelected(Mathf.Clamp(_editor.ColourSet, 0, setCount - 1) + 1);
 
         if (setCount <= 1) return;
 
-        ui.CreateButton(panel, "Remove last colour set", () =>
+        ui.CreateButton(panel, "Remove last color set", () =>
         {
             foreach (var part in Config.PartConfigs.Values)
                 if (part.ColorChoices is { Count: > 1 }) part.ColorChoices.RemoveAt(part.ColorChoices.Count - 1);
 
             _editor.ColourSet = Mathf.Min(_editor.ColourSet, Document.ColourSetCount - 1);
-            Touch($"Colour set {setCount} removed.");
+            Touch($"Color set {setCount} removed.");
             _editor.RebuildPanels();
         }, 36f, MapEditorEmphasis.Quiet);
+    }
+
+    private void AddSet()
+    {
+        foreach (var part in Config.PartConfigs.Values)
+        {
+            part.ColorChoices ??= [];
+            part.ColorChoices.Add(part.ColorChoices.Count > 0 ? part.ColorChoices[^1] : "#FFFFFF");
+        }
+
+        _editor.ColourSet = Document.ColourSetCount - 1;
+        Touch($"Color set {Document.ColourSetCount} added; it starts as a copy of the last one.");
+        _editor.RebuildPanels();
     }
 
     // ---- layers -------------------------------------------------------------------------------
@@ -418,7 +443,7 @@ public class SkinSetupPanel : IMapEditorTool
     }
 
     public void OnEnter() =>
-        _editor.SetStatus("Each layer is one part of the follower: an image that replaces it, a colour, or both.");
+        _editor.SetStatus("Each layer is one part of the follower: an image that replaces it, a color, or both.");
 
     public void OnExit() => _pendingLoad = null;
 

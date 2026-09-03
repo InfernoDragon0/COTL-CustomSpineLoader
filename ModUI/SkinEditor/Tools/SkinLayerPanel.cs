@@ -11,7 +11,7 @@ public class SkinLayerPanel : IMapEditorTool
 {
     public string Name => "Layer";
 
-    private const string NoImage = "No image (colour only)";
+    private const string NoImage = "No image (color only)";
 
     private readonly FollowerSkinEditor _editor;
 
@@ -95,7 +95,7 @@ public class SkinLayerPanel : IMapEditorTool
                     return;
 
                 _editor.SelectedLayer = null;
-                Touch($"'{part.PartName}' only recolours now; no image covers it.");
+                Touch($"'{part.PartName}' only recolors now; no image covers it.");
             }
             else
             {
@@ -146,16 +146,16 @@ public class SkinLayerPanel : IMapEditorTool
 
         var colour = FollowerSpineLoader.HexToColor(part.ColorChoices[set]);
 
-        ui.CreateHeader(panel, $"Colour (set {set + 1})", 20);
+        ui.CreateHeader(panel, $"Color (set {set + 1})", 20);
 
         ui.CreateSlider(panel, "Red", 0f, 1f, colour.r, v => { colour.r = v; Write(part, set, colour); });
         ui.CreateSlider(panel, "Green", 0f, 1f, colour.g, v => { colour.g = v; Write(part, set, colour); });
         ui.CreateSlider(panel, "Blue", 0f, 1f, colour.b, v => { colour.b = v; Write(part, set, colour); });
 
-        ui.CreateButton(panel, "Reset colour", () =>
+        ui.CreateButton(panel, "Reset color", () =>
         {
             Write(part, set, Color.white);
-            Touch("The part shows its own colours.");
+            Touch("The part shows its own colors.");
             _editor.RebuildPanels();
         }, 36f, MapEditorEmphasis.Quiet);
     }

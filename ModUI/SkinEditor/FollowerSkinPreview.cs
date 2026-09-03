@@ -176,45 +176,74 @@ public class FollowerSkinPreview
 
     private readonly List<Packed> _packed = [];
     private string _worn;
+    private Spine.Skin _wornSkin;
+    private string _costumeWorn = "";
+    private string _costumeProblem;
 
-    public string Show(CTFollowerSkinDocument document, int colourSet, bool mayUseRegistered = false)
+    public string Show(CTFollowerSkinDocument document, int colourSet, SkinCostume costume,
+        bool mayUseRegistered = false)
     {
         if (_spine == null || document?.Config == null) return "The preview rig is not running.";
 
         var signature = Signature(document);
+        var costumeKey = costume?.Key ?? "";
 
-        if (signature == _worn)
+        // Signature covers the document, not which kind of skin is worn, so the registered skin the game
+        // baked at startup matches here too. That is deliberate: a colour-only edit changes no signature
+        // and recolours whatever is worn, registered or not, which is why viewing and recolouring a skin
+        // never costs a repack. (An idle prebake once relied on breaking this early-out to force a real
+        // build; it was removed because it charged that cost to people who only wanted to look.)
+        if (signature == _worn && costumeKey == _costumeWorn)
         {
             Recolour(document, colourSet);
             return null;
         }
 
-        var skin = mayUseRegistered ? Registered(document) : null;
-        WearingRegistered = skin != null;
+        Spine.Skin skin;
 
-        if (skin == null)
+        if (signature == _worn && _wornSkin != null)
         {
-            var cached = Find(signature) ?? Pack(document, signature);
-            if (cached == null) return "The skin could not be built; the log says why.";
+            // Only the costume moved. The art is already packed, so re-dress what is on rather than
+            // going anywhere near a repack.
+            skin = _wornSkin;
+        }
+        else
+        {
+            skin = mayUseRegistered ? Registered(document) : null;
+            WearingRegistered = skin != null;
 
-            _packed.Remove(cached);
-            _packed.Add(cached);
-            Trim();
+            if (skin == null)
+            {
+                var cached = Find(signature) ?? Pack(document, signature);
+                if (cached == null) return "The skin could not be built; the log says why.";
 
-            skin = cached.Skin;
+                _packed.Remove(cached);
+                _packed.Add(cached);
+                Trim();
+
+                skin = cached.Skin;
+            }
         }
 
-        Wear(skin, document, colourSet, signature);
-        return null;
+        Wear(skin, document, colourSet, signature, costume);
+        return _costumeProblem;
     }
 
-    private void Wear(Spine.Skin skin, CTFollowerSkinDocument document, int colourSet, string signature)
+    private void Wear(Spine.Skin skin, CTFollowerSkinDocument document, int colourSet, string signature,
+        SkinCostume costume)
     {
         var skeleton = _spine.Skeleton;
+
+        // Dress first: building the costume asks the game to compose one, which sets a skin of its own
+        // on the way past.
+        var worn = Dress(skin, document.Config.OverrideBaseSkin, costume);
+
         skeleton.SetSkin((Spine.Skin)null);
-        skeleton.SetSkin(skin);
+        skeleton.SetSkin(worn);
         skeleton.SetSlotsToSetupPose();
         _worn = signature;
+        _wornSkin = skin;
+        _costumeWorn = costume?.Key ?? "";
 
         FollowerSpineLoader.ApplyColours(skeleton, document.Config, colourSet);
 
@@ -259,6 +288,68 @@ public class FollowerSkinPreview
         }
 
         return added;
+    }
+
+    // ---- costume -----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Lays the chosen outfit, hat, clothing, special and necklace over <paramref name="skin"/>, the way
+    /// the game lays them over a follower's own skin. Returns the skin untouched when nothing is chosen.
+    /// </summary>
+    private Spine.Skin Dress(Spine.Skin skin, string baseSkinName, SkinCostume costume)
+    {
+        _costumeProblem = null;
+        if (costume == null || !costume.Any) return skin;
+
+        var extra = Overlay(baseSkinName, costume);
+        if (extra == null || extra.Count == 0) return skin;
+
+        var dressed = new Spine.Skin(skin.Name + "_dressed");
+        dressed.AddSkin(skin);
+        foreach (var entry in extra) dressed.SetAttachment(entry.SlotIndex, entry.Name, entry.attachment);
+        return dressed;
+    }
+
+    /// <summary>
+    /// The attachments a costume adds, and nothing else. The game composes a costume by stacking skins
+    /// on top of a base one, so it is asked to dress the same base this skin is built on and the base's
+    /// own attachments are subtracted back out - they are the ones the edited skin supplies instead.
+    /// Doing the stacking here would mean copying FollowerBrain's outfit, hat and robe name tables and
+    /// keeping them in step with every game update.
+    /// </summary>
+    private List<Spine.Skin.SkinEntry> Overlay(string baseSkinName, SkinCostume costume)
+    {
+        var data = _spine.Skeleton.Data;
+        var plain = data.FindSkin(baseSkinName ?? "Cat") ?? data.FindSkin("Cat");
+        if (plain == null)
+        {
+            _costumeProblem = "The base skin is missing, so no costume can be built.";
+            return null;
+        }
+
+        Spine.Skin dressed;
+        try
+        {
+            dressed = FollowerBrain.SetFollowerCostume(_spine.Skeleton, SkinCostume.Level, plain.Name, 0,
+                costume.Outfit, FollowerHatType.None, FollowerClothingType.None,
+                FollowerCustomisationType.None, FollowerSpecialType.None,
+                InventoryItem.ITEM_TYPE.NONE, "", null);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"SkinEditor: that costume could not be built: {e.Message}");
+            _costumeProblem = "That costume combination has no art in the game; try another.";
+            return null;
+        }
+
+        if (dressed == null) return null;
+
+        var extra = new List<Spine.Skin.SkinEntry>();
+        foreach (var entry in dressed.Attachments)
+            if (!ReferenceEquals(plain.GetAttachment(entry.SlotIndex, entry.Name), entry.attachment))
+                extra.Add(entry);
+
+        return extra;
     }
 
     public bool WearingRegistered { get; private set; }
@@ -427,6 +518,8 @@ public class FollowerSkinPreview
 
         _packed.Clear();
         _worn = null;
+        _wornSkin = null;
+        _costumeWorn = "";
 
         foreach (var material in _flattened)
             if (material != null) UnityEngine.Object.Destroy(material);

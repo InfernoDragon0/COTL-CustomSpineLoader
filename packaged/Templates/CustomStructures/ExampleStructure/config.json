@@ -11,6 +11,8 @@
   "RequiresTempleToBuild": true,
 
   "CanBeFlipped": false,
+
+  "HideFromBuildMenu": false,
   "Bounds": { "X": 2, "Y": 2 },
 
   "ItemCost": { "LOG": 20, "STONE": 10 }

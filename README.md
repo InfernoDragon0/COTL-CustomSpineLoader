@@ -162,10 +162,16 @@ Structures live in `BepInEx > plugins > CultTweaker > CustomStructures`, one fol
   "BuildOnlyOne": true,
   "RequiresTempleToBuild": true,
   "CanBeFlipped": false,
+  "HideFromBuildMenu": false,
   "Bounds": { "X": 2, "Y": 2 },
   "ItemCost": { "LOG": 20, "STONE": 10 }
 }
 ```
+
+Set `HideFromBuildMenu` to `true` to keep a structure out of the player's build menu while still
+being able to place it yourself in the map editor. Useful for scenery that belongs to a map rather
+than to a cult. Hidden or not, every custom structure appears in the map editor's structure tool
+under the **Custom** group, and saved maps load it either way.
 
 #### Building a Spine structure instead of a sprite
 

@@ -20,12 +20,31 @@ Everything new since pre-release 3.
   made to move
 - Added shadows to custom structures, which previously cast none
 - Improved see-through so it can be worn together with wind
+- Added `"HideFromBuildMenu": true` to a custom structure's `config.json`: it stops appearing in the
+  build menu, so players cannot build it, while you can still place it yourself
+- Added a **Custom** group to the structure tool, holding every custom structure, hidden ones
+  included; custom structures used to sit at the end of the Build Menu Structures list
 
 ## Triggers
 
 - Added a "Blocking volume" checkbox: the trigger becomes an invisible wall to players and enemies,
   drawn in red
 - Added enemy pathfinding around blocking volumes, updated as they are moved and resized
+- Added a "Play animation on object" action: pick anything in the room that has a spine, choose one
+  of its animations, and play it once or loop it for a while
+- Added a choice of what happens when that animation ends, so an enemy or NPC can go back to the
+  idle it was playing instead of freezing on the last frame
+
+## Loading
+
+- Custom follower skins are now baked once and kept, instead of being rebuilt on every launch:
+  roughly 10 seconds off the startup and about 2 GB less memory while it loads
+- A skin is rebuilt only when you change it, and the kept copy can be shipped with a skin so
+  other players never pay for the first build either
+
+## Compatibility
+
+- Built for Cult of the Lamb **1.5.26**; earlier versions of the game are no longer supported
 
 ## Fixes
 
@@ -33,3 +52,5 @@ Everything new since pre-release 3.
 - Fixed an issue where a structure's own sprites, added as it is placed, missed the look it was
   given
 - Fixed an issue where naming a skin could confirm a name the editor would not accept
+- Fixed the skin editor claiming to get a skin ready to edit while doing nothing; viewing and
+  recolouring a skin no longer costs a rebuild at all

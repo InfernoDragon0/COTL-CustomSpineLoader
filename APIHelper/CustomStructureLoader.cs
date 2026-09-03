@@ -13,6 +13,11 @@ public class CustomStructureLoader : Loader<CustomStructureConfig>
 {
     public static List<StructureBrain.TYPES> loadedStructures = [];
 
+    // Structures the player is not meant to build. They are still registered, still placeable from the
+    // map editor's Custom group, and still load from a saved map -- only the build menu drops them, via
+    // CustomStructureMenuPatches.
+    public static readonly HashSet<StructureBrain.TYPES> HiddenFromBuildMenu = [];
+
     public CustomStructureLoader() : base("CustomStructures") { }
 
     public static void LoadAllCustomStructures()
@@ -97,7 +102,16 @@ public class CustomStructureLoader : Loader<CustomStructureConfig>
                 }
 
                 Plugin.Log.LogInfo("Successfully created custom structure with internal name : " + custom.InternalName);
-                loadedStructures.Add(CustomStructureManager.Add(custom));
+
+                var type = CustomStructureManager.Add(custom);
+                loadedStructures.Add(type);
+
+                if (cfg.HideFromBuildMenu)
+                {
+                    HiddenFromBuildMenu.Add(type);
+                    Plugin.Log.LogInfo(cfg.StructureName + " is hidden from the build menu; it can still be " +
+                                       "placed from the map editor's Custom group.");
+                }
 
             }
             catch (Exception e)
@@ -173,6 +187,11 @@ public class CustomStructureConfig
     public bool RequiresTempleToBuild = true;
 
     public bool CanBeFlipped = true;
+
+    // Keeps the structure out of the player's build menu without unregistering it, for pieces that
+    // belong to a hand-built map rather than to a cult. The map editor lists it either way.
+    public bool HideFromBuildMenu = false;
+
     public SerializableVector2 Bounds = new() { X = 1, Y = 1 };
 
     public Dictionary<string, int> ItemCost = []; //StructuresData.ItemCost of ITEM_TYPE to int CostValue
