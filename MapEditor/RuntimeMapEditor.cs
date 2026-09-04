@@ -28,6 +28,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private Image _statusBorder;
 
     private RectTransform _shortcutPanel;
+    private MapEditorLayerPanel _layers;
 
     private readonly Dictionary<string, Image> _toolRings = [];
 
@@ -148,6 +149,9 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     public void MarkEdited() => _edits++;
 
+    /// Bumps on every recorded edit; the layer tree watches it to know when to re-read the room.
+    public int EditCount => _edits;
+
     public void MarkSaved() => _savedEdits = _edits;
 
     public bool HasUnsavedEdits => _edits != _savedEdits;
@@ -212,8 +216,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         if (!_editing) EnterEditorMode();
 
-        SetStatus("Editing the base. Save writes this slot's own file; the game's save is not " +
-                  "touched.");
+        SetStatus("Base Editor Open");
     }
 
     public void ExitForPlayback()
@@ -420,7 +423,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         GetTool<ShapeTool>()?.PrepareForLoad();
 
         SelectTool(_tools.FirstOrDefault());
-        SetStatus("Editor open.");
+
+        // Base and hub sessions arrive with their objects already in the scene, so saved groups are
+        // put back here; a blueprint load does the same at the end of its own routine.
+        var groups = MapEditorGroups.Restore(Map);
+        SetStatus(groups > 0 ? $"Editor open. {groups} group(s) restored." : "Editor open.");
     }
 
     private void ExitEditorMode()
@@ -523,6 +530,60 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
                 Plugin.Log.LogError($"MapEditor: tool '{_activeTool?.Name}' update failed: " + e);
             }
         }
+
+        try
+        {
+            _layers?.Tick();
+        }
+        catch (System.Exception e)
+        {
+            if (Time.unscaledTime >= _nextUpdateErrorAt)
+            {
+                _nextUpdateErrorAt = Time.unscaledTime + 5f;
+                Plugin.Log.LogError("MapEditor: layer tree update failed: " + e);
+            }
+        }
+    }
+
+    // ---- the layer tree --------------------------------------------------------------------------
+
+    /// The layer tree hands an object over: whatever tool is up, it becomes the Select tool's selection.
+    public void PickFromLayers(GameObject go)
+    {
+        if (go == null) return;
+        var select = GetTool<SelectTool>();
+        if (select == null) return;
+
+        SelectTool(select);
+        select.SelectObject(go);
+    }
+
+    /// A shift-range or a group folder in the layer tree: several objects at once.
+    public void PickManyFromLayers(IEnumerable<GameObject> objects)
+    {
+        var select = GetTool<SelectTool>();
+        if (select == null) return;
+
+        SelectTool(select);
+        select.SelectMany(objects);
+    }
+
+    public void PickTriggerFromLayers(CTMapTrigger trigger)
+    {
+        if (trigger == null) return;
+        var triggers = GetTool<TriggerTool>();
+        if (triggers == null) return;
+
+        SelectTool(triggers);
+        triggers.SelectTrigger(trigger);
+    }
+
+    /// The layer tree and the shortcut hints share the left edge; opening the tree folds the hints.
+    internal void CollapseShortcuts()
+    {
+        if (_shortcutsCollapsed) return;
+        _shortcutsCollapsed = true;
+        RefreshShortcuts();
     }
 
     private float _nextUpdateErrorAt;
@@ -874,6 +935,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         if (_optionsTitle != null) _optionsTitle.text = tool.Name;
 
         RefreshShortcuts();
+        _layers?.OnToolChanged(tool);
 
         _activeTool.OnEnter();
         SetStatus(tool.Name + " tool.");
@@ -900,6 +962,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         CreateOptionsPanel();
         CreateStatusBar();
         CreateShortcutPanel();
+        _layers = new MapEditorLayerPanel(this, _ui, _canvas.transform);
 
         _ownChrome.Clear();
         foreach (Transform child in _canvas.transform) _ownChrome.Add(child.gameObject);
@@ -1086,6 +1149,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     {
         if (!_editing || _toolOptionsPanel == null) return;
 
+        _layers?.LateUpdate();
+
         RectTransform column = null;
         if (!_optionsCollapsed && _activeTool != null)
             _optionColumns.TryGetValue(_activeTool.Name, out column);
@@ -1183,6 +1248,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private void ToggleShortcutsCollapsed()
     {
         _shortcutsCollapsed = !_shortcutsCollapsed;
+        if (!_shortcutsCollapsed) _layers?.SetCollapsed(true);
         RefreshShortcuts();
     }
 

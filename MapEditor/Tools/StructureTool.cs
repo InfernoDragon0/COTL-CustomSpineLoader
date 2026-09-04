@@ -465,6 +465,26 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     private static readonly HashSet<string> ExcludedPropFolders =
         ["Enemies", "UI", "Fonts", "Audio", "Materials", "Shaders", "Player", "Followers"];
 
+    // The DLC dungeons' dressing is not under Assets/Prefabs: Ewefall's pieces live in the
+    // "Mountain" decoration plots and the Rot dungeon's in "Prison", both under Resources_moved. The
+    // folder names are the game's; the labels are the dungeons a map maker knows them as.
+    private const string DlcPlotPrefix = "Assets/Resources_moved/Dungeon/Decoration Plots/";
+
+    private static readonly Dictionary<string, string> DlcPlotLabels = new()
+    {
+        ["Mountain"] = "Ewefall (Mountain)",
+        ["Prison"] = "Rot (Prison)"
+    };
+
+    // A few more biome pieces (the cave biome, base weeds, boss and shop room dressing) sit under
+    // Assets/Art. Its tooling, UI and shader folders are skipped.
+    private const string ArtPrefix = "Assets/Art/";
+
+    private static readonly HashSet<string> ExcludedArtFolders =
+        ["UI", "Tools", "Materials", "Shaders", "AmplifyColorVolumes"];
+
+    private const string TilePrefix = "Assets/Tile Decorations/";
+
     private static SortedDictionary<string, List<string>> PropGroups()
     {
         if (_propGroups != null) return _propGroups;
@@ -477,19 +497,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             if (locator?.Keys == null) continue;
             foreach (var keyObj in locator.Keys)
             {
-                if (keyObj is not string key) continue;
-                if (!key.StartsWith(PropPrefix) || !key.EndsWith(".prefab")) continue;
+                if (keyObj is not string key || !key.EndsWith(".prefab")) continue;
 
-                var relative = key.Substring(PropPrefix.Length);
-                var slash = relative.IndexOf('/');
-                if (slash <= 0) continue;
-
-                var top = relative.Substring(0, slash);
-                if (ExcludedPropFolders.Contains(top)) continue;
-
-                var rest = relative.Substring(slash + 1);
-                var nextSlash = rest.IndexOf('/');
-                var group = nextSlash > 0 ? top + " / " + rest.Substring(0, nextSlash) : top;
+                var group = GroupOfKey(key);
+                if (group == null) continue;
 
                 if (!_propGroups.TryGetValue(group, out var list)) _propGroups[group] = list = [];
                 if (!list.Contains(key)) list.Add(key);
@@ -502,6 +513,66 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         foreach (var group in _propGroups.Values) total += group.Count;
         Plugin.Log.LogInfo($"MapEditor: prop catalog holds {total} prefab(s) in {_propGroups.Count} group(s).");
         return _propGroups;
+    }
+
+    /// <summary>
+    /// The browser group an addressable prefab key belongs in, or null for keys the browser does
+    /// not list (rooms, island pieces, UI, enemies and the like).
+    /// </summary>
+    private static string GroupOfKey(string key)
+    {
+        if (key.StartsWith(PropPrefix))
+        {
+            var relative = key.Substring(PropPrefix.Length);
+            var slash = relative.IndexOf('/');
+            if (slash <= 0) return null;
+
+            var top = relative.Substring(0, slash);
+            if (ExcludedPropFolders.Contains(top)) return null;
+
+            var rest = relative.Substring(slash + 1);
+            var nextSlash = rest.IndexOf('/');
+            if (nextSlash <= 0) return top;
+
+            // "Placement Objects / DLC" and "VFX / DLC" are grab-bags of the DLC's cult decorations
+            // and effects; now that the DLC dungeons have groups of their own, the folder's name
+            // would only suggest those. They are listed as Misc.
+            var second = rest.Substring(0, nextSlash);
+            if (second == "DLC") second = "Misc";
+            return top + " / " + second;
+        }
+
+        if (key.StartsWith(DlcPlotPrefix))
+        {
+            var relative = key.Substring(DlcPlotPrefix.Length);
+            var slash = relative.IndexOf('/');
+            if (slash <= 0) return null;
+
+            var biome = relative.Substring(0, slash);
+            if (!DlcPlotLabels.TryGetValue(biome, out var label)) label = biome;
+
+            // The files straight under the biome folder are whole plots (a 2x2 of cages, a 3x3 of
+            // ruins); the individual pieces are one folder down.
+            var rest = relative.Substring(slash + 1);
+            return rest.IndexOf('/') > 0
+                ? "DLC Dungeon / " + label
+                : "DLC Dungeon / " + label + " Plots";
+        }
+
+        if (key.StartsWith(ArtPrefix))
+        {
+            var parts = key.Substring(ArtPrefix.Length).Split('/');
+            if (parts.Length < 2 || ExcludedArtFolders.Contains(parts[0])) return null;
+
+            // Up to two folders deep, so "Sprite / Dungeon" and "Sprite / Base" stay apart.
+            return parts.Length >= 3
+                ? "Art / " + parts[0] + " / " + parts[1]
+                : "Art / " + parts[0];
+        }
+
+        if (key.StartsWith(TilePrefix)) return "Tile Decorations";
+
+        return null;
     }
 
     private static void AddBiomeGroups()

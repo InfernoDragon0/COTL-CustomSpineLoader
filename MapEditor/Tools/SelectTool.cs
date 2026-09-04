@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -6,13 +7,16 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-public class SelectTool : IMapEditorTool, IMapEditorShortcuts
+public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContributor
 {
     public string Name => "Select";
 
     private readonly RuntimeMapEditor _editor;
 
+    // The primary selection, and the rest of a multi-selection. Gizmos frame all of them, moves and
+    // depth changes apply to all, resize and the look toggles act on the primary alone.
     private GameObject _selected;
+    private readonly List<GameObject> _extra = [];
     private bool _cloneDragging;
     private Vector3 _cloneGrabOffset;
     private readonly List<Renderer> _highlighted = [];
@@ -167,6 +171,32 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
+        if (_extra.Count > 0)
+        {
+            _seeThroughGO?.SetActive(false);
+            _fogThroughGO?.SetActive(false);
+            _windGO?.SetActive(false);
+            _flipToggle?.SetValue(false, notify: false);
+
+            var all = AllSelected();
+            var groupId = MapEditorGroups.GroupOf(_selected);
+            var wholeGroup = groupId != null && all.All(g => MapEditorGroups.GroupOf(g) == groupId);
+            var names = string.Join("\n", all.Take(8).Select(g => "  " + g.name));
+            if (all.Count > 8) names += $"\n  ... and {all.Count - 8} more";
+
+            _details.text =
+                (wholeGroup
+                    ? $"{MapEditorGroups.NameOf(groupId)}   ({all.Count} objects)"
+                    : $"{all.Count} objects selected") +
+                "\n" + names +
+                "\nDrag the yellow grip to move them together; purple shifts depth." +
+                (wholeGroup ? "\nCtrl+G ungroups." : "\nCtrl+G makes them a group.");
+
+            MapEditorUI.FitLabelHeight(_detailsGO);
+            if (resize) _editor.RequestOptionsResize();
+            return;
+        }
+
         var structures = _editor.GetTool<StructureTool>();
         var canSeeThrough = structures?.CanSetSeeThrough(_selected) == true;
         _seeThroughGO?.SetActive(canSeeThrough);
@@ -193,6 +223,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             $"Position   {position.x:0.##}, {position.y:0.##}   (z {position.z:0.###})\n" +
             $"Scale   {Mathf.Abs(scale.x):0.###} x {scale.y:0.###}\n" +
             $"{scripts} script(s), {nested} in children, {renderers} renderer(s)" +
+            (MapEditorGroups.GroupOf(_selected) != null
+                ? $"\nIn {MapEditorGroups.NameOf(MapEditorGroups.GroupOf(_selected))}" : "") +
             (MapEditorProtection.IsProtected(_selected) ? "\nProtected - cannot be deleted."
                 : !MapEditorProtection.CanDelete(_selected)
                     ? "\nOne of the base's own buildings - can be moved, not deleted."
@@ -229,10 +261,12 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
         ("LMB", "Select Object"),
+        ("Shift + LMB", "Add to / remove from selection"),
         ("RMB", "Deselect"),
         ("Ctrl + Drag", "Clone"),
         ("Drag", "Yellow = move, Blue = resize, Purple = depth"),
-        ("Shift + LMB", "Blue Node stretch"),
+        ("Shift + Blue", "Stretch one axis"),
+        ("Ctrl + G", "Group / ungroup selection"),
         ("Del", "Delete selected")
     ];
 
@@ -255,9 +289,14 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             {
                 var world = _editor.MouseWorld();
                 var picked = PickAtMouse();
+                var shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
                 if (picked == null)
-                    _editor.SetStatus($"Nothing at {world.x:0.0}, {world.y:0.0}.");
+                {
+                    if (!shift) _editor.SetStatus($"Nothing at {world.x:0.0}, {world.y:0.0}.");
+                }
+                else if (shift)
+                    ToggleInSelection(picked);
                 else
                     Select(picked);
             }
@@ -271,6 +310,9 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         if (Input.GetKeyDown(KeyCode.Delete))
             DeleteSelected();
+
+        if (RuntimeMapEditor.CtrlHeld && Input.GetKeyDown(KeyCode.G))
+            GroupOrUngroup();
 
         if (_selected != null && Input.GetMouseButton(0) && Time.unscaledTime >= _nextDetailsAt)
         {
@@ -411,23 +453,50 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     private void SyncGizmos()
     {
         if (_selected == null) return;
+        if (!TryUnionBounds(out var bounds)) return;
 
-        MapEditorGizmos.UpdateSelectionBox(_outline, _selected);
+        MapEditorGizmos.SetBox(_outline, bounds, _selected.transform.position.z - 0.05f);
 
         var cam = SceneRefs.Cam;
         if (cam == null) return;
 
         if (_grip != null)
-            _grip.GetComponent<RectTransform>().position =
-                cam.WorldToScreenPoint(MapEditorGizmos.GripPosition(_selected));
+            _grip.GetComponent<RectTransform>().position = cam.WorldToScreenPoint(bounds.center);
 
+        // One object resizes from its corner; several move and shift depth together but do not resize.
         if (_resizeNode != null)
+        {
+            _resizeNode.SetActive(_extra.Count == 0);
             _resizeNode.GetComponent<RectTransform>().position =
-                cam.WorldToScreenPoint(MapEditorGizmos.CornerPosition(_selected));
+                cam.WorldToScreenPoint(new Vector3(bounds.max.x, bounds.max.y, bounds.center.z));
+        }
 
         if (_depthNode != null)
             _depthNode.GetComponent<RectTransform>().position =
-                cam.WorldToScreenPoint(MapEditorGizmos.FarCornerPosition(_selected));
+                cam.WorldToScreenPoint(new Vector3(bounds.min.x, bounds.max.y, bounds.center.z));
+    }
+
+    /// The bounds of everything selected together, which is what the box and the grip frame.
+    private bool TryUnionBounds(out Bounds bounds)
+    {
+        bounds = default;
+        var found = false;
+
+        foreach (var go in AllSelected())
+        {
+            if (go == null || !MapEditorGizmos.TryGetBounds(go, out var own)) continue;
+            if (!found)
+            {
+                bounds = own;
+                found = true;
+            }
+            else
+            {
+                bounds.Encapsulate(own);
+            }
+        }
+
+        return found;
     }
 
     private GameObject PickAtMouse() => PickWorldObject(_editor.MouseWorld());
@@ -527,7 +596,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return false;
     }
 
-    private static bool IsSelectable(GameObject go)
+    internal static bool IsSelectable(GameObject go)
     {
         if (go == null || MapEditorProtection.IsProtected(go)) return false;
         if (IsPickIgnored(go)) return false;
@@ -538,16 +607,18 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return false;
     }
 
-    private static GameObject SelectionRoot(GameObject go)
+    /// <summary>
+    /// The containers a selection never climbs past: the room itself, its custom, scenery and heavy
+    /// groups, and the editor's own content root. Their direct children are the things one can pick,
+    /// which is also what the layer tree lists.
+    /// </summary>
+    internal static HashSet<Transform> SelectionStops()
     {
-        if (go == null) return null;
-
         var room = SceneRefs.Room;
-        var roomRoot = room != null ? room.transform : null;
         var stops = new HashSet<Transform>();
-        if (roomRoot != null) stops.Add(roomRoot);
         if (room != null)
         {
+            stops.Add(room.transform);
             if (room.CustomTransform != null) stops.Add(room.CustomTransform.transform);
             if (room.SceneryTransform != null) stops.Add(room.SceneryTransform.transform);
             if (room.HeavyAssetsTransform != null) stops.Add(room.HeavyAssetsTransform);
@@ -555,6 +626,56 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
         var content = SceneRefs.ContentRoot;
         if (content != null) stops.Add(content);
+        return stops;
+    }
+
+    /// <summary>
+    /// Every object a click could land on, once each: the direct children of the selection stops
+    /// (stepping one level into a base placement region), filtered by IsSelectable and resolved through
+    /// SelectionRoot. The layer tree lists exactly this, and group restore matches against it.
+    /// </summary>
+    internal static List<GameObject> AllSelectableRoots()
+    {
+        var roots = new List<GameObject>();
+        var seen = new HashSet<GameObject>();
+        var stops = SelectionStops();
+        var inBase = RuntimeMapEditor.Context == EditorContext.Base;
+
+        void Consider(Transform candidate)
+        {
+            if (candidate == null || !candidate.gameObject.activeInHierarchy) return;
+            if (!IsSelectable(candidate.gameObject)) return;
+
+            var root = SelectionRoot(candidate.gameObject);
+            if (root != null && seen.Add(root)) roots.Add(root);
+        }
+
+        foreach (var stop in stops)
+        {
+            if (stop == null) continue;
+            for (var i = 0; i < stop.childCount; i++)
+            {
+                var child = stop.GetChild(i);
+                if (stops.Contains(child)) continue;
+
+                if (inBase && IsRegion(child))
+                {
+                    for (var j = 0; j < child.childCount; j++) Consider(child.GetChild(j));
+                    continue;
+                }
+
+                Consider(child);
+            }
+        }
+
+        return roots;
+    }
+
+    internal static GameObject SelectionRoot(GameObject go)
+    {
+        if (go == null) return null;
+
+        var stops = SelectionStops();
 
         var inBase = RuntimeMapEditor.Context == EditorContext.Base;
 
@@ -583,7 +704,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     private const float RegionSize = 9f;
 
-    private static bool IsRegion(Transform parent)
+    internal static bool IsRegion(Transform parent)
     {
         var renderers = parent.GetComponentsInChildren<Renderer>(true);
         if (renderers.Length == 0) return false;
@@ -611,11 +732,59 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         return bounds.size.x > RegionSize || bounds.size.y > RegionSize;
     }
 
-    private void Select(GameObject go)
-    {
-        ClearHighlight();
-        _selected = go;
+    public GameObject Selected => _selected;
 
+    /// Everything selected, primary first. A fresh list each call.
+    public IReadOnlyList<GameObject> Selection => AllSelected();
+
+    public int SelectionCount => AllSelected().Count;
+
+    private List<GameObject> AllSelected()
+    {
+        var list = new List<GameObject>();
+        if (_selected != null) list.Add(_selected);
+        foreach (var go in _extra)
+            if (go != null && go != _selected && !list.Contains(go)) list.Add(go);
+        return list;
+    }
+
+    /// Selection from outside the world - the layer tree - goes through the same path as a click.
+    public void SelectObject(GameObject go) => Select(go);
+
+    /// <summary>
+    /// Selects exactly these, widened to whole groups: picking any member of a group picks the group.
+    /// The first becomes the primary, which is the one resize and the look toggles act on.
+    /// </summary>
+    public void SelectMany(IEnumerable<GameObject> objects)
+    {
+        var wanted = MapEditorGroups.Expand(objects);
+
+        ClearHighlight();
+        _extra.Clear();
+        _selected = wanted.Count > 0 ? wanted[0] : null;
+        for (var i = 1; i < wanted.Count; i++) _extra.Add(wanted[i]);
+
+        AfterSelectionChanged();
+    }
+
+    /// Shift-click: adds an object (and its group) to the selection, or takes it out if it is already in.
+    public void ToggleInSelection(GameObject go)
+    {
+        if (go == null) return;
+
+        var current = AllSelected();
+        var members = MapEditorGroups.Expand([go]);
+
+        if (members.All(current.Contains)) current.RemoveAll(members.Contains);
+        else foreach (var member in members) if (!current.Contains(member)) current.Add(member);
+
+        SelectMany(current);
+    }
+
+    private void Select(GameObject go) => SelectMany(go == null ? [] : [go]);
+
+    private void AfterSelectionChanged()
+    {
         _internalName = _selected == null ? null : ResolveInternalName(_selected);
 
         if (_selected == null)
@@ -626,8 +795,16 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
             return;
         }
 
-        ApplyHighlight(_selected);
-        _editor.SetStatus("Selected: " + _selected.name);
+        var all = AllSelected();
+        foreach (var go in all) ApplyHighlight(go);
+        EnsureGizmos();
+
+        var group = MapEditorGroups.GroupOf(_selected);
+        _editor.SetStatus(all.Count == 1
+            ? "Selected: " + _selected.name
+            : group != null && all.All(g => MapEditorGroups.GroupOf(g) == group)
+                ? $"Selected {MapEditorGroups.NameOf(group)} ({all.Count} objects). Ctrl+G ungroups."
+                : $"Selected {all.Count} objects. Ctrl+G groups them.");
 
         RefreshDetails();
         RefreshPreview();
@@ -654,7 +831,12 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         }
 
         SetHighlightVisible(true);
-        DrawOutline(go);
+    }
+
+    private void EnsureGizmos()
+    {
+        if (_outline == null) DrawOutline();
+        SyncGizmos();
     }
 
     private const float HighlightBlend = 0.45f;
@@ -684,9 +866,9 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
         }
     }
 
-    private void DrawOutline(GameObject go)
+    private void DrawOutline()
     {
-        _outline = MapEditorGizmos.CreateSelectionBox(go, "MapEditor_SelectionOutline");
+        _outline = MapEditorGizmos.CreateBox("MapEditor_SelectionOutline", MapEditorGizmos.BoxColour);
         _grip = CreateHandle("Grip", MapEditorGizmos.GripColour, SelectHandle.Mode.Move, 30f);
         _resizeNode = CreateHandle("Resize", ResizeColour, SelectHandle.Mode.Resize, 24f);
         _depthNode = CreateHandle("Depth", DepthColour, SelectHandle.Mode.Depth, 24f);
@@ -730,51 +912,52 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     // ---- undoable gestures ----------------------------------------------------------------------
 
-    private GameObject _gestureTarget;
-    private Vector3 _gesturePosition;
-    private Vector3 _gestureScale;
+    private readonly List<(GameObject Go, Vector3 Position, Vector3 Scale)> _gesture = [];
 
     public void BeginGesture()
     {
-        _gestureTarget = _selected;
-        if (_selected == null) return;
-
-        _gesturePosition = _selected.transform.position;
-        _gestureScale = _selected.transform.localScale;
+        _gesture.Clear();
+        foreach (var go in AllSelected())
+            _gesture.Add((go, go.transform.position, go.transform.localScale));
     }
 
     public void EndGesture(string label)
     {
-        var target = _gestureTarget;
-        _gestureTarget = null;
-        if (target == null) return;
+        var moved = _gesture
+            .Where(g => g.Go != null &&
+                        (g.Go.transform.position != g.Position || g.Go.transform.localScale != g.Scale))
+            .ToList();
+        _gesture.Clear();
+        if (moved.Count == 0) return;
 
-        var position = _gesturePosition;
-        var scale = _gestureScale;
+        foreach (var g in moved) BaseDelta.NoteMoved(g.Go, g.Position, g.Scale);
 
-        if (target.transform.position == position && target.transform.localScale == scale) return;
-
-        BaseDelta.NoteMoved(target, position, scale);
-
-        _editor.History.Push($"{label} {target.name}", () =>
+        var what = moved.Count == 1 ? moved[0].Go.name : $"{moved.Count} objects";
+        _editor.History.Push($"{label} {what}", () =>
         {
-            if (target == null) return false;
+            var any = false;
+            foreach (var g in moved)
+            {
+                if (g.Go == null) continue;
 
-            var undoneFrom = target.transform.position;
-            var undoneScale = target.transform.localScale;
+                var undoneFrom = g.Go.transform.position;
+                var undoneScale = g.Go.transform.localScale;
 
-            target.transform.position = position;
-            target.transform.localScale = scale;
-            BaseDelta.NoteMoved(target, undoneFrom, undoneScale);
+                g.Go.transform.position = g.Position;
+                g.Go.transform.localScale = g.Scale;
+                BaseDelta.NoteMoved(g.Go, undoneFrom, undoneScale);
+                any = true;
+            }
+
             _editor.KeepCullingSuspended = true;
 
-            if (_selected == target)
+            if (any && _selected != null)
             {
                 RefreshDetails();
                 RefreshPreview();
             }
 
-            return true;
+            return any;
         });
     }
 
@@ -785,8 +968,13 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     public void SetSelectedPosition(Vector3 world)
     {
         if (_selected == null) return;
-        var z = _selected.transform.position.z;
-        _selected.transform.position = new Vector3(world.x, world.y, z);
+
+        // The primary lands where asked; everything else keeps its offset from it.
+        var from = _selected.transform.position;
+        var delta = new Vector3(world.x - from.x, world.y - from.y, 0f);
+
+        foreach (var go in AllSelected())
+            if (go != null) go.transform.position += delta;
 
         _editor.KeepCullingSuspended = true;
         _editor.MarkEdited();
@@ -876,13 +1064,21 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
     {
         if (_selected == null) return;
 
-        var p = _selected.transform.position;
         var z = _depthStartZ + (screenY - _depthStartScreenY) * DepthPerPixel;
-        _selected.transform.position = new Vector3(p.x, p.y, z);
+        var delta = z - _selected.transform.position.z;
+
+        foreach (var go in AllSelected())
+        {
+            if (go == null) continue;
+            var p = go.transform.position;
+            go.transform.position = new Vector3(p.x, p.y, p.z + delta);
+        }
 
         _editor.KeepCullingSuspended = true;
         _editor.MarkEdited();
-        _editor.SetStatus($"{_selected.name} Z: {z:0.###}");
+        _editor.SetStatus(_extra.Count == 0
+            ? $"{_selected.name} Z: {z:0.###}"
+            : $"{_extra.Count + 1} objects, primary Z: {z:0.###}");
     }
 
     private void SetLook(bool? player, bool? fog, bool? wind)
@@ -1000,38 +1196,119 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts
 
     private void DeleteSelected()
     {
-        if (_selected == null)
+        var all = AllSelected();
+        if (all.Count == 0)
         {
             _editor.SetStatus("Nothing selected.");
             return;
         }
 
-        if (MapEditorProtection.IsProtected(_selected))
+        var deleted = 0;
+        var kept = new List<string>();
+        var journalled = false;
+        string lastPath = null;
+
+        foreach (var go in all)
         {
-            _editor.SetStatus($"'{_selected.name}' is protected.", StatusSeverity.Warning);
-            return;
+            if (go == null) continue;
+
+            if (MapEditorProtection.IsProtected(go) || !MapEditorProtection.CanDelete(go))
+            {
+                kept.Add(go.name);
+                continue;
+            }
+
+            lastPath = HierarchyPath(go.transform);
+            journalled |= BaseDelta.NoteRemoved(go);
+            Object.Destroy(go);
+            deleted++;
         }
 
-        if (!MapEditorProtection.CanDelete(_selected))
+        ClearHighlight();
+        _selected = null;
+        _extra.Clear();
+        RefreshDetails();
+        RefreshPreview();
+
+        if (deleted > 0)
         {
-            _editor.SetStatus($"'{_selected.name}' is one of the base's own buildings - it can be " +
-                              "moved, not deleted. Demolish it from the build totem.",
+            SceneRefs.RescanNavigation();
+            _editor.MarkEdited();
+        }
+
+        if (deleted == 0 && kept.Count == 1)
+        {
+            var go = all[0];
+            _editor.SetStatus(MapEditorProtection.IsProtected(go)
+                    ? $"'{kept[0]}' is protected."
+                    : $"'{kept[0]}' is one of the base's own buildings - it can be moved, not deleted. " +
+                      "Demolish it from the build totem.",
                 StatusSeverity.Warning);
             return;
         }
 
-        var path = HierarchyPath(_selected.transform);
+        var summary = deleted == 1 && kept.Count == 0
+            ? "Deleted " + lastPath
+            : $"Deleted {deleted} object(s)";
+        if (kept.Count > 0) summary += $"; {kept.Count} protected one(s) left alone";
+        if (journalled) summary += " - they stay gone once the base is saved";
+        _editor.SetStatus(summary + ".", kept.Count > 0 ? StatusSeverity.Warning : StatusSeverity.Info);
+    }
 
-        var journalled = BaseDelta.NoteRemoved(_selected);
+    // ---- groups ---------------------------------------------------------------------------------
 
-        ClearHighlight();
-        Object.Destroy(_selected);
-        _selected = null;
+    /// <summary>
+    /// Ctrl+G. Two or more selected objects become a group; a selection that is exactly one whole
+    /// group is taken apart again. Members keep their own places in the hierarchy - see CTEditorGroup.
+    /// </summary>
+    private void GroupOrUngroup()
+    {
+        var all = AllSelected();
+        if (all.Count < 2)
+        {
+            _editor.SetStatus("Shift-click two or more objects first, then Ctrl+G groups them.",
+                StatusSeverity.Warning);
+            return;
+        }
 
-        SceneRefs.RescanNavigation();
+        var ids = all.Select(MapEditorGroups.GroupOf).Distinct().ToList();
+        if (ids.Count == 1 && ids[0] != null && MapEditorGroups.Members(ids[0]).Count == all.Count)
+        {
+            var id = ids[0];
+            var name = MapEditorGroups.NameOf(id) ?? "the group";
+            var members = MapEditorGroups.Members(id);
+
+            MapEditorGroups.Dissolve(id);
+            _editor.MarkEdited();
+            _editor.History.Push($"ungroup {name}", () =>
+            {
+                MapEditorGroups.Create(members.Where(m => m != null), name, id);
+                return true;
+            });
+
+            SelectMany(all);
+            _editor.SetStatus($"Ungrouped {name}; the {all.Count} objects stay selected.");
+            return;
+        }
+
+        var created = MapEditorGroups.Create(all);
+        var createdName = MapEditorGroups.NameOf(created);
         _editor.MarkEdited();
-        _editor.SetStatus("Deleted " + path +
-                          (journalled ? " - it stays gone once the base is saved." : ""));
+        _editor.History.Push($"group {createdName}", () =>
+        {
+            MapEditorGroups.Dissolve(created);
+            return true;
+        });
+
+        SelectMany(all);
+        _editor.SetStatus($"Grouped {all.Count} objects as {createdName}. Clicking any of them selects " +
+                          "the whole group; Ctrl+G again ungroups.");
+    }
+
+    public void ContributeTo(CTNodeBlueprint map)
+    {
+        if (map == null) return;
+        map.Groups = MapEditorGroups.Capture();
     }
 
     private static string HierarchyPath(Transform t)

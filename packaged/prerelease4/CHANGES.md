@@ -5,12 +5,21 @@ Everything new since pre-release 3.
 ## Follower skin editor
 
 - Added a follower skin editor on F8, editing the same `FollowerSkins/` folders the mod loads
-- Added a left panel: skin and variant picking, new skins and variants, base skin, animation
-  preview, colour sets, and the list of overridden slots
+- Added a left panel: skin and variant picking, new skins and variants, color set, base skin,
+  animation preview, and the list of overridden slots
+- Added an **Outfit** picker to the preview: the skin is shown under any follower outfit, the same
+  swap the Customize Follower command does; it is only for looking and is never saved with the skin
 - Added a right panel for the selected layer: its slot, the image covering it, hide, placement
-  sliders and its colour
+  sliders and its color
 - Added `skin/variant` naming, so one prompt saves either a new variant or a whole new skin
 - Added live reload: a saved skin can be worn by followers without restarting the game
+- Adding a color set is now an entry at the top of the Color set list, like new skins and new layers
+
+## Player skins
+
+- Custom player spines now show on the player tab of the inventory, in Knucklebones and in
+  Flockade, for both players and on the Flockade result card; those screens draw the lamb with a
+  UI skeleton of their own and used to fall back to the plain lamb
 
 ## Structures
 

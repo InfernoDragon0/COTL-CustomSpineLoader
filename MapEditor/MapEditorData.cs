@@ -27,6 +27,7 @@ public class CTNodeBlueprint
     public List<MapNpcData> Npcs = [];
     public List<MapTriggerData> Triggers = [];
     public List<MapPodiumData> Podiums = [];
+    public List<MapGroupData> Groups = [];
 
     public MapTotemData BuildTotem;
 }

@@ -202,6 +202,9 @@ public class BlueprintLoader
 
         yield return RebuildBuildTotem(bp, structureTool);
 
+        var groups = MapEditorGroups.Restore(bp);
+        if (groups > 0) Plugin.Log.LogInfo($"MapEditor: {groups} editor group(s) restored.");
+
         CustomRoomPatches.Mark(room);
 
         try

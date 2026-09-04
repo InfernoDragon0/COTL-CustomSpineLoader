@@ -1707,6 +1707,16 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         return best;
     }
 
+    public IReadOnlyList<CTMapTrigger> Triggers => _triggers;
+
+    public CTMapTrigger SelectedTrigger => _selected;
+
+    public void SelectTrigger(CTMapTrigger trigger)
+    {
+        if (trigger == null || !_triggers.Contains(trigger)) return;
+        Select(trigger);
+    }
+
     private void Select(CTMapTrigger trigger, bool placed = false)
     {
         if (_selected != null) _selected.SetHighlighted(false);

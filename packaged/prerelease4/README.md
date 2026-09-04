@@ -11,7 +11,10 @@
 The full list is in `CHANGES.md`.
 
 - Added a **follower skin editor** (**F8** in your cult): build a custom follower skin from a base
-  skin, override parts with your own pngs, set colour sets, and watch it animate before saving
+  skin, override parts with your own pngs, set color sets, and watch it animate - in any follower
+  outfit - before saving
+- **Custom player spines now show everywhere the lamb is drawn**: the inventory's player tab,
+  Knucklebones and Flockade, both players and the result card
 - Added **Affected by wind** to the Structure and Select tools: a structure or prop sways with the
   biome's own wind, whole rather than in pieces, and can be see-through at the same time
 - Added **shadows** to custom structures, which used to cast none
@@ -61,11 +64,12 @@ Press **F8** anywhere in the game (not on the title screen). Skins live under `F
 one folder per skin with a folder per variant (`base`, `variant1`...), each holding a
 `config.json` and its pngs — the same files the mod already loads.
 
-The **left panel** picks which skin and variant you are editing (and starts new ones), the base
-skin every layer sits on (Cat, Dog...), the animation the preview plays, the colour sets, and the
-list of layers: pick a slot to override it, then click a layer to work on it. The **right panel**
-is that layer — its slot, the image covering it, whether it is hidden, its placement, and its
-colour for the set you are editing.
+The **left panel** picks which skin and variant you are editing (and starts new ones), the color
+set, the base skin every layer sits on (Cat, Dog...), an outfit for the preview to wear (just for
+looking - it is not part of the skin), the animation the preview plays, and the list of layers:
+pick a slot to override it, then click a layer to work on it. The **right panel** is that layer —
+its slot, the image covering it, whether it is hidden, its placement, and its color for the set
+you are editing.
 
 Names are written as `skin/variant`, so one prompt makes either a new variant of a skin you have
 or a whole new skin. **Ctrl+S** saves, and saving makes the skin wearable straight away — it
