@@ -14,7 +14,13 @@ public static class RoomSnapshot
 {
     private static Dictionary<string, string> _catalogByName;
 
-    public static void Collect(CTNodeBlueprint map, RuntimeMapEditor editor)
+    /// <summary>
+    /// Reads the room's scenery into the blueprint. Every record gets the object's editor id; an
+    /// object that has none yet gets one derived from what it is and where it stands, so two
+    /// machines that generated the same room name its pieces the same way without talking.
+    /// <paramref name="quiet"/> is for the repeated collects the multiplayer diff makes.
+    /// </summary>
+    public static void Collect(CTNodeBlueprint map, RuntimeMapEditor editor, bool quiet = false)
     {
         map.Props.Clear();
 
@@ -29,7 +35,8 @@ public static class RoomSnapshot
         var kept = 0;
         var skipped = 0;
 
-        void Sweep(Transform parent, string parentTag, bool runtimeOnly, int parentIslandIndex = -1)
+        void Sweep(Transform parent, string parentTag, bool runtimeOnly, int parentIslandIndex = -1,
+            string parentIslandId = "")
         {
             if (parent == null) return;
 
@@ -41,8 +48,11 @@ public static class RoomSnapshot
 
                 if (TryResolveIsland(child.gameObject, room, out var islandKey))
                 {
+                    var islandId = Net.EditorIds.Of(child.gameObject,
+                        Net.EditorIds.Seed("island", islandKey, child.position));
                     map.Props.Add(new MapPropData
                     {
+                        Id = islandId,
                         Key = islandKey,
                         IsIslandRef = true,
                         Parent = "Island",
@@ -53,16 +63,19 @@ public static class RoomSnapshot
                     });
                     resolved++;
 
-                    Sweep(child, parentTag, runtimeOnly: true, parentIslandIndex: map.Props.Count - 1);
+                    Sweep(child, parentTag, runtimeOnly: true, parentIslandIndex: map.Props.Count - 1,
+                        parentIslandId: islandId);
                 }
                 else if (TryResolve(child.gameObject, prefabPaths, out var key, out var isAddressable))
                 {
                     map.Props.Add(new MapPropData
                     {
+                        Id = Net.EditorIds.Of(child.gameObject, Net.EditorIds.Seed("prop", key, child.position)),
                         Key = key,
                         IsAddressable = isAddressable,
                         Parent = parentTag,
                         ParentIslandIndex = parentIslandIndex,
+                        ParentIslandId = parentIslandId ?? "",
                         Position = MapEditorSerialization.V3(child.position),
                         RotationZ = child.eulerAngles.z,
                         RotationY = child.eulerAngles.y,
@@ -70,12 +83,13 @@ public static class RoomSnapshot
                     });
                     resolved++;
 
-                    Sweep(child, parentTag, runtimeOnly: true, parentIslandIndex);
+                    Sweep(child, parentTag, runtimeOnly: true, parentIslandIndex, parentIslandId);
                 }
                 else if (!runtimeOnly && !child.name.EndsWith("(Clone)"))
                 {
                     map.KeptAuthored.Add(new MapKeptData
                     {
+                        Id = Net.EditorIds.Of(child.gameObject, Net.EditorIds.Seed("kept", child.name, child.position)),
                         Parent = parentTag,
                         Name = child.name,
                         Position = MapEditorSerialization.V3(child.position),
@@ -88,7 +102,8 @@ public static class RoomSnapshot
                 else
                 {
                     skipped++;
-                    Plugin.Log.LogInfo($"MapEditor snapshot: could not resolve '{HierarchyPath(child)}', not saved.");
+                    if (!quiet)
+                        Plugin.Log.LogInfo($"MapEditor snapshot: could not resolve '{HierarchyPath(child)}', not saved.");
                     Sweep(child, parentTag, runtimeOnly: true);
                 }
             }
@@ -98,15 +113,16 @@ public static class RoomSnapshot
         Sweep(room.HeavyAssetsTransform, "Heavy", false);
         Sweep(room.CustomTransform != null ? room.CustomTransform.transform : null, "Custom", false);
         Sweep(room.RoomTransform != null ? room.RoomTransform.transform : null, "Island", false);
-        SweepRoomRoot(room, editor, map, prefabPaths, ref resolved, ref kept, ref skipped);
+        SweepRoomRoot(room, editor, map, prefabPaths, quiet, ref resolved, ref kept, ref skipped);
 
-        Plugin.Log.LogInfo($"MapEditor snapshot: {resolved} prop(s) resolved, " +
-                           $"{kept} authored object(s) marked kept, {skipped} skipped.");
+        if (!quiet)
+            Plugin.Log.LogInfo($"MapEditor snapshot: {resolved} prop(s) resolved, " +
+                               $"{kept} authored object(s) marked kept, {skipped} skipped.");
     }
 
     private static void SweepRoomRoot(GenerateRoom room, RuntimeMapEditor editor, CTNodeBlueprint map,
-        Dictionary<GameObject, (string key, bool addressable)> prefabPaths, ref int resolved, ref int kept,
-        ref int skipped)
+        Dictionary<GameObject, (string key, bool addressable)> prefabPaths, bool quiet, ref int resolved,
+        ref int kept, ref int skipped)
     {
         var containers = new HashSet<Transform>();
         if (room.SceneryTransform != null) containers.Add(room.SceneryTransform.transform);
@@ -124,12 +140,13 @@ public static class RoomSnapshot
             {
                 map.Props.Add(new MapPropData
                 {
+                    Id = Net.EditorIds.Of(child.gameObject, Net.EditorIds.Seed("prop", key, child.position)),
                     Key = key,
                     IsAddressable = isAddressable,
                     Parent = "Room",
                     Position = MapEditorSerialization.V3(child.position),
                     RotationZ = child.eulerAngles.z,
-                        RotationY = child.eulerAngles.y,
+                    RotationY = child.eulerAngles.y,
                     Scale = MapEditorSerialization.V3(child.lossyScale)
                 });
                 resolved++;
@@ -138,11 +155,12 @@ public static class RoomSnapshot
             {
                 map.KeptAuthored.Add(new MapKeptData
                 {
+                    Id = Net.EditorIds.Of(child.gameObject, Net.EditorIds.Seed("kept", child.name, child.position)),
                     Parent = "Room",
                     Name = child.name,
                     Position = MapEditorSerialization.V3(child.position),
                     RotationZ = child.eulerAngles.z,
-                        RotationY = child.eulerAngles.y,
+                    RotationY = child.eulerAngles.y,
                     Scale = MapEditorSerialization.V3(child.lossyScale)
                 });
                 kept++;
@@ -150,7 +168,8 @@ public static class RoomSnapshot
             else
             {
                 skipped++;
-                Plugin.Log.LogInfo($"MapEditor snapshot: could not resolve '{HierarchyPath(child)}', not saved.");
+                if (!quiet)
+                    Plugin.Log.LogInfo($"MapEditor snapshot: could not resolve '{HierarchyPath(child)}', not saved.");
             }
         }
     }
@@ -169,6 +188,8 @@ public static class RoomSnapshot
         if (go.GetComponent<UnitObject>() != null) return true;
 
         if (go.GetComponentInChildren<CTMapTrigger>(true) != null) return true;
+
+        if (go.GetComponentInChildren<CTWhiteboardStroke>(true) != null) return true;
 
         if (editor != null)
         {

@@ -61,7 +61,7 @@ public class CTBaseDelta
 
 public static class BaseDelta
 {
-    private const string RootFolder = "CustomBaseMaps";
+    internal const string RootFolder = "CustomBaseMaps";
 
     private const float MatchRadius = 0.5f;
 
@@ -77,6 +77,26 @@ public static class BaseDelta
     public static CTNodeBlueprint Content => Current().Content;
 
     public static bool IsApplying { get; private set; }
+
+    /// The multiplayer applier borrows the loader's ownership while it writes a peer's changes.
+    internal static void SetApplying(bool applying) => IsApplying = applying;
+
+    /// The file as it would be written now: the in-memory journal plus the reshaped terrain.
+    internal static CTBaseDelta Snapshot()
+    {
+        var file = Current();
+        CollectTouchedShapes(file);
+        return file;
+    }
+
+    /// The identity of a journal entry: the hierarchy path when it was recorded, else name and place.
+    internal static string RefId(BaseVanillaRef entry)
+    {
+        if (entry == null) return "";
+        if (!string.IsNullOrEmpty(entry.Path)) return Net.EditorIds.Deterministic("path|" + entry.Path);
+        var at = MapEditorSerialization.ToVector3(entry.OriginalPosition);
+        return Net.EditorIds.Deterministic(Net.EditorIds.Seed("ref", entry.Name, at));
+    }
 
     private static CTBaseDelta Current()
     {
@@ -94,6 +114,7 @@ public static class BaseDelta
         file.ModGroundStructures.Count == 0 && file.EditedShapes.Count == 0 &&
         file.Content.Shapes.Count == 0 && file.Content.Structures.Count == 0 &&
         file.Content.Npcs.Count == 0 && file.Content.Triggers.Count == 0 &&
+        (file.Content.Whiteboard == null || file.Content.Whiteboard.Count == 0) &&
         string.IsNullOrEmpty(file.Content.MusicEvent) &&
         (file.Content.Lighting == null || !file.Content.Lighting.Enabled);
 
@@ -232,6 +253,7 @@ public static class BaseDelta
         if (IsEmpty(file))
         {
             BaseGround.RememberVanillaGround();
+            Net.EditorNet.RoomContentReady();
             yield break;
         }
 
@@ -257,6 +279,8 @@ public static class BaseDelta
         IsApplying = false;
 
         Plugin.Log.LogInfo($"Base editor: slot {file.Slot} applied - {string.Join(", ", report)}.");
+
+        Net.EditorNet.RoomContentReady();
     }
 
     private static IEnumerator ApplyContent(RuntimeMapEditor editor, CTBaseDelta file, List<string> report)
@@ -330,7 +354,9 @@ public static class BaseDelta
         foreach (var shape in file.Content.Shapes)
         {
             var ctrl = shapeTool?.RebuildShape(shape);
-            if (ctrl != null) rebuilt.Add(ctrl);
+            if (ctrl == null) continue;
+            rebuilt.Add(ctrl);
+            Net.EditorIds.Adopt(ctrl.gameObject, shape.Id);
         }
 
         yield return null;
@@ -351,14 +377,17 @@ public static class BaseDelta
                     continue;
                 }
 
+                var before = structureTool.LastPlacedInstance;
                 yield return structureTool.PlaceAt(type, s.IsCustom,
                     MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
                     deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough,
                     wind: s.Wind);
 
                 var instance = structureTool.LastPlacedInstance;
-                if (instance != null && s.Scale != null && s.Scale.X != 0f)
+                if (instance == null || ReferenceEquals(instance, before)) continue;
+                if (s.Scale != null && s.Scale.X != 0f)
                     instance.transform.localScale = MapEditorSerialization.ToVector3(s.Scale);
+                Net.EditorIds.Adopt(instance, s.Id);
             }
             report.Add($"{file.Content.Structures.Count} structure(s)");
         }
@@ -366,8 +395,13 @@ public static class BaseDelta
         if (npcTool != null)
         {
             foreach (var n in file.Content.Npcs)
+            {
+                var before = npcTool.LastPlacedInstance;
                 yield return npcTool.SpawnNpcRoutine(n.Key, MapEditorSerialization.ToVector3(n.Position),
                     n.IsCustom);
+                var instance = npcTool.LastPlacedInstance;
+                if (instance != null && !ReferenceEquals(instance, before)) Net.EditorIds.Adopt(instance, n.Id);
+            }
             report.Add($"{file.Content.Npcs.Count} npc(s)");
         }
 
@@ -378,6 +412,13 @@ public static class BaseDelta
                     t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl,
                     t.Blocking);
             report.Add($"{file.Content.Triggers.Count} trigger(s)");
+        }
+
+        var whiteboardTool = editor.GetTool<WhiteboardTool>();
+        if (whiteboardTool != null && file.Content.Whiteboard != null && file.Content.Whiteboard.Count > 0)
+        {
+            foreach (var stroke in file.Content.Whiteboard) whiteboardTool.ApplyRecord(stroke);
+            report.Add($"{file.Content.Whiteboard.Count} whiteboard stroke(s)");
         }
 
         // ---- the player's own buildings ---------------------------------------------------------
@@ -1087,6 +1128,187 @@ public static class BaseDelta
             Plugin.Log.LogWarning("Base editor: one of our buildings could not be unregistered: " +
                                   e.Message);
         }
+    }
+
+    // ---- a peer's journal entries -----------------------------------------------------------------
+    //
+    // When the other player removes, moves or reshapes one of the base's own pieces, their journal
+    // entry arrives here whole. It is applied to the scene the way the loader applies the file, and
+    // written into this machine's journal so both copies of the file say the same thing.
+
+    internal static void ApplyRemovedEntry(BaseVanillaRef entry)
+    {
+        if (entry == null) return;
+        var file = Current();
+
+        file.Removed.RemoveAll(existing => Same(existing, entry));
+        file.Moved.RemoveAll(existing => Same(existing, entry));
+        file.Removed.Add(entry);
+
+        var go = Find(BuildSceneIndex(), entry);
+        if (go == null)
+        {
+            Plugin.Log.LogInfo($"Base editor: '{entry.Name}' is already gone here.");
+            return;
+        }
+
+        if (IsMine(go)) RetireBrain(go);
+        UnityEngine.Object.Destroy(go);
+    }
+
+    internal static void UnapplyRemovedEntry(string refId)
+    {
+        var file = Current();
+        var removed = file.Removed.RemoveAll(existing => RefId(existing) == refId);
+        if (removed > 0)
+            Plugin.Log.LogInfo("Base editor: a removal was taken back by the other player; the piece " +
+                               "returns when the base is next loaded.");
+    }
+
+    internal static void ApplyMovedEntry(BaseMovedVanilla entry)
+    {
+        if (entry == null) return;
+        var file = Current();
+
+        var existing = file.Moved.Find(m => Same(m, entry));
+        if (existing != null)
+        {
+            existing.Path = entry.Path;
+            existing.NewPosition = entry.NewPosition;
+            existing.Scale = entry.Scale;
+        }
+        else
+        {
+            file.Moved.Add(entry);
+        }
+
+        var index = BuildSceneIndex();
+        var go = Find(index, entry);
+        if (go == null)
+        {
+            // It may already stand where the entry says it moved to.
+            var probe = new BaseVanillaRef { Name = entry.Name, Key = entry.Key, OriginalPosition = entry.NewPosition };
+            go = Find(index, probe);
+        }
+        if (go == null)
+        {
+            Plugin.Log.LogInfo($"Base editor: nothing called '{entry.Name}' to move here.");
+            return;
+        }
+
+        go.transform.position = MapEditorSerialization.ToVector3(entry.NewPosition);
+        if (entry.Scale != null && entry.Scale.X != 0f)
+            go.transform.localScale = MapEditorSerialization.ToVector3(entry.Scale);
+    }
+
+    internal static void UnapplyMovedEntry(string refId)
+    {
+        var file = Current();
+        var entry = file.Moved.Find(m => RefId(m) == refId);
+        if (entry == null) return;
+
+        file.Moved.Remove(entry);
+
+        var index = BuildSceneIndex();
+        var go = Find(index, new BaseVanillaRef
+            { Name = entry.Name, Key = entry.Key, Path = entry.Path, OriginalPosition = entry.NewPosition }) ??
+                 Find(index, entry);
+        if (go == null) return;
+
+        go.transform.position = MapEditorSerialization.ToVector3(entry.OriginalPosition);
+    }
+
+    internal static void ApplyEditedShapeEntry(BaseEditedShape entry, ShapeTool shapeTool)
+    {
+        if (entry?.Shape == null || shapeTool == null) return;
+        var file = Current();
+
+        var record = file.EditedShapes.Find(existing => Same(existing, entry));
+        if (record == null)
+        {
+            record = new BaseEditedShape { Name = entry.Name, Key = entry.Key, OriginalPosition = entry.OriginalPosition };
+            file.EditedShapes.Add(record);
+        }
+        record.Path = entry.Path;
+        record.Shape = entry.Shape;
+
+        var go = Find(BuildSceneIndex(), entry);
+        var ctrl = go != null ? go.GetComponent<UnityEngine.U2D.SpriteShapeController>() : null;
+        if (ctrl == null)
+        {
+            Plugin.Log.LogInfo($"Base editor: the terrain called '{entry.Name}' is not here to reshape.");
+            return;
+        }
+
+        ctrl.transform.position = MapEditorSerialization.ToVector3(entry.Shape.Position);
+        if (!shapeTool.ApplyShapeData(ctrl, entry.Shape)) return;
+
+        BaseGround.RegisterReshapedGround(ctrl);
+        _touchedShapes[ctrl] = new BaseVanillaRef
+            { Name = entry.Name, Key = entry.Key, Path = entry.Path, OriginalPosition = entry.OriginalPosition };
+
+        try
+        {
+            shapeTool.MergeCollisionIntoRoom(ctrl);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("Base editor: reshaped terrain could not be merged into the room's " +
+                                  "collision: " + e.Message);
+        }
+    }
+
+    internal static void UnapplyEditedShapeEntry(string refId)
+    {
+        var file = Current();
+        var entry = file.EditedShapes.Find(existing => RefId(existing) == refId);
+        if (entry == null) return;
+
+        file.EditedShapes.Remove(entry);
+        foreach (var pair in _touchedShapes)
+        {
+            if (RefId(pair.Value) != refId) continue;
+            _touchedShapes.Remove(pair.Key);
+            break;
+        }
+        Plugin.Log.LogInfo("Base editor: a terrain edit was taken back by the other player; the original " +
+                           "shape returns when the base is next loaded.");
+    }
+
+    internal static void ApplyStructureMoveEntry(BaseMovedStructure entry)
+    {
+        if (entry == null) return;
+        var file = Current();
+
+        var brain = FindBrain(entry);
+        if (brain?.Data == null)
+        {
+            Plugin.Log.LogInfo($"Base editor: the {entry.TypeName} the other player moved is not in this base.");
+            return;
+        }
+
+        var existing = file.MovedStructures.Find(m => m.StructureId == entry.StructureId);
+        if (existing != null) existing.NewPosition = entry.NewPosition;
+        else file.MovedStructures.Add(entry);
+
+        var to = MapEditorSerialization.ToVector3(entry.NewPosition);
+        if (!MoveStructure(brain, to)) return;
+
+        SaveMask.Register(brain.Data, MapEditorSerialization.ToVector3(entry.OriginalPosition),
+            new Vector2Int(entry.OriginalGridX, entry.OriginalGridY));
+    }
+
+    internal static void UnapplyStructureMoveEntry(string id)
+    {
+        var file = Current();
+        var entry = file.MovedStructures.Find(m => m.StructureId.ToString(System.Globalization.CultureInfo.InvariantCulture) == id);
+        if (entry == null) return;
+
+        file.MovedStructures.Remove(entry);
+
+        var brain = FindBrain(entry);
+        if (brain?.Data == null) return;
+        MoveStructure(brain, MapEditorSerialization.ToVector3(entry.OriginalPosition));
     }
 
     // ---- the base's own terrain -------------------------------------------------------------------

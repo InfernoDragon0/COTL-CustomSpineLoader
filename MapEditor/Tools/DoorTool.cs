@@ -9,9 +9,27 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
+public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts, Net.IMapEditorLivePreview
 {
     public string Name => "Doors";
+
+    // ---- multiplayer -------------------------------------------------------------------------
+
+    public bool LiveActive => _dragging != null;
+
+    public IEnumerable<GameObject> LiveObjects
+    {
+        get
+        {
+            if (_dragging != null) yield return _dragging.gameObject;
+        }
+    }
+
+    /// Doors are named by direction on both machines; that is their identity for presence too.
+    private static void NameForPresence(Door door)
+    {
+        if (door != null) Net.EditorIds.Adopt(door.gameObject, "door-" + door.direction);
+    }
 
     private readonly RuntimeMapEditor _editor;
 
@@ -662,6 +680,13 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
     {
         if (door == null) return;
 
+        NameForPresence(door);
+        if (Net.EditorPresence.LockedByPeer(door.gameObject))
+        {
+            _editor.SetStatus(Net.EditorPresence.LockMessage, StatusSeverity.Warning);
+            return;
+        }
+
         _dragging = door;
         _selected = door;
         _dragOffset = door.transform.position - pointerWorld;
@@ -713,12 +738,21 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public void SelectDoor(Door door)
     {
+        NameForPresence(door);
+        if (door != null && door != _selected && Net.EditorPresence.LockedByPeer(door.gameObject))
+        {
+            _editor.SetStatus(Net.EditorPresence.LockMessage, StatusSeverity.Warning);
+            return;
+        }
+
         _selected = door;
         if (door != null)
             _editor.SetStatus($"Selected {door.direction} door ({door.ConnectionType}).");
     }
 
     public bool IsSelected(Door door) => ReferenceEquals(door, _selected);
+
+    internal Door SelectedDoor => _selected;
 
     public void ContributeTo(CTNodeBlueprint map)
     {
@@ -728,6 +762,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         foreach (var door in _knownDoors)
         {
             if (!IsDoorPresent(door)) continue;
+            NameForPresence(door);
             map.Doors.Add(new MapDoorData
             {
                 Direction = door.direction.ToString(),

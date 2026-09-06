@@ -252,6 +252,14 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
     public void OnExit() { }
     public void OnUpdate() { }
 
+    /// The blueprint's lighting or weather changed under the panel (a peer edited it).
+    internal void RefreshFromMap()
+    {
+        if (!_built) return;
+        SyncSliders();
+        SyncWeather();
+    }
+
     private void Touch()
     {
         if (!_built) return;

@@ -90,6 +90,8 @@ public static class BaseSession
         SceneRefs.RoomOverride = null;
         SceneRefs.ContentRootOverride = null;
 
+        Net.EditorNet.RoomChanged();
+
         if (scene.name != BaseScene) return;
 
         BaseDelta.OnArrived();

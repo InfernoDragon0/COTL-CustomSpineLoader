@@ -64,6 +64,9 @@ public static class LevelPlayback
         if (level == null || editor == null) return "No level to play.";
         if (CTLevelDungeon.Instance == null) return "CTLevelDungeon is not registered.";
 
+        var held = Net.EditorNet.WhyNotWorldChange();
+        if (held != null) return held;
+
         var resolved = Resolve(level, out var error);
         if (resolved == null) return error;
 
@@ -81,6 +84,7 @@ public static class LevelPlayback
 
         Plugin.Log.LogInfo($"MapEditor: level '{level.LevelName}' started - rooms: {string.Join(", ", resolved)}. " +
                            "Entering CTLevelDungeon.");
+        Net.EditorNet.LevelChanged();
 
         editor.ExitForPlayback();
         try
@@ -146,6 +150,9 @@ public static class LevelPlayback
     {
         if (level == null) return "No level bound to this node.";
 
+        var held = Net.EditorNet.WhyNotWorldChange();
+        if (held != null) return held;
+
         var resolved = Resolve(level, out var error);
         if (resolved == null) return error;
 
@@ -161,15 +168,18 @@ public static class LevelPlayback
 
         Plugin.Log.LogInfo($"MapEditor: level '{level.LevelName}' bound to a dungeon-map node - " +
                            $"rooms: {string.Join(", ", resolved)}.");
+        Net.EditorNet.LevelChanged();
         return null;
     }
 
     public static void Stop()
     {
+        var was = Active;
         if (Active)
             Plugin.Log.LogInfo($"MapEditor: level playback of '{_level.LevelName}' ended, " +
                                $"stopped by {Caller()}.");
         Active = false;
+        FromPeer = false;
         SuppressVanillaContent = false;
         _level = null;
         _resolvedRooms = null;
@@ -182,6 +192,121 @@ public static class LevelPlayback
 
         Tools.LightingTool.ClearOverride();
         Tools.LightingTool.ForgetRoomLighting();
+
+        if (was) Net.EditorNet.LevelChanged();
+    }
+
+    // ---- multiplayer -----------------------------------------------------------------------------
+    //
+    // The guest never starts a level; the host decides where the party goes. But the guest's own
+    // generator must build the same floor the host built: an authored layout comes from the level
+    // file, not the seed, and the blueprint each slot plays was drawn at random on the host. So the
+    // host describes its playback over the editor link, the guest keeps it armed, and the moment its
+    // BiomeGenerator wakes up for the floor the host led it into, the same state is adopted here -
+    // then every hook below behaves exactly as on the host.
+
+    private static CTLevelBlueprint _peerLevel;
+    private static List<string> _peerRooms;
+    private static float _peerArmedAt = -1f;
+
+    /// True while the running level was taken over from the host rather than started here.
+    public static bool FromPeer { get; private set; }
+
+    internal static Net.LevelMsg DescribeForPeer() => new()
+    {
+        Active = Active,
+        LevelName = _level != null ? _level.LevelName ?? "" : "",
+        Rooms = _resolvedRooms != null ? new List<string>(_resolvedRooms) : []
+    };
+
+    internal static void OnPeerLevel(Net.LevelMsg msg)
+    {
+        if (msg == null) return;
+
+        if (!msg.Active)
+        {
+            ForgetPeer();
+            if (FromPeer && Active)
+            {
+                Plugin.Log.LogInfo($"EditorNet: {Net.EditorNet.PeerName} ended the level; ending ours.");
+                Stop();
+            }
+            return;
+        }
+
+        var level = CTLevelSerialization.LoadByName(msg.LevelName);
+        if (level == null)
+        {
+            Plugin.Log.LogWarning($"EditorNet: {Net.EditorNet.PeerName} is playing level '{msg.LevelName}', which is not " +
+                                  "saved on this machine; the next floor will be a plain dungeon.");
+            ForgetPeer();
+            return;
+        }
+
+        _peerLevel = level;
+        _peerRooms = msg.Rooms != null ? new List<string>(msg.Rooms) : [];
+        _peerArmedAt = Time.unscaledTime;
+        Plugin.Log.LogInfo($"EditorNet: {Net.EditorNet.PeerName} is playing level '{level.LevelName}' " +
+                           $"({_peerRooms.Count} rooms); armed for the next floor.");
+    }
+
+    /// <summary>
+    /// Called first thing when a BiomeGenerator wakes up. If the host told us about a level, this
+    /// floor is it: the same level and resolved rooms become ours and the generator is pointed at the
+    /// level dungeon, exactly as if Start had run here.
+    /// </summary>
+    internal static void ArmFromPeer()
+    {
+        if (_peerLevel == null) return;
+
+        var level = _peerLevel;
+        var rooms = _peerRooms;
+        var age = Time.unscaledTime - _peerArmedAt;
+        ForgetPeer();
+
+        if (age > 600f)
+        {
+            Plugin.Log.LogInfo($"EditorNet: the host's level '{level.LevelName}' was announced {age:0} s ago; too old, ignored.");
+            return;
+        }
+
+        if (CTLevelDungeon.Instance == null) return;
+
+        if (rooms == null || rooms.Count != level.Rooms.Count)
+        {
+            Plugin.Log.LogWarning($"EditorNet: the host sent {rooms?.Count ?? 0} room(s) for a level of {level.Rooms.Count}; " +
+                                  "resolving here instead, so room contents may differ.");
+            rooms = Resolve(level, out var error);
+            if (rooms == null)
+            {
+                Plugin.Log.LogWarning("EditorNet: could not resolve the host's level here: " + error);
+                return;
+            }
+        }
+
+        if (Active) Stop();
+
+        _level = level;
+        _resolvedRooms = rooms;
+        _roomSlots.Clear();
+        _normalCursor = 0;
+        _applyToken++;
+        _pendingApply = null;
+        Active = true;
+        FromPeer = true;
+
+        CTLevelDungeon.Instance.Level = level;
+        CustomDungeonManager.EnteringCustomDungeon = CTLevelDungeon.Instance.Location;
+
+        Plugin.Log.LogInfo($"EditorNet: following {Net.EditorNet.PeerName} into level '{level.LevelName}' - " +
+                           $"rooms: {string.Join(", ", rooms)}.");
+    }
+
+    internal static void ForgetPeer()
+    {
+        _peerLevel = null;
+        _peerRooms = null;
+        _peerArmedAt = -1f;
     }
 
     private static string Caller()

@@ -373,7 +373,7 @@ public class MapEditorLayerPanel
     }
 
     /// Asks for a fresh read of the room at the next Tick, whatever the stamp says.
-    private void Invalidate()
+    internal void Invalidate()
     {
         _signature = null;
         _forceScan = true;
@@ -798,7 +798,13 @@ public class MapEditorLayerPanel
         view.Rect.offsetMin = new Vector2(PadSide, top - RowHeight);
         view.Rect.offsetMax = new Vector2(-PadSide, top);
 
-        view.Label.text = row.Text;
+        // The other player's selection wears its own colour here too, as a dot after the name.
+        var peerHeld = (row.Kind == RowKind.Item && row.Go != null && Net.EditorPresence.IsPeerSelected(row.Go)) ||
+                       (row.Kind == RowKind.Trigger && row.Trigger != null &&
+                        Net.EditorPresence.IsPeerSelectedId(row.Trigger.Id));
+        view.Label.text = peerHeld
+            ? row.Text + " <color=" + Net.EditorPresence.PeerColourTag + ">●</color>"
+            : row.Text;
         view.LabelRect.offsetMin = new Vector2(8f + row.Indent, 0f);
         view.Label.color = row.Kind == RowKind.Empty ? new Color(1f, 1f, 1f, 0.6f) : Color.white;
 

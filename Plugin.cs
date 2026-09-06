@@ -56,6 +56,9 @@ namespace CustomSpineLoader
         public static ConfigEntry<bool> MapEditorVanillaWidgets { get; set; }
         public static ConfigEntry<bool> MapEditorFullWeather { get; set; }
 
+        /// Verbose multiplayer editor logging: every change sent and applied, by entry key.
+        public static ConfigEntry<bool> EditorNetVerbose { get; set; }
+
         public static ConfigEntry<bool> MainMenuEnabled { get; set; }
         public static ConfigEntry<string> MainMenuPreset { get; set; }
 
@@ -180,6 +183,9 @@ namespace CustomSpineLoader
                 "MainMenu", "Preset", "",
                 "Which saved preset the title screen wears, by folder name. Empty is the game's own menu; the editor writes this when a preset is made active.");
 
+            EditorNetVerbose = Config.Bind("MapEditor", "NetVerbose", false,
+                "Log every multiplayer editor change sent and applied, with its entry keys, and every reconcile decision. Off keeps the log readable; on is for tracking a desync between two machines.");
+
             for (var i = 0; i < FleeceTransmog.Length; i++)
                 FleeceTransmog[i] = Config.Bind("Fleece", $"FleeceTransmogP{i + 1}",
                     FleeceCyclingEnabled.Value,
@@ -194,6 +200,8 @@ namespace CustomSpineLoader
             SceneManager.sceneLoaded += OnSceneLoaded;
 
             MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.LevelPlayback.NoteBiomeRoomChanged;
+
+            MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.Net.EditorNet.OnBiomeRoomChanged;
 
             MMBiomeGeneration.BiomeGenerator.OnBiomeChangeRoom += MapEditor.Tools.LightingTool.OnBiomeRoomChanged;
 
@@ -262,6 +270,19 @@ namespace CustomSpineLoader
 
             SpineMemory.Watch();
 
+            try
+            {
+                MapEditor.Net.EditorNet.Tick();
+            }
+            catch (System.Exception e)
+            {
+                if (Time.unscaledTime >= _nextEditorNetErrorAt)
+                {
+                    _nextEditorNetErrorAt = Time.unscaledTime + 5f;
+                    Log.LogError("EditorNet: tick failed: " + e);
+                }
+            }
+
             if (Input.GetKeyDown(KeyCode.F7))
             {
                 if (cultTweakerPanel != null && !MenuEditorOpen && !SkinEditorOpen) cultTweakerPanel.Toggle();
@@ -287,7 +308,7 @@ namespace CustomSpineLoader
                 }
                 else
                 {
-                    var why = WhyNotTestDungeon();
+                    var why = MapEditor.Net.EditorNet.WhyNotWorldChange() ?? WhyNotTestDungeon();
                     if (why != null) Log.LogInfo("F5: " + why);
                     else
                     {
@@ -315,6 +336,8 @@ namespace CustomSpineLoader
                 RoomEditor.ToggleEditor();
             }
         }
+        private float _nextEditorNetErrorAt;
+
         private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
         {
             if (!TransmogOn(playerID))

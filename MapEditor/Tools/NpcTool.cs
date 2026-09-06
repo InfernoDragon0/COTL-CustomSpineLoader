@@ -800,6 +800,18 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         return removed;
     }
 
+    /// Takes a placed NPC out of the room and out of the books; false if it was not ours.
+    internal bool RemoveTracked(GameObject go)
+    {
+        if (go == null) return false;
+        var index = _placed.FindIndex(p => p.Instance == go);
+        if (index < 0) return false;
+
+        _placed.RemoveAt(index);
+        UnityEngine.Object.Destroy(go);
+        return true;
+    }
+
     public GameObject LastPlacedInstance =>
         _placed.Count > 0 ? _placed[_placed.Count - 1].Instance : null;
 
@@ -811,6 +823,7 @@ public class NpcTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
             if (placed.Instance == null) continue;
             map.Npcs.Add(new MapNpcData
             {
+                Id = Net.EditorIds.Of(placed.Instance),
                 Key = placed.Key,
                 IsCustom = placed.IsCustom,
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),

@@ -346,6 +346,43 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public void AdoptTotem(GameObject totem) => _placedTotem = totem;
 
+    internal GameObject PlacedTotem => _placedTotem;
+
+    internal void RemoveTotem()
+    {
+        if (_placedTotem != null) Object.Destroy(_placedTotem);
+        _placedTotem = null;
+        HubBuildTotem.Forget();
+    }
+
+    /// Takes a placed structure or prop out of the room and out of the books; false if it was not ours.
+    internal bool RemoveTracked(GameObject go)
+    {
+        if (go == null) return false;
+
+        var index = IndexOfPlaced(go);
+        if (index >= 0)
+        {
+            _placed.RemoveAt(index);
+            BaseDelta.RetireBrain(go);
+            Object.Destroy(go);
+            return true;
+        }
+
+        if (!_placedProps.Remove(go)) return false;
+        Object.Destroy(go);
+        return true;
+    }
+
+    /// A peer moved or turned a placed structure; the books follow the object.
+    internal void UpdatePlaced(GameObject go, float rotation, bool flipX)
+    {
+        var index = IndexOfPlaced(go);
+        if (index < 0) return;
+        _placed[index].Rotation = rotation;
+        _placed[index].FlipX = flipX;
+    }
+
     private readonly Dictionary<string, StructureBrain.TYPES> _typesById = [];
 
     private MapEditorGrid.Entry StructureEntry(StructureBrain.TYPES type, string label)
@@ -1211,6 +1248,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             if (placed.Instance == null) continue;
             map.Structures.Add(new MapStructureData
             {
+                Id = Net.EditorIds.Of(placed.Instance),
                 TypeName = placed.IsCustom ? CustomInternalName(placed.Type) : placed.Type.ToString(),
                 IsCustom = placed.IsCustom,
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),

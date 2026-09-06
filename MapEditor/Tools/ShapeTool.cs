@@ -8,9 +8,46 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
+public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts, Net.IMapEditorLivePreview
 {
     public string Name => "Shape";
+
+    // ---- multiplayer -------------------------------------------------------------------------
+
+    private bool _liveDragging;
+
+    public bool LiveActive => _liveDragging && _active != null;
+
+    public IEnumerable<GameObject> LiveObjects
+    {
+        get
+        {
+            if (_active != null) yield return _active.gameObject;
+        }
+    }
+
+    /// A peer's record for a shape that already stands here: geometry, profile, order and collider.
+    internal void ApplyRemoteShape(SpriteShapeController ctrl, MapShapeData data, bool bake)
+    {
+        if (ctrl == null || data == null) return;
+
+        var position = MapEditorSerialization.ToVector3(data.Position);
+        ctrl.transform.position = new Vector3(position.x, position.y, ctrl.transform.position.z);
+
+        if (!ApplyShapeData(ctrl, data)) return;
+        if (!_shapes.Contains(ctrl) && ctrl.GetComponent<CTEditorShape>() != null) _shapes.Add(ctrl);
+
+        if (bake)
+        {
+            FinalizeLoadedShape(ctrl);
+            BaseGround.RequestRefresh();
+        }
+
+        if (!ReferenceEquals(ctrl, _active) || !_toolActive) return;
+        RebuildHandles();
+        UpdateLabels();
+        RefreshCollisionOverlay();
+    }
 
     private readonly RuntimeMapEditor _editor;
     private readonly List<SpriteShapeController> _shapes = [];
@@ -623,6 +660,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     {
         if (shape == null) return;
 
+        if (shape != _active && Net.EditorPresence.LockedByPeer(shape.gameObject))
+        {
+            _editor.SetStatus(Net.EditorPresence.LockMessage, StatusSeverity.Warning);
+            return;
+        }
+
         _active = shape;
         _openEnded = _active.spline.isOpenEnded;
 
@@ -650,9 +693,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         DeleteShape(_active);
     }
 
-    private void DeleteShape(SpriteShapeController shape)
+    internal bool DeleteShape(SpriteShapeController shape)
     {
-        if (shape == null) return;
+        if (shape == null) return false;
 
         var doomed = shape;
 
@@ -671,6 +714,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         UpdateLabels();
         _editor.MarkEdited();
         _editor.SetStatus("Deleted shape.");
+        return true;
     }
 
     private void RefreshProfileDropdown()
@@ -775,6 +819,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         var spline = _active.spline;
         if (index < 0 || index >= spline.GetPointCount()) return;
 
+        _liveDragging = true;
         spline.SetPosition(index, _active.transform.InverseTransformPoint(worldPos));
 
         RefreshGeometry(_active);
@@ -1037,7 +1082,11 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         if (edge != null) edge.usedByComposite = true;
     }
 
-    public void CommitActiveShape() => CommitShape(_active);
+    public void CommitActiveShape()
+    {
+        _liveDragging = false;
+        CommitShape(_active);
+    }
 
     private Transform HandleRoot()
     {
@@ -1103,9 +1152,12 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     public bool HasActiveShape => _active != null;
 
+    internal GameObject ActiveShapeObject => _active != null ? _active.gameObject : null;
+
     public void SetActiveShapePosition(Vector3 world)
     {
         if (_active == null) return;
+        _liveDragging = true;
         var z = _active.transform.position.z;
         _active.transform.position = new Vector3(world.x, world.y, z);
     }
@@ -1164,7 +1216,13 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         foreach (var ctrl in CollectSerializableShapes())
         {
             if (ctrl == null) continue;
-            map.Shapes.Add(Describe(ctrl));
+            var data = Describe(ctrl);
+            // Vanilla rooms stack several shapes of one profile at the origin; the prefab's object name
+            // and the point count keep their seeds apart so both machines mint the same ids in any order.
+            data.Id = Net.EditorIds.Of(ctrl.gameObject,
+                Net.EditorIds.Seed("shape", data.Profile + "|" + ctrl.gameObject.name + "|" + (data.Points?.Count ?? 0),
+                    ctrl.transform.position));
+            map.Shapes.Add(data);
         }
     }
 

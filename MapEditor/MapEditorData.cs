@@ -28,8 +28,19 @@ public class CTNodeBlueprint
     public List<MapTriggerData> Triggers = [];
     public List<MapPodiumData> Podiums = [];
     public List<MapGroupData> Groups = [];
+    public List<MapStrokeData> Whiteboard = [];
 
     public MapTotemData BuildTotem;
+}
+
+/// A whiteboard stroke: planning marks drawn over the room. Points are flat x, y pairs.
+[Serializable]
+public class MapStrokeData
+{
+    public string Id = "";
+    public string Colour = "#FFFFFF";
+    public float Width = 0.15f;
+    public List<float> Points = [];
 }
 
 [Serializable]
@@ -38,9 +49,14 @@ public class MapTotemData
     public SerializableVector3 Position;
 }
 
+// Every placed record carries an Id: the object's editor identity (a CTEditorId tag), kept across
+// save and load so two machines editing the same room can name the same thing. Old files without
+// ids load fine; the objects get fresh ids the next time the room is collected.
+
 [Serializable]
 public class MapShapeData
 {
+    public string Id = "";
     public SerializableVector3 Position;
     public string Profile = "Primary";
     public bool IsOpenEnded;
@@ -68,6 +84,7 @@ public class MapShapePointData
 [Serializable]
 public class MapKeptData
 {
+    public string Id = "";
     public string Parent = "Room";   // which sweep root it is a direct child of
     public string Name = "";
     public SerializableVector3 Position;
@@ -80,10 +97,12 @@ public class MapKeptData
 [Serializable]
 public class MapPropData
 {
+    public string Id = "";
     public string Key = "";          // addressable key, Resources path, or island prefab name
     public bool IsAddressable = true;
     public bool IsIslandRef;         // Key names a prefab in GenerateRoom's island piece lists
     public int ParentIslandIndex = -1; // index into Props of the island this was a child of
+    public string ParentIslandId = ""; // the island's Id; preferred over the index when present
     public string Parent = "Scenery"; // Scenery | Heavy | Room | Custom | Island
     public SerializableVector3 Position;
     public float RotationZ;
@@ -95,6 +114,7 @@ public class MapPropData
 [Serializable]
 public class MapStructureData
 {
+    public string Id = "";
     public string TypeName = "";     // vanilla: StructureBrain.TYPES name; custom: InternalName
     public bool IsCustom;
     public SerializableVector3 Position;
@@ -121,6 +141,7 @@ public class MapDoorData
 [Serializable]
 public class MapEnemyData
 {
+    public string Id = "";
     public string Key = "";          // vanilla: addressable prefab path; custom: CustomEnemy.InternalName
     public bool IsCustom;
     public SerializableVector3 Position;
@@ -131,6 +152,7 @@ public class MapEnemyData
 [Serializable]
 public class MapNpcData
 {
+    public string Id = "";
     public string Key = "";          // vanilla: addressable prefab path; custom: InternalName
     public bool IsCustom;
     public SerializableVector3 Position;
@@ -220,6 +242,7 @@ public class SerializableColor
 
 public class MapPodiumData
 {
+    public string Id = "";
     public SerializableVector3 Position;
     public string Type = "Random";   // Interaction_WeaponSelectionPodium.Types name
     public bool ClearAllOnEquip = true;

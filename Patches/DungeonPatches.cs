@@ -115,6 +115,10 @@ namespace CustomSpineLoader.Patches
         [HarmonyPrefix]
         private static void BiomeGenerator_OnEnable(BiomeGenerator __instance)
         {
+            // A multiplayer guest following the host into a level: the host's level state becomes
+            // ours here, before anything below reads what is being entered.
+            MapEditor.LevelPlayback.ArmFromPeer();
+
             var entering = CustomDungeonManager.EnteringCustomDungeon;
             var bindsOwnLevel = CustomDungeonManager.CustomDungeonList.TryGetValue(entering, out var target) &&
                                 target.DrivesLevelPlayback;

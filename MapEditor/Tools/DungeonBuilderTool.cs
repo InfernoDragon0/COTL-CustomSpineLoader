@@ -190,6 +190,13 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
 
     private void EnterDungeon()
     {
+        var held = Net.EditorNet.WhyNotWorldChange();
+        if (held != null)
+        {
+            Report(held, StatusSeverity.Error);
+            return;
+        }
+
         var problem = DungeonMapBuilder.Validate(_map);
         if (problem != null)
         {

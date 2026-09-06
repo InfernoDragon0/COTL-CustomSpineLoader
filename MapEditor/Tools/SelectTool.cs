@@ -7,9 +7,17 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
-public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContributor
+public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContributor, Net.IMapEditorLivePreview
 {
     public string Name => "Select";
+
+    // ---- multiplayer -------------------------------------------------------------------------
+
+    public bool LiveActive => _gesture.Count > 0 || _cloneDragging;
+
+    public IEnumerable<GameObject> LiveObjects => AllSelected();
+
+    public bool IsSelected(GameObject go) => go != null && (go == _selected || _extra.Contains(go));
 
     private readonly RuntimeMapEditor _editor;
 
@@ -593,6 +601,9 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContribut
 
         if (go.GetComponentInParent<CTMapTrigger>() != null) return true;
 
+        // Whiteboard marks are drawn over the room, never part of it.
+        if (go.GetComponentInParent<CTWhiteboardStroke>() != null) return true;
+
         return false;
     }
 
@@ -758,6 +769,13 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContribut
     public void SelectMany(IEnumerable<GameObject> objects)
     {
         var wanted = MapEditorGroups.Expand(objects);
+
+        // What the other player holds stays theirs; the rest of the click still lands.
+        if (Net.EditorNet.Enabled)
+        {
+            var held = wanted.RemoveAll(go => !IsSelected(go) && Net.EditorPresence.LockedByPeer(go));
+            if (held > 0) _editor.SetStatus(Net.EditorPresence.LockMessage, StatusSeverity.Warning);
+        }
 
         ClearHighlight();
         _extra.Clear();
@@ -1212,7 +1230,8 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContribut
         {
             if (go == null) continue;
 
-            if (MapEditorProtection.IsProtected(go) || !MapEditorProtection.CanDelete(go))
+            if (MapEditorProtection.IsProtected(go) || !MapEditorProtection.CanDelete(go) ||
+                Net.EditorPresence.LockedByPeer(go))
             {
                 kept.Add(go.name);
                 continue;

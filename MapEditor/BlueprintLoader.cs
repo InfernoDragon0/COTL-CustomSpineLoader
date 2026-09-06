@@ -54,6 +54,7 @@ public class BlueprintLoader
         var npcTool = _editor.GetTool<NpcTool>();
         var triggerTool = _editor.GetTool<TriggerTool>();
         var podiumTool = _editor.GetTool<PodiumTool>();
+        var whiteboardTool = _editor.GetTool<WhiteboardTool>();
         var clearTool = _editor.GetTool<ClearTool>();
 
         // ---- Phase 0: capture everything that clearing would destroy -----------------------
@@ -75,6 +76,7 @@ public class BlueprintLoader
         npcTool?.ResetTracking();
         triggerTool?.ResetTracking();
         podiumTool?.ResetTracking();
+        whiteboardTool?.ResetTracking();
 
         _editor.History.Clear();
 
@@ -90,7 +92,9 @@ public class BlueprintLoader
         foreach (var shapeData in bp.Shapes)
         {
             var ctrl = shapeTool?.RebuildShape(shapeData);
-            if (ctrl != null) rebuiltShapes.Add(ctrl);
+            if (ctrl == null) continue;
+            rebuiltShapes.Add(ctrl);
+            Net.EditorIds.Adopt(ctrl.gameObject, shapeData.Id);
         }
 
         yield return null;
@@ -112,11 +116,15 @@ public class BlueprintLoader
                     Plugin.Log.LogWarning($"MapEditor: structure '{s.TypeName}' could not be resolved, skipped.");
                     continue;
                 }
+                var before = structureTool.LastPlacedInstance;
                 yield return structureTool.PlaceAt(type, s.IsCustom,
                     MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
                     deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough,
                     wind: s.Wind);
-                ApplySavedScale(structureTool.LastPlacedInstance, s.Scale);
+                var placed = structureTool.LastPlacedInstance;
+                if (placed == null || ReferenceEquals(placed, before)) continue;
+                ApplySavedScale(placed, s.Scale);
+                Net.EditorIds.Adopt(placed, s.Id);
             }
         }
 
@@ -156,9 +164,13 @@ public class BlueprintLoader
         {
             foreach (var e in bp.Enemies)
             {
+                var before = enemyTool.LastPlacedInstance;
                 yield return enemyTool.SpawnEnemyRoutine(e.Key, e.IsCustom,
                     MapEditorSerialization.ToVector3(e.Position), withVfx: true);
-                ApplySavedScale(enemyTool.LastPlacedInstance, e.Scale);
+                var placed = enemyTool.LastPlacedInstance;
+                if (placed == null || ReferenceEquals(placed, before)) continue;
+                ApplySavedScale(placed, e.Scale);
+                Net.EditorIds.Adopt(placed, e.Id);
             }
         }
 
@@ -167,9 +179,13 @@ public class BlueprintLoader
         {
             foreach (var n in bp.Npcs)
             {
+                var before = npcTool.LastPlacedInstance;
                 yield return npcTool.SpawnNpcRoutine(n.Key, MapEditorSerialization.ToVector3(n.Position),
                     n.IsCustom);
-                ApplySavedScale(npcTool.LastPlacedInstance, n.Scale);
+                var placed = npcTool.LastPlacedInstance;
+                if (placed == null || ReferenceEquals(placed, before)) continue;
+                ApplySavedScale(placed, n.Scale);
+                Net.EditorIds.Adopt(placed, n.Id);
             }
         }
 
@@ -178,8 +194,10 @@ public class BlueprintLoader
         {
             foreach (var p in bp.Podiums)
             {
-                podiumTool.SpawnPodium(MapEditorSerialization.ToVector3(p.Position), p.Type, p.ClearAllOnEquip);
-                ApplySavedScale(podiumTool.LastPlacedInstance, p.Scale);
+                var placed = podiumTool.SpawnPodium(MapEditorSerialization.ToVector3(p.Position), p.Type, p.ClearAllOnEquip);
+                if (placed == null) continue;
+                ApplySavedScale(placed, p.Scale);
+                Net.EditorIds.Adopt(placed, p.Id);
             }
         }
 
@@ -190,6 +208,9 @@ public class BlueprintLoader
                     t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl,
                     t.Blocking);
         }
+
+        if (whiteboardTool != null && bp.Whiteboard != null)
+            foreach (var stroke in bp.Whiteboard) whiteboardTool.ApplyRecord(stroke);
 
         yield return null;
         doorTool?.FinalizeAllPads();
@@ -252,6 +273,8 @@ public class BlueprintLoader
 
         _editor.MarkSaved();
         IsLoading = false;
+
+        Net.EditorNet.RoomContentReady();
     }
 
     private IEnumerator RebuildBuildTotem(CTNodeBlueprint bp, StructureTool structureTool)
@@ -492,15 +515,19 @@ public class BlueprintLoader
         var pending = 0;
 
         var islandsByIndex = new Dictionary<int, Transform>();
+        var islandsById = new Dictionary<string, Transform>();
 
         for (var index = 0; index < bp.Props.Count; index++)
         {
             var prop = bp.Props[index];
 
-            var parent = prop.ParentIslandIndex >= 0 &&
-                         islandsByIndex.TryGetValue(prop.ParentIslandIndex, out var islandParent)
-                ? islandParent
-                : ParentFor(prop.Parent, room);
+            // The island's id names the parent when the file has one; older files fall back to the index.
+            Transform islandParent = null;
+            var byId = !string.IsNullOrEmpty(prop.ParentIslandId) &&
+                       islandsById.TryGetValue(prop.ParentIslandId, out islandParent);
+            var byIndex = !byId && prop.ParentIslandIndex >= 0 &&
+                          islandsByIndex.TryGetValue(prop.ParentIslandIndex, out islandParent);
+            var parent = byId || byIndex ? islandParent : ParentFor(prop.Parent, room);
             if (parent == null)
             {
                 Plugin.Log.LogWarning($"MapEditor: no '{prop.Parent}' parent for prop '{prop.Key}', skipped.");
@@ -524,6 +551,11 @@ public class BlueprintLoader
                 ApplyPropTransform(island, prop, room);
                 island.GetComponent<IslandPiece>()?.HideSprites();
                 islandsByIndex[index] = island.transform;
+                if (!string.IsNullOrEmpty(prop.Id))
+                {
+                    islandsById[prop.Id] = island.transform;
+                    Net.EditorIds.Adopt(island, prop.Id);
+                }
                 continue;
             }
 
@@ -546,6 +578,7 @@ public class BlueprintLoader
                         }
                         _propsSpawned++;
                         ApplyPropTransform(go, captured, room);
+                        Net.EditorIds.Adopt(go, captured.Id);
                     },
                     prop.IsAddressable);
             }
@@ -563,13 +596,13 @@ public class BlueprintLoader
             Plugin.Log.LogWarning($"MapEditor: {pending} prop(s) still loading after timeout; they may appear late.");
     }
 
-    private static void ApplySavedScale(GameObject go, SerializableVector3 scale)
+    internal static void ApplySavedScale(GameObject go, SerializableVector3 scale)
     {
         if (go == null || scale == null || scale.X == 0f) return;
         go.transform.localScale = MapEditorSerialization.ToVector3(scale);
     }
 
-    private static void ApplyPropTransform(GameObject go, MapPropData prop, GenerateRoom room)
+    internal static void ApplyPropTransform(GameObject go, MapPropData prop, GenerateRoom room)
     {
         go.transform.position = MapEditorSerialization.ToVector3(prop.Position);
         go.transform.eulerAngles = new Vector3(0f, prop.RotationY, prop.RotationZ);
@@ -581,7 +614,7 @@ public class BlueprintLoader
             room.Pieces.Add(piece);
     }
 
-    private static Transform ParentFor(string tag, GenerateRoom room)
+    internal static Transform ParentFor(string tag, GenerateRoom room)
     {
         return tag switch
         {
@@ -690,7 +723,12 @@ public class BlueprintLoader
 
             var grew = false;
             foreach (var door in stranded)
-                if (doorTool.ExtendPad(door, deferCollision: true)) grew = true;
+            {
+                if (!doorTool.ExtendPad(door, deferCollision: true)) continue;
+                grew = true;
+                Plugin.Log.LogInfo($"MapEditor: the {door.direction} doorway does not reach the floor; " +
+                                   "its pad grows a step.");
+            }
 
             if (!grew)
             {
@@ -706,12 +744,26 @@ public class BlueprintLoader
         }
     }
 
+    /// <summary>
+    /// The node that stands for "the room's floor": the walkable node nearest the collision's centre.
+    /// The centre itself often lies in a hole (a room built around a pit or a tree) whose node is not
+    /// walkable; asking for that node made every doorway look stranded, and each pad then grew step
+    /// by step until it crossed the room and filled the hole with a band of collision.
+    /// </summary>
+    private static Pathfinding.GraphNode FloorReferenceNode(CompositeCollider2D composite)
+    {
+        var centre = composite.bounds.center;
+        var walkable = AstarPath.active.GetNearest(centre, Pathfinding.NNConstraint.Default).node;
+        if (walkable != null && walkable.Walkable) return walkable;
+        return AstarPath.active.GetNearest(centre).node;
+    }
+
     private static List<Door> StrandedDoors(CompositeCollider2D composite)
     {
         var result = new List<Door>();
         if (AstarPath.active == null) return result;
 
-        var centre = AstarPath.active.GetNearest(composite.bounds.center).node;
+        var centre = FloorReferenceNode(composite);
         if (centre == null) return result;
 
         foreach (var door in Door.Doors)
@@ -731,7 +783,7 @@ public class BlueprintLoader
     {
         if (AstarPath.active == null) return;
 
-        var centre = AstarPath.active.GetNearest(composite.bounds.center).node;
+        var centre = FloorReferenceNode(composite);
         if (centre == null) return;
 
         foreach (var door in Door.Doors)

@@ -344,9 +344,82 @@ public class CTMapTrigger : MonoBehaviour
     }
 }
 
-public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts, IMapEditorEscapeHandler
+public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts, IMapEditorEscapeHandler,
+    Net.IMapEditorLivePreview
 {
     public string Name => "Triggers";
+
+    // ---- multiplayer -------------------------------------------------------------------------
+
+    public bool LiveActive => _gestureTarget != null || _cloneDragging;
+
+    public IEnumerable<GameObject> LiveObjects
+    {
+        get
+        {
+            if (_selected != null) yield return _selected.gameObject;
+        }
+    }
+
+    internal CTMapTrigger FindTrigger(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        foreach (var trigger in _triggers)
+            if (trigger != null && trigger.Id == id) return trigger;
+        return null;
+    }
+
+    /// Takes a trigger out of the room and out of the books; false if it was not ours.
+    internal bool RemoveTrigger(CTMapTrigger trigger)
+    {
+        if (trigger == null || !_triggers.Remove(trigger)) return false;
+        if (_selected == trigger) Select(null);
+        Object.Destroy(trigger.gameObject);
+        return true;
+    }
+
+    /// Writes a record over a live trigger: place, size, flags and the whole action list.
+    internal void ApplyRecord(CTMapTrigger trigger, MapTriggerData record)
+    {
+        if (trigger == null || record == null) return;
+
+        var position = MapEditorSerialization.ToVector3(record.Position);
+        trigger.transform.position = new Vector3(position.x, position.y, 0f);
+        trigger.Size = new Vector2(Mathf.Max(0.5f, record.Width), Mathf.Max(0.5f, record.Height));
+        trigger.Action = record.Action ?? "";
+        trigger.Once = record.Once;
+        trigger.LockPlayerControl = record.LockPlayerControl;
+
+        var wasBlocking = trigger.Blocking;
+        trigger.Blocking = record.Blocking;
+
+        trigger.Actions.Clear();
+        trigger.Actions.AddRange(TriggerActions.FromData(record.Actions, trigger.Id));
+
+        trigger.Refresh();
+        trigger.RefreshTint();
+        if (wasBlocking != record.Blocking) SceneRefs.RescanNavigation();
+
+        if (_selected == trigger)
+        {
+            PushSelectionToPanel();
+            RebuildActionList();
+            UpdateActionControls();
+        }
+    }
+
+    internal static MapTriggerData Describe(CTMapTrigger trigger) => new()
+    {
+        Id = trigger.Id,
+        Action = trigger.Action,
+        Position = MapEditorSerialization.V3(trigger.transform.position),
+        Width = trigger.Size.x,
+        Height = trigger.Size.y,
+        Once = trigger.Once,
+        Actions = TriggerActions.ToData(trigger.Actions),
+        LockPlayerControl = trigger.LockPlayerControl,
+        Blocking = trigger.Blocking
+    };
 
     private readonly RuntimeMapEditor _editor;
     private readonly List<CTMapTrigger> _triggers = [];
@@ -1666,6 +1739,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         trigger.ShowGizmo(_gizmosVisible);
 
         _triggers.Add(trigger);
+        Net.EditorIds.Adopt(go, trigger.Id);
 
         _editor.History.Push($"place trigger {trigger.Id}", () =>
         {
@@ -1680,10 +1754,14 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private string NextId()
     {
+        // Two players placing triggers at once must not both mint "Trigger3": the guest's carry a
+        // letter so the two sequences never meet.
+        var suffix = Net.EditorNet.Enabled && !Net.EditorNet.IsHost ? "g" : "";
+
         string candidate;
         do
         {
-            candidate = "Trigger" + _nextId++;
+            candidate = "Trigger" + _nextId++ + suffix;
         } while (_triggers.Exists(t => t != null && t.Id == candidate));
 
         return candidate;
@@ -1719,6 +1797,12 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private void Select(CTMapTrigger trigger, bool placed = false)
     {
+        if (trigger != null && trigger != _selected && Net.EditorPresence.LockedByPeer(trigger.gameObject))
+        {
+            _editor.SetStatus(Net.EditorPresence.LockMessage, StatusSeverity.Warning);
+            return;
+        }
+
         if (_selected != null) _selected.SetHighlighted(false);
         _selected = trigger;
 
@@ -1977,18 +2061,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         foreach (var trigger in _triggers)
         {
             if (trigger == null) continue;
-            map.Triggers.Add(new MapTriggerData
-            {
-                Id = trigger.Id,
-                Action = trigger.Action,
-                Position = MapEditorSerialization.V3(trigger.transform.position),
-                Width = trigger.Size.x,
-                Height = trigger.Size.y,
-                Once = trigger.Once,
-                Actions = TriggerActions.ToData(trigger.Actions),
-                LockPlayerControl = trigger.LockPlayerControl,
-                Blocking = trigger.Blocking
-            });
+            map.Triggers.Add(Describe(trigger));
         }
     }
 }

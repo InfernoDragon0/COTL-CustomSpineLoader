@@ -53,6 +53,9 @@ public class MusicTool : IMapEditorTool, IMapDataContributor
         _editor.SetStatus("Pick a track to preview and assign it.");
     }
 
+    /// The blueprint's music changed under the panel (a peer edited it).
+    internal void RefreshFromMap() => RefreshOptions();
+
     private void RefreshOptions()
     {
         if (_dropdown == null) return;

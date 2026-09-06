@@ -64,6 +64,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     public bool IsEditing => _editing;
 
+    /// F6 has hidden the editor's UI and gizmos; overlays that belong to the editor hide with them.
+    internal bool ChromeHidden => _chromeHidden;
+
+    /// A tool whose shortcut hints depend on its state asks for the panel to be rebuilt.
+    internal void RefreshShortcutHints() => RefreshShortcuts();
+
     public bool ModalOpen
     {
         get => _modalOpen;
@@ -107,6 +113,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         _tools.Add(new PodiumTool(this));
         _tools.Add(new TriggerTool(this));
         _tools.Add(new DoorTool(this));
+        _tools.Add(new WhiteboardTool(this));
         _tools.Add(new LightingTool(this));
         _tools.Add(new MusicTool(this));
         _tools.Add(new ClearTool(this));
@@ -120,9 +127,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     public void SelectFirstTool() => SelectTool(_tools.FirstOrDefault());
 
     public static EditorContext Context =>
-        BaseSession.Active ? EditorContext.Base
-        : HubSession.Active ? EditorContext.Hub
-        : EditorContext.Dungeon;
+        ContextOverride ?? (BaseSession.Active ? EditorContext.Base
+            : HubSession.Active ? EditorContext.Hub
+            : EditorContext.Dungeon);
+
+    /// While a peer's base edits are written into a base nobody here is editing, the tools must
+    /// still behave as in the base editor; the multiplayer applier sets this for the duration.
+    internal static EditorContext? ContextOverride;
 
     private static bool HiddenIn(EditorContext context, IMapEditorTool tool) => context switch
     {
@@ -158,8 +169,163 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void UndoLast()
     {
-        if (History.Undo(out var description)) SetStatus("Undid: " + description + ".");
-        else SetStatus("Nothing to undo.");
+        if (History.Undo(out var description, out var skipped))
+        {
+            SetStatus(skipped > 0
+                ? $"Undid: {description} (skipped {skipped} step(s) whose objects are gone)."
+                : "Undid: " + description + ".");
+        }
+        else
+        {
+            SetStatus(skipped > 0 ? $"Nothing left to undo; {skipped} stale step(s) dropped." : "Nothing to undo.");
+        }
+    }
+
+    // ---- multiplayer -----------------------------------------------------------------------------
+
+    /// Every tool writes its part of the room into the blueprint, as a save does.
+    internal void ContributeAll()
+    {
+        foreach (var tool in _tools.OfType<IMapDataContributor>())
+            tool.ContributeTo(Map);
+    }
+
+    internal IEnumerable<Net.IMapEditorLivePreview> LivePreviews() => _tools.OfType<Net.IMapEditorLivePreview>();
+
+    internal string ActiveToolName => _activeTool != null ? _activeTool.Name : "";
+
+    /// What this player has hold of, by presence id, for the peer's locks and colours.
+    internal List<string> SelectedIds()
+    {
+        var ids = new List<string>();
+
+        var select = GetTool<SelectTool>();
+        if (select != null)
+            foreach (var go in select.Selection)
+            {
+                var id = go != null ? Net.EditorIds.Of(go) : null;
+                if (id != null) ids.Add(id);
+            }
+
+        var trigger = GetTool<TriggerTool>()?.SelectedTrigger;
+        if (trigger != null && !string.IsNullOrEmpty(trigger.Id)) ids.Add(trigger.Id);
+
+        var doors = GetTool<DoorTool>();
+        var door = doors?.SelectedDoor;
+        if (door != null) ids.Add("door-" + door.direction);
+
+        var shapes = GetTool<ShapeTool>();
+        if (_activeTool == shapes && shapes != null && shapes.HasActiveShape && shapes.ActiveShapeObject != null)
+            ids.Add(Net.EditorIds.Of(shapes.ActiveShapeObject));
+
+        return ids;
+    }
+
+    internal bool IsLocallySelected(GameObject go)
+    {
+        if (go == null) return false;
+        var select = GetTool<SelectTool>();
+        return select != null && select.IsSelected(go);
+    }
+
+    internal void RefreshLayers() => _layers?.Invalidate();
+
+    /// <summary>
+    /// In the base the editor's blueprint must be the delta's own content - that is what a base save
+    /// writes, and what a peer's base changes are applied into - whether or not a base session is open.
+    /// </summary>
+    internal void EnsureBaseMap()
+    {
+        if (Net.EditorDocument.EffectiveContext != EditorContext.Base) return;
+        var content = BaseDelta.Content;
+        if (ReferenceEquals(Map, content)) return;
+        content.MapName = $"base_slot{BaseDelta.Slot}";
+        AdoptBlueprint(content);
+    }
+
+    private bool _holdBaseContext;
+
+    /// The host writes for both: a guest's Save asks the host, which saves and ships the files.
+    internal void SaveForPeer(string mapName)
+    {
+        // A host standing in the base without the editor open still saves the base, not a room.
+        if (Net.EditorDocument.EffectiveContext == EditorContext.Base && !BaseSession.Active)
+        {
+            ContextOverride = EditorContext.Base;
+            _holdBaseContext = true;
+        }
+        EnsureBaseMap();
+
+        if (Context != EditorContext.Base && !string.IsNullOrWhiteSpace(mapName))
+        {
+            Map.MapName = mapName.Trim();
+            UpdateNameLabel();
+        }
+
+        var blocked = SaveBlock();
+        if (blocked != null)
+        {
+            ReleaseBaseContext();
+            SetStatus(blocked, StatusSeverity.Error);
+            Net.EditorNet.Notice($"Could not save for {Net.EditorNet.PeerName}: {blocked}");
+            return;
+        }
+
+        if (Context == EditorContext.Base || !string.IsNullOrWhiteSpace(Map.MapName))
+        {
+            _quickSavedName = Map.MapName;
+            SetStatus($"{Net.EditorNet.PeerName} asked to save; saving...");
+            WriteMap();
+            return;
+        }
+
+        ReleaseBaseContext();
+
+        if (!_editing)
+        {
+            Net.EditorNet.Notice($"{Net.EditorNet.PeerName} asked to save, but this room has no name yet; " +
+                                 "open the editor and save it once.");
+            return;
+        }
+
+        SetStatus($"{Net.EditorNet.PeerName} asked to save; pick a name.");
+        SaveMap();
+    }
+
+    private void ReleaseBaseContext()
+    {
+        if (!_holdBaseContext) return;
+        _holdBaseContext = false;
+        ContextOverride = null;
+    }
+
+    /// The host saved: this side's copy is now the saved copy too.
+    internal void PeerSaved(string mapName)
+    {
+        if (Context != EditorContext.Base && !string.IsNullOrWhiteSpace(mapName))
+        {
+            Map.MapName = mapName.Trim();
+            UpdateNameLabel();
+        }
+
+        _quickSavedName = Map.MapName;
+        MarkSaved();
+        SetStatus(string.IsNullOrWhiteSpace(mapName)
+            ? $"{Net.EditorNet.PeerName} saved the room."
+            : $"{Net.EditorNet.PeerName} saved '{mapName}'.", StatusSeverity.Success);
+
+        if (_closeAfterSave)
+        {
+            _closeAfterSave = false;
+            if (_editing) ExitEditorMode();
+        }
+    }
+
+    private void RequestPeerSave(string mapName)
+    {
+        Net.EditorNet.RequestSave(mapName);
+        SetStatus($"Asked {Net.EditorNet.PeerName} to save" +
+                  (string.IsNullOrWhiteSpace(mapName) ? "." : $" '{mapName}'."));
     }
 
     private void CycleTool(int direction)
@@ -228,7 +394,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     {
         if (_canvasGO != null) Destroy(_canvasGO);
         if (_previewBadgeGO != null) Destroy(_previewBadgeGO);
-        if (_editing) RestoreGameState();
+        if (_editing)
+        {
+            RestoreGameState();
+            Net.EditorNet.LocalEditorChanged(false);
+        }
 
         MapEditorIcons.ClearSceneScopedCache();
         EnemyThumbnails.ClearSceneScopedCache();
@@ -305,7 +475,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void SaveAndClose()
     {
-        if (string.IsNullOrWhiteSpace(Map.MapName))
+        if (string.IsNullOrWhiteSpace(Map.MapName) && Context != EditorContext.Base)
         {
             _closeAfterSave = true;
             SaveMap();
@@ -321,6 +491,16 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         _closeAfterSave = true;
         _quickSavedName = Map.MapName;
+
+        if (Net.EditorNet.ShouldRequestSave)
+        {
+            // The host writes; this side closes now and is marked saved when the host confirms.
+            RequestPeerSave(Context == EditorContext.Base ? null : Map.MapName);
+            _closeAfterSave = false;
+            ExitEditorMode();
+            return;
+        }
+
         WriteMap();
     }
 
@@ -350,6 +530,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         _chromeHidden = !_chromeHidden;
         _canvas.enabled = !_chromeHidden;
         MapEditorGizmos.SetHidden(_chromeHidden);
+        GetTool<WhiteboardTool>()?.RefreshVisibility();
         ShowPreviewBadge(_chromeHidden);
 
         if (!_chromeHidden) SetStatus("Editor UI back. F6 hides it again.");
@@ -360,6 +541,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         SetOwnChromeVisible(true);
         _chromeHidden = false;
         MapEditorGizmos.SetHidden(false);
+        GetTool<WhiteboardTool>()?.RefreshVisibility();
         ShowPreviewBadge(false);
     }
 
@@ -428,6 +610,10 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         // put back here; a blueprint load does the same at the end of its own routine.
         var groups = MapEditorGroups.Restore(Map);
         SetStatus(groups > 0 ? $"Editor open. {groups} group(s) restored." : "Editor open.");
+
+        GetTool<WhiteboardTool>()?.RefreshVisibility();
+        Net.EditorNet.LocalEditorChanged(true);
+        if (Net.EditorNet.Enabled) RefreshShortcuts();
     }
 
     private void ExitEditorMode()
@@ -444,6 +630,9 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         ShowChrome();
         _canvas.enabled = false;
         RestoreGameState();
+        GetTool<WhiteboardTool>()?.RefreshVisibility();
+
+        Net.EditorNet.LocalEditorChanged(false);
     }
 
     private void RestoreGameState()
@@ -478,6 +667,10 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         if (_resetArmed && Time.unscaledTime - _resetArmedAt > ResetArmWindow) DisarmReset();
 
+        // The multiplayer chat box draws where the shortcut hints sit; the hints step aside.
+        if (_shortcutPanel != null && _shortcutPanel.gameObject.activeSelf == Net.EditorNet.ExternalOverlayVisible)
+            _shortcutPanel.gameObject.SetActive(!Net.EditorNet.ExternalOverlayVisible);
+
         if (_renaming)
         {
             HandleRenameInput();
@@ -485,6 +678,19 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         }
 
         ReleaseTypingLocks();
+
+        // Someone is typing into the chat: no hotkeys, no camera keys, no tool input.
+        if (Net.EditorNet.ExternalTyping)
+        {
+            try
+            {
+                _layers?.Tick();
+            }
+            catch (System.Exception)
+            {
+            }
+            return;
+        }
 
         if (Input.GetKeyDown(KeyCode.Escape) && HandleEscape()) return;
 
@@ -760,6 +966,23 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         var t = -ray.origin.z / ray.direction.z;
         var p = ray.origin + ray.direction * t;
         p.z = 0f;
+        return p;
+    }
+
+    /// Like ScreenToWorld but intersecting the plane z = depth. Anything drawn off the floor plane
+    /// (the whiteboard at z -1) must project the mouse onto its own plane, or the tilted camera
+    /// puts it a few pixels away from the cursor.
+    public Vector3 ScreenToWorldAtDepth(Vector2 screenPoint, float depth)
+    {
+        var cam = SceneRefs.Cam;
+        if (cam == null) return new Vector3(0f, 0f, depth);
+
+        var ray = cam.ScreenPointToRay(screenPoint);
+        if (Mathf.Abs(ray.direction.z) < 1e-6f) return new Vector3(ray.origin.x, ray.origin.y, depth);
+
+        var t = (depth - ray.origin.z) / ray.direction.z;
+        var p = ray.origin + ray.direction * t;
+        p.z = depth;
         return p;
     }
 
@@ -1277,6 +1500,19 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
         }
 
+        if (Net.EditorNet.Enabled)
+            _ui.CreateButton(_shortcutPanel, $"Resync with {Net.EditorNet.PeerName}", () =>
+            {
+                Net.EditorSnapshot.RequestResync();
+                SetStatus(Net.EditorNet.IsHost
+                    ? $"Sent the room to {Net.EditorNet.PeerName} again."
+                    : $"Asked {Net.EditorNet.PeerName} for the room again.");
+            }, 30f);
+
+        // Debug: with NetVerbose on, the room can be run through the peer-snapshot path on one machine.
+        if (Plugin.EditorNetVerbose.Value)
+            _ui.CreateButton(_shortcutPanel, "Sync self-test", () => Net.EditorApply.SelfTest(this), 30f);
+
         _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   -",
             ToggleShortcutsCollapsed, 30f);
     }
@@ -1446,6 +1682,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         if (Context == EditorContext.Base)
         {
+            if (Net.EditorNet.ShouldRequestSave)
+            {
+                RequestPeerSave(null);
+                return;
+            }
+
             SetStatus("Saving the base...");
             WriteMap();
             return;
@@ -1479,6 +1721,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         _quickSaveArmed = false;
         _quickSavedName = Map.MapName;
+
+        if (Net.EditorNet.ShouldRequestSave)
+        {
+            RequestPeerSave(Map.MapName);
+            return;
+        }
+
         SetStatus($"Saving '{Map.MapName}'...");
         WriteMap();
     }
@@ -1515,6 +1764,17 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         if (Context == EditorContext.Base)
         {
+            if (Net.EditorNet.ShouldRequestSave)
+            {
+                RequestPeerSave(null);
+                if (_closeAfterSave)
+                {
+                    _closeAfterSave = false;
+                    ExitEditorMode();
+                }
+                return;
+            }
+
             WriteMap();
             return;
         }
@@ -1545,6 +1805,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
                 Map.MapName = chosen.Trim();
                 UpdateNameLabel();
+
+                if (Net.EditorNet.ShouldRequestSave)
+                {
+                    RequestPeerSave(Map.MapName);
+                    if (_closeAfterSave)
+                    {
+                        _closeAfterSave = false;
+                        ExitEditorMode();
+                    }
+                    return;
+                }
+
                 WriteMap();
             });
     }
@@ -1552,6 +1824,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private void WriteMap() => StartCoroutine(WriteMapRoutine());
 
     private IEnumerator WriteMapRoutine()
+    {
+        try
+        {
+            yield return WriteMapBody();
+        }
+        finally
+        {
+            ReleaseBaseContext();
+        }
+    }
+
+    private IEnumerator WriteMapBody()
     {
         SetStatus("Saving...");
         yield return null;
@@ -1581,6 +1865,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
             MarkSaved();
 
+            Net.EditorNet.LocalSaved(Map.MapName, [$"{BaseDelta.RootFolder}/base_slot{BaseDelta.Slot}.json"]);
+
             if (_closeAfterSave)
             {
                 _closeAfterSave = false;
@@ -1608,14 +1894,24 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         _quickSavedName = Map.MapName;
         MarkSaved();
 
+        var shipped = new List<string>
+        {
+            MapEditorSerialization.FolderName + "/" + MapEditorSerialization.Sanitize(Map.MapName) + ".json"
+        };
+
         if (Context == EditorContext.Hub)
         {
             HubSession.WriteRecord(Map.MapName, Map.MapName);
+            shipped.Add(CTLevelSerialization.FolderName + "/" + MapEditorSerialization.Sanitize(Map.MapName) + ".json");
             SetStatus($"Saved hub '{Map.MapName}'. World map nodes can target it as a Hub.",
                 StatusSeverity.Success);
         }
 
         yield return CaptureSnapshot();
+        if (_snapshotWritten)
+            shipped.Add(MapEditorSerialization.FolderName + "/" + MapEditorSerialization.Sanitize(Map.MapName) + ".png");
+
+        Net.EditorNet.LocalSaved(Map.MapName, shipped);
 
         if (_closeAfterSave)
         {
@@ -1624,8 +1920,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         }
     }
 
+    private bool _snapshotWritten;
+
     private IEnumerator CaptureSnapshot()
     {
+        _snapshotWritten = false;
         var tool = _activeTool;
         tool?.OnExit();
         _canvas.enabled = false;
@@ -1648,7 +1947,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             Plugin.Log.LogWarning("MapEditor: snapshot capture failed: " + e.Message);
         }
 
-        _canvas.enabled = true;
+        // A host saving on a guest's behalf may not be editing; the canvas stays as it was.
+        _canvas.enabled = _editing;
         tool?.OnEnter();
 
         if (png != null)
@@ -1672,6 +1972,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
             while (!write.IsCompleted) yield return null;
             if (write.Result) Plugin.Log.LogInfo("MapEditor: snapshot saved to " + pngPath);
+            _snapshotWritten = write.Result;
         }
 
         SetStatus($"Saved '{Map.MapName}'.", StatusSeverity.Success);
@@ -1711,6 +2012,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void ResetRoom()
     {
+        var held = Net.EditorNet.WhyNotWorldChange();
+        if (held != null)
+        {
+            SetStatus(held, StatusSeverity.Warning);
+            return;
+        }
+
         if (CustomDungeonManager.CustomDungeonList.Count == 0)
         {
             SetStatus("No custom dungeon to reset into.", StatusSeverity.Error);

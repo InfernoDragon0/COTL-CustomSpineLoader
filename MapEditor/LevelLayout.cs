@@ -523,7 +523,21 @@ public static class LevelLayout
         private static bool Prefix(BiomeGenerator __instance)
         {
             var level = LevelPlayback.CurrentLevel;
-            if (!LevelPlayback.Active || !IsAuthored(level)) return true;
+            if (!LevelPlayback.Active || !IsAuthored(level))
+            {
+                // Build sets OverrideRandomWalk after filling Rooms itself, so a copy of this
+                // generator's settings taken afterwards (a multiplayer seed message) says "fixed
+                // layout" with no OverrideRooms behind it. Vanilla would then build zero rooms and
+                // never lift the fade. A random walk is wrong for the level but it is a floor.
+                if (__instance.OverrideRandomWalk &&
+                    (__instance.OverrideRooms == null || __instance.OverrideRooms.Count == 0))
+                {
+                    Plugin.Log.LogWarning("MapEditor: the generator asks for a fixed layout but has no " +
+                                          "rooms for it; falling back to a random walk so the floor can build.");
+                    __instance.OverrideRandomWalk = false;
+                }
+                return true;
+            }
 
             try
             {

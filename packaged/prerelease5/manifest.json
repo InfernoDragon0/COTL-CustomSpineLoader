@@ -1,0 +1,9 @@
+{
+    "name": "CotLSpineLoader",
+    "version_number": "2.0.4",
+    "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
+    "description": "[PRE-RELEASE 5] CultTweaker 2.0 experimental build: layers, multi-selection and groups, the DLC dungeon dressing, and editing together over COTL MP Steam. For Cult of the Lamb 1.5.26. Back up your saves!",
+    "dependencies": [
+        "xhayper-COTL_API-0.3.4"
+    ]
+}

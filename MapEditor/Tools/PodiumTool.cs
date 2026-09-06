@@ -238,6 +238,18 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
 
     public void ResetTracking() => _placed.Clear();
 
+    /// Takes a placed podium out of the room and out of the books; false if it was not ours.
+    internal bool RemoveTracked(GameObject go)
+    {
+        if (go == null) return false;
+        var index = _placed.FindIndex(p => p.Instance == go);
+        if (index < 0) return false;
+
+        _placed.RemoveAt(index);
+        Object.Destroy(go);
+        return true;
+    }
+
     public GameObject SpawnPodium(Vector3 position, string typeName, bool clearAllOnEquip = true)
     {
         var template = AcquireTemplate();
@@ -355,6 +367,7 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             if (placed.Instance == null) continue;
             map.Podiums.Add(new MapPodiumData
             {
+                Id = Net.EditorIds.Of(placed.Instance),
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
                 Scale = MapEditorSerialization.V3(placed.Instance.transform.lossyScale),
                 Type = placed.SavedType,
@@ -367,6 +380,8 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             if (podium == null || IsTrackedOrChild(podium.gameObject)) continue;
             map.Podiums.Add(new MapPodiumData
             {
+                Id = Net.EditorIds.Of(podium.gameObject,
+                    Net.EditorIds.Seed("podium", podium.Type.ToString(), podium.transform.position)),
                 Position = MapEditorSerialization.V3(podium.transform.position),
                 Scale = MapEditorSerialization.V3(podium.transform.lossyScale),
                 Type = podium.Type.ToString(),

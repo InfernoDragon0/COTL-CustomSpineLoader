@@ -52,6 +52,10 @@ public static class HubSession
 
     private static string Begin(string hubName, Mode mode)
     {
+        // In a multiplayer session only the host takes the party somewhere else.
+        var held = Net.EditorNet.WhyNotWorldChange();
+        if (held != null) return held;
+
         if (_running) return "A hub is already being prepared.";
 
         if (PlayerFarming.Instance == null) return "Hubs open in game, not on the menu.";

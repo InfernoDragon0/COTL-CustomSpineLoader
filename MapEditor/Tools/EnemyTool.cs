@@ -328,6 +328,18 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         return removed;
     }
 
+    /// Takes a placed enemy out of the room and out of the books; false if it was not ours.
+    internal bool RemoveTracked(GameObject go)
+    {
+        if (go == null) return false;
+        var index = _placed.FindIndex(p => p.Instance == go);
+        if (index < 0) return false;
+
+        _placed.RemoveAt(index);
+        Object.Destroy(go);
+        return true;
+    }
+
     public IEnumerator SpawnEnemyRoutine(string key, bool isCustom, Vector3 position, bool withVfx)
     {
         if (isCustom)
@@ -735,6 +747,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
             if (placed.Instance == null) continue;
             map.Enemies.Add(new MapEnemyData
             {
+                Id = Net.EditorIds.Of(placed.Instance),
                 Key = placed.Key,
                 IsCustom = placed.IsCustom,
                 Position = MapEditorSerialization.V3(placed.Instance.transform.position),
