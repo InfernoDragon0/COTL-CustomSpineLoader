@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using COTL_API.Helpers;
@@ -25,6 +26,8 @@ public class CustomNpcConfig
     public string NpcToMimic = "";
 
     public NpcDialogue Dialogue;
+
+    public List<NpcQuests.NpcQuestConfig> Quests;
 }
 
 public class CultTweakerCustomNpc : CustomNpc
@@ -50,6 +53,7 @@ public class CultTweakerCustomNpc : CustomNpc
         _talk = string.IsNullOrEmpty(config.TalkAnimation) ? "talk" : config.TalkAnimation;
         SpineSkinName = config.SkinName ?? "";
         Dialogue = config.Dialogue;
+        Quests = config.Quests;
     }
 }
 
@@ -77,6 +81,10 @@ public class CustomNpcLoader : Loader<CustomNpcConfig>
                 var npc = new CultTweakerCustomNpc(internalName, config);
 
                 npc.SpineOverride = BuildSpine(entry.FolderPath, config, internalName);
+
+                // Quests register before the dialogue is checked, so a node naming one can be
+                // told apart from a node naming nothing.
+                NpcQuests.QuestRegistry.Register(npc, npc.Quests);
 
                 if (npc.Dialogue != null)
                 {

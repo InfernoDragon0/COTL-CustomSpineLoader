@@ -44,7 +44,9 @@ public class CustomTarotLoader : Loader<CustomTarotConfig>
                 var tarot = new CultTweakerCustomTarot(internalName, cfg, spritePath, backSpritePath);
                 Plugin.Log.LogInfo("Successfully created custom tarot with internal name : " + tarot.InternalName);
 
-                loadedTarots.Add(CustomTarotCardManager.Add(tarot));
+                var tarotCard = CustomTarotCardManager.Add(tarot);
+                loadedTarots.Add(tarotCard);
+                Api.CultTweakerApi.NoteContent("tarots", internalName, (int)tarotCard);
             }
             catch (Exception e)
             {

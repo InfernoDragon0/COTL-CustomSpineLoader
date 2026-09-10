@@ -105,6 +105,7 @@ public class CustomStructureLoader : Loader<CustomStructureConfig>
 
                 var type = CustomStructureManager.Add(custom);
                 loadedStructures.Add(type);
+                Api.CultTweakerApi.NoteContent("structures", custom.InternalName, (int)type);
 
                 if (cfg.HideFromBuildMenu)
                 {

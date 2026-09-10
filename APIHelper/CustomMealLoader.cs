@@ -39,7 +39,9 @@ public class CustomMealLoader : Loader<CustomMealConfig>
                 var meal = new CultTweakerCustomMeal(internalName, cfg, spritePath);
                 Plugin.Log.LogInfo("Successfully created custom meal with internal name : " + meal.InternalName);
 
-                loadedMeals.Add(CustomItemManager.Add(meal));
+                var mealType = CustomItemManager.Add(meal);
+                loadedMeals.Add(mealType);
+                Api.CultTweakerApi.NoteContent("meals", internalName, (int)mealType);
             }
             catch (Exception e)
             {

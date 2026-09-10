@@ -98,6 +98,133 @@ name.
 Both settings apply per player and only while that spine is worn; other skins in the same file, and
 the vanilla lamb, are untouched.
 
+### Custom NPC Quests
+
+A custom NPC can hand out quests. They appear in the objectives panel on the right of the screen
+beside the game's own, with the same tick boxes and counters, and they finish on the same kinds of
+criteria: gathering items, killing enemies, clearing a dungeon, building, performing a ritual,
+growing the flock, or any of the game's own story beats. Dialogue offers them, nags about them and
+takes them in. Quests are written in the NPC's `config.json`; the full guide is in
+[CustomNpcQuests.md](CustomNpcQuests.md).
+
+```
+"Quests": [
+    {
+        "Id": "firewood",
+        "Title": "Wood for Bramble",
+        "Goals": [ { "Type": "collectItem", "Target": "LOG", "Count": 10, "Text": "Gather logs" } ],
+        "Reward": { "Items": [ { "Item": "GOLD_NUGGET", "Count": 5 } ] }
+    }
+]
+```
+
+### Custom Weapons
+
+A player spine can add weapons to the game. They are declared in the same `config.json`, under
+`weapons`, and each one is built on a vanilla weapon: it keeps that weapon's heavy attack, sounds,
+hit shapes and pickup card, and swaps in your look, your combo and your numbers. The full field
+reference and a guide to hit timings are in [CustomWeapons.md](CustomWeapons.md).
+
+```
+{
+    "defaultSkin": "Lamb",
+    "skins": [ "Lamb" ],
+    "weapons": [
+        {
+            "name": "FlameSword",
+            "displayName": "Flame Sword",
+            "description": "Burns a little.",
+            "baseWeapon": "Sword",
+            "skin": "Weapons/FlameSword",
+            "pickupAnimation": "weapons/get-weapon-flamesword",
+            "icon": "flamesword.png",
+            "combo": [
+                { "animation": "attack-combo1-flame", "damage": 1.0, "speed": 1.0 },
+                { "animation": "attack-combo2-flame", "damage": 1.0, "speed": 1.2 },
+                { "animation": "attack-combo3-flame", "damage": 1.5, "speed": 0.9 }
+            ]
+        }
+    ]
+}
+```
+
+**name** is the weapon's id inside this spine. **baseWeapon** is one of `Sword`, `Axe`, `Hammer`,
+`Dagger`, `Gauntlet`, `Blunderbuss`, `Shield`, `Chain` (default `Sword`).
+
+**skin** is a skin in your Spine file holding the weapon's artwork. Make it the way the game makes
+`Weapons/Poison`: a skin whose attachments sit on the `WEAPON` slot (and `Weapons/SwordHeavy` for
+the heavy attack). If you reuse the base weapon's animations, name the attachments the way those
+animations expect them - `Weapons/Sword`, `Weapons/Axe`, `Weapons/Hammer`, `Weapons/Dagger`,
+`Weapons/Blunderbuss`, `Shield` - so the animation shows your image where it showed the vanilla
+one. If you make your own animations, key the `WEAPON` slot to whatever you named your attachments.
+
+**combo** is the chain of hits, in order; leave it out to keep the base weapon's chain. Each hit
+takes an `animation` (default: the base weapon's hit at that position), a `damage` (the base
+damage before level, fleece and tarot bonuses; vanilla swords hit for about 1), and a `speed`
+(playback speed of the animation, 1 = as authored).
+
+**Hit boxes.** A hit lands as a circle spawned in front of the player when the animation fires its
+"Attack Deal Damage" event; the artwork itself never collides. Every hit starts as a copy of the
+base weapon's hit at the same position in its chain, so a Sword-based weapon swings like a sword
+and an Axe-based one like an axe, and these optional fields on a hit reshape it:
+
+```
+{
+    "animation": "attack-combo3-flame", "damage": 1.5, "speed": 0.9,
+    "range": 1.2,          // how far in front of the player the circle is placed (world units)
+    "hitboxRadius": 0.9,   // radius of the circle; defaults to range, as in vanilla
+    "knockback": 1.5,      // push on whatever it hits
+    "lungeSpeed": 20,      // forward lunge while swinging, and
+    "lungeDuration": 0.15, //   how long it lasts
+    "cameraShake": 0.5,
+    "attackType": "Melee", // Melee, Heavy, Projectile, Poison, NoKnockBack, Ice, Charm
+    "canQueueNext": true,  // the next hit may be queued during this one
+    "canTurn": true        // the player may turn while it plays
+}
+```
+
+Anything left out keeps the base hit's value. Vanilla swords reach about 1 unit; the range
+multiplier from tarot cards applies to both `range` and `hitboxRadius` as it does in vanilla.
+
+Your attack animations should carry the three events the game's combat waits for: `Attack Deal
+Damage`, `Attack Can Break` and `Attack Has Finished` (copy them from a vanilla attack). An
+animation with none of them gets them added when the spine loads, at 35% and 65% of its length and
+at its end; `hitAt` and `breakAt` on the hit (fractions from 0 to 1) move the first two.
+
+**pickupAnimation** plays when the weapon is picked up (default: the base weapon's). **icon** is a
+PNG in the spine folder for the HUD and the podium (default: the base weapon's). **modifierSkin**
+is the vanilla modifier layered under yours (`Normal`, `Poison`, `Critical`, `Healing`, `Fervor`,
+`Godly`, `Necromancy`; default `Normal`). `inPool: false` keeps the weapon out of random podium and
+chest rolls.
+
+**Loading.** The weapon's artwork lives in your spine file, which is only loaded when needed: at
+boot if a player is wearing it, otherwise the moment one of its weapons appears in a room (a podium
+rolls it, a chest or a fallen enemy drops it), in the background while the player walks over.
+Someone who reaches it before the load finishes holds it with the base weapon's look until the art
+lands, a few seconds at most. To avoid even that, set **preloadWeapons** to `true` at the top level
+of the config (beside `defaultSkin`): the spine then loads at boot whether or not anyone wears it,
+at the cost of a longer start and a few hundred megabytes of memory per spine.
+
+**Any spine can wield it.** A custom weapon is not tied to the spine that declares it. Whoever holds
+it, on any skin, gets its artwork copied onto their skeleton the way a fleece is, and the numbers
+above. Animations are the one thing that cannot travel: on a skin that does not have your custom
+animations, the base weapon's animations play instead, still with your artwork if your attachments
+use the base weapon's names as described above. The same applies in multiplayer, where each player
+may wear a different spine.
+
+**Getting one in a run.** Custom weapons join the weapon pool, so weapon podiums and chests can roll
+them. To place one on purpose, open the map editor's Podium tool: its **Weapon** list has every
+vanilla weapon and every custom one (`<spine>/<name>`), and a podium placed with one picked always
+offers that weapon.
+
+### For other mod authors
+
+Other mods can add content to CultTweaker without any code: put your files in a `CultTweaker`
+folder inside your own plugin folder, for example
+`BepInEx/plugins/YourMod/CultTweaker/CustomDungeonMaps/YourDungeon.json`, and they load beside the
+player's own. There is also a small code contract for listing, finding and entering custom content.
+Both are documented in [ModdingApi.md](ModdingApi.md).
+
 ### Custom Enemies
 
 Enemies live in `BepInEx > plugins > CultTweaker > CustomEnemies`, one folder each, with a

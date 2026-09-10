@@ -95,6 +95,7 @@ public class CustomEnemyLoader : Loader<CustomEnemyConfig>
 
                 var type = CustomEnemyManager.Add(enemy);
                 Registered[type] = enemy;
+                Api.CultTweakerApi.NoteContent("enemies", internalName, (int)type);
 
                 coroutineHost.StartCoroutine(CustomEnemyManager.BuildEnemyPrefab(enemy));
 

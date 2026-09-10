@@ -577,6 +577,11 @@ public class PlayerSpineLoader
         return entry != null && entry.State == SpineState.Ready;
     }
 
+    public static bool IsRegistered(string name) => FindEntry(name) != null;
+
+    /// The spine's skeleton asset once loaded (null before; see EnsureLoaded).
+    public static SkeletonDataAsset AssetFor(string name) => FindEntry(name)?.Asset;
+
     public static List<string> RegisteredSpineNames()
     {
         var names = new List<string>();
@@ -747,20 +752,33 @@ public class PlayerSpineLoader
 
             Registry[name] = entry;
 
-            if (entry.Config != null) SpineConfigs[name.Replace("/", "")] = entry.Config;
+            if (entry.Config != null)
+            {
+                SpineConfigs[name.Replace("/", "")] = entry.Config;
+                CustomWeapons.Register(name, folder, entry.Config);
+            }
         }
+
+        CustomWeapons.Seal();
 
         LoadedCustomSpines = true;
 
         var loadWatch = Stopwatch.StartNew();
         var eager = 0;
-        foreach (var name in new[]
-                 {
-                     ActiveSpineName(0), ActiveSpineName(1),
-                     SpineNameFromKey(RememberedSpineKey(0)), SpineNameFromKey(RememberedSpineKey(1)),
-                     SpineNameFromFleece(Plugin.CurrentFleeceNameP1?.Value),
-                     SpineNameFromFleece(Plugin.CurrentFleeceNameP2?.Value)
-                 })
+        var eagerNames = new List<string>
+        {
+            ActiveSpineName(0), ActiveSpineName(1),
+            SpineNameFromKey(RememberedSpineKey(0)), SpineNameFromKey(RememberedSpineKey(1)),
+            SpineNameFromFleece(Plugin.CurrentFleeceNameP1?.Value),
+            SpineNameFromFleece(Plugin.CurrentFleeceNameP2?.Value)
+        };
+
+        // Spines that asked for their weapons to be ready from the first room pay the load at boot.
+        foreach (var entry in Registry.Values)
+            if (entry.Config is { PreloadWeapons: true, Weapons.Count: > 0 })
+                eagerNames.Add(entry.Name);
+
+        foreach (var name in eagerNames)
         {
             if (string.IsNullOrEmpty(name) || !Registry.TryGetValue(name, out var entry)) continue;
             if (entry.State != SpineState.NotLoaded) continue;
@@ -958,4 +976,12 @@ public class PlayerSpineConfig
     public bool DisableFleeceCycling { get; set; } = false;
 
     public string[] HiddenSlots { get; set; } = [];
+
+    /// Weapons this spine adds to the game; see CustomWeapons.
+    public List<PlayerWeaponConfig> Weapons { get; set; }
+
+    /// Load this spine at boot so its weapons never show the base look while it loads. Costs
+    /// boot time and memory for a spine nobody may wear; off, the spine loads when a weapon of
+    /// its enters the world.
+    public bool PreloadWeapons { get; set; } = false;
 }

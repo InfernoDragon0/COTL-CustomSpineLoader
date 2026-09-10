@@ -632,6 +632,19 @@ per-room "clear all on equip" rule.
   silently vanishing.
 - The room's authored podiums are captured on save: the snapshot deliberately never records podiums
   as props, so without this they were lost on load.
+- A podium can be pinned to one weapon: the saved `Type` string is `Weapon:<key>`, resolved to
+  `Types.Weapon` plus `ForceEquipmentType` (a custom weapon by registry key, or a vanilla family by
+  enum name). It stays a plain string so the map file, the sync layer and old readers need nothing
+  new; an install that lacks the weapon logs once and rolls like an ordinary weapon podium. The
+  panel keeps two dropdowns (type, weapon) and composes the string on placement; picking a weapon
+  flips the type to Weapon and picking another type clears the weapon, so the two never disagree.
+  `SetSelected` on a dropdown does not fire its callback, which is what makes the cross-update safe.
+  DEAD END: setting `ForceEquipmentType` alone. Only the base `Interaction_WeaponSelectionPodium.SetWeapon`
+  reads it; the prefab the tool spawns (`Interaction_Chest.WeaponPodiumPrefab`) is an
+  `Interaction_WeaponChoiceChest`, whose override (and `Interaction_WeaponChoice`'s) rolls
+  `GetRandomWeaponInPool` and never looks at the field. A postfix on both overrides writes the pin
+  into `TypeOfWeapon` (protected setter, via Traverse) after the roll and before `SetItem` picks the
+  icon, guarded so a curse-swapped or deactivated podium is left alone.
 
 ### Trigger
 
@@ -2284,6 +2297,88 @@ One thing deliberately stays local: an extracted cutscene soundtrack is cached i
 `CustomCutscenes` folder even when the video came from another mod, since that mod's folder is not
 ours to write into.
 
+### Custom NPC quests (APIHelper/Quests/, Patches/QuestPatches.cs, CustomNpcQuests.md)
+
+- **A quest is shown by putting real vanilla objectives in the game's own list.** The objectives
+  panel on the right is driven entirely by `ObjectiveManager` events and `DataManager.Instance.
+  Objectives`; there is no seam to draw our own line into it. So one `ObjectivesData` per goal is
+  added, all sharing the quest's title term as `GroupId`, which is what makes them one titled group.
+- **The shell is `Objectives_CollectItem`, and picking it was not obvious.** `Objectives_Custom`
+  looks like the natural choice and is a trap: with `TargetFollowerID` and `Follower` both -1 its
+  `CheckComplete` falls through to `return true`, so the first `UpdateObjective` — the only way to
+  refresh a line's text — would finish the quest. `Objectives_CollectItem` is the one class whose
+  text is ours (`CustomTerm`) and whose completion is a plain `Count >= Target`, so both are ours to
+  drive. `ItemType` is `NONE` and `Count` is written by our tick; the shell's own inventory listener
+  can only fire for items of type NONE, and the tick re-asserts `Count` anyway.
+- **The " 3 / 10" counter is not optional, so it is hidden when it would read badly.** A custom term
+  always gets `FormatCurrentMax` appended. That reads exactly right for a countable goal and badly
+  for a one-shot, so a goal with `Count <= 1` and the "return to me" line get `<alpha=#00>` on the
+  end of their registered text, which makes the appended counter invisible in TMP without removing it.
+- **The shells never reach the save file.** `QuestSaveMask` lifts them out on `SaveAndLoad.Saving`
+  and puts them back from the writer's `OnWriteCompleted`, the same shape as the base editor's
+  `SaveMask`, watchdog included. Without it, removing CultTweaker would strand a real objective in
+  the player's save whose text points at a term nothing registers any more and whose target nothing
+  can reach. Progress lives in `QuestProgress`, one JSON per save slot, keyed by `npc/questId`.
+- **Nothing in that file is a game id.** Items, enemies, structures, dungeons and rituals are named,
+  and resolved to their per-install numbers on use through `CultTweakerApi.IdOf`. This is the same
+  rule the ids warning below is about, applied where it is easiest to get wrong.
+- **World-derived goals beat counter goals wherever the world can be read.** Items, kills, structures
+  and follower count are re-read rather than accumulated, so they self-correct after a load, a cheat
+  or another mod's doing. Only what cannot be observed after the fact — a cleared run, a ritual,
+  one of the game's story beats, a conversation, a flag — is counted from an event.
+- **Those reads are event-triggered, not timed, and coalesced.** The first version polled all four
+  every 0.5s, which meant `StructureManager.GetAllStructuresOfType` walking every `StructureBrain`
+  in the settlement twice a second for as long as a build goal was open. `EnsureHooked` now
+  subscribes to the same four signals the game's own `ObjectiveManager` uses —
+  `Inventory.OnInventoryUpdated`, `UnitObject.OnEnemyKilled`, `StructureManager.OnStructureAdded` /
+  `OnStructureRemoved`, `FollowerManager.OnFollowerAdded` / `OnFollowerRemoved` — and each only sets
+  a bit in `_dirty`; the tick reads a kind only when its bit is set, then clears it. Two things fall
+  out of that. A `_watching` mask, recomputed whenever a quest starts or stops, means the handlers
+  cost nothing when no quest wants that kind. And many events in one frame become one read, so a
+  settlement loading with two hundred buildings announcing themselves is one scan rather than two
+  hundred — better than vanilla here, whose handlers call `CheckObjectives` once per event. A 30s
+  sweep forces a re-read as a net against a signal the game never sent; nothing depends on it.
+- **The game's own quest events are the wide door.** `ObjectiveManager.CompleteCustomObjective` is
+  postfixed, so all ~200 `Objectives.CustomQuestTypes` beats become usable criteria for one patch,
+  rather than one hook per kind of thing the game can do.
+- **Turn-in has an ordering trap.** `UpdateQuestStatus` deletes a group the moment every line in it
+  is complete, so the "return to me" line is added to the group *before* the last goal is ticked off,
+  never after. Once a quest is `ready` its goals stop being polled, so spending the items you were
+  asked to gather cannot walk the quest backwards.
+- **DEAD END: a custom `ObjectivesData` subclass.** `ObjectivesData` is a MessagePack union with a
+  fixed `[Union]` table; a subclass of our own throws on serialize the first time anything writes
+  `DataManager`, and the save path is not the only writer. Reusing a vanilla class is the only way.
+
+### The contract for other mods (Api/CultTweakerApi.cs, ModdingApi.md)
+
+- **One class is the promise; everything else moves.** `CustomSpineLoader.Api.CultTweakerApi` is the
+  only surface another mod is meant to touch, alongside `MapEditor.Net.EditorNet` (the older, separate
+  editor-sync contract at its own version 2). Members are never removed or changed in meaning; new
+  ones are added and `ContractVersion` goes up by one. The rest of the assembly stays free to be
+  rearranged, which is the point of having it.
+- **Kinds are strings, not an enum.** `Kind.Dungeons`, `Kind.Npcs`, ... are const strings and
+  `Kinds()` returns the list, so a caller can iterate without recompiling when a kind is added, and
+  an unknown kind logs a warning and answers empty rather than throwing an undefined enum value back
+  across the boundary. Every query is wrapped: a foreign mod never has to guard against our internals.
+- **Names come from two different places by kind.** Registered kinds (npcs, enemies, items, meals,
+  tarots, structures, weapons, skins) answer from the live registries, so the list is what actually
+  loaded; document kinds (rooms, levels, dungeon maps, world maps, menus) answer by listing `*.json`
+  filenames through `ModContentPaths`, which is cheap and covers every mod's folders without parsing
+  a single document.
+- **`ContentIds` exists because the game's registries lose the name.** `CustomItemManager.Add` and
+  friends return an enum value and keep no record of the internal name we passed, so `IdOf` would be
+  impossible; each loader calls `CultTweakerApi.NoteContent(kind, internalName, (int)type)` at the
+  point it registers. Dungeons and weapons need no registry: their own objects carry both.
+- **Ids are deliberately typed as `int`, and documented as unsendable.** They are COTL_API GUID
+  allocations, per install and per load order. `IdOf` returns `int.MinValue` for "no such thing" so
+  a caller cannot mistake a real id for a failure. The doc comment carries the warning because this
+  exact mistake cost a debugging session: the MP mod put a raw custom-dungeon `FollowerLocation` in
+  its scene-change message and the guest black-screened on an id that means nothing there.
+- **`OnReady` answers the load-order hazard.** Content registers during our `Awake` and BepInEx does
+  not order plugins, so a foreign mod reading a registry from its own `Awake` can see an empty one.
+  `MarkReady` runs at the end of `Plugin.Awake` and drains queued callbacks; a callback added after
+  that runs immediately. Callback exceptions are caught, so one bad consumer cannot take our boot down.
+
 ## World maps
 
 The world editor builds a custom overworld in the shape of the DLC's Ewefall map: a full-screen
@@ -2981,6 +3076,141 @@ Organized by area; each entry is the why/mechanism/dead-end knowledge, not a res
 - Fleece: ResolveFleeceSkin is shared by the F-keys, the panel and the SetSkin patch (one fix reaches all three); "CultTweaker_<spine></spine>_<fleece></fleece>" splits capped at 3 (fleece names may contain underscores); GetSkeletonData(false), not the field (the field is null until the warm-up reaches the spine — the call parses on the spot when needed). ApplyFleeceAttachments clears slots the fleece doesn't fill (the previous fleece's poncho stays on under the new one otherwise); hidden slots win over fleece slots (nine of fourteen are the poncho). HideSlots after the fleece, never before. Players beyond the second are dressed but NOT remembered (config and SetSkin patch only know two; the choice lasts until the skin next rebuilds — the panel carries the note). A fleece refused by DisableFleeceCycling still strips slots, so AnnounceLook fires anyway. ResolvePlayer: `players` is only populated with coop features on — solo falls back to Instance.
 - **Lazy loading:** eighteen installed spines used to pay full cost at boot (whole gigabytes of parsed data) for looks nobody wore. The scan now reads only config.json into a registry; the selected spines (API's saved choice per player + the remembered fleece) load eagerly (the saved look on the player from the first frame — synchronously, at startup); everything else loads on first pick — file IO on a worker Task (fully qualified: a game assembly ships its own 'Task'), texture decodes one per frame, parse on the warm-up thread, applied by callback. FindEntry accepts bare names or "<spine></spine>/<skin></skin>" keys. IsPreparing feeds the F7 panel's "waiting" state. RegisteredSpineNames mints the same per-skin keys AddPlayerSpine does. The load caption is suppressed while the panel is open (it lands where the player dock stands, and the dock says it better — naming who is waiting). Register happens BEFORE the parse lands (the API can resolve the name; the wearer dresses by callback — the smooth swap). Register deliberately does NOT ChangeSelectedPlayerSpine (the old loader selected every spine as it registered — the last folder was worn on every boot regardless of the pick; the API's saved selection rules). **RestoreSelectedSpine: load first, select second** — ChangeSelectedPlayerSpine only takes a spine the API has been handed, and handing happens at load end; selecting first named something that didn't exist, the API kept its default, the player came up plain lamb with the log cheerfully reporting a restore that never happened. Read the selection BACK after (the API takes a string and reports nothing — a silent no-op restore is exactly the failure this catches). Both boot sources are asked (the API's selection is empty in Plugin.Awake — asking only it lost the remembered spine). StartWarmUp last (the worker never competes with the loading loop that queues it). CreateRuntimeInstance(initialize:false) — the third argument is the main-thread whole-JSON parse.
 - PlayerSpineConfig: DisableFleeceCycling for spines dressing their own body; HiddenSlots exists because hiding a slot in the Spine editor doesn't export, clearing the setup attachment lasts until the first animation keying the slot, and the game re-attaches the crown by name — transparent live-skin copies are the one thing all three paths resolve through.
+
+### Custom weapons (SpineLoaderHelper/CustomWeapons.cs, Patches/CustomWeaponPatches.cs)
+
+- **Weapons are data, not code.** Vanilla keys everything on `EquipmentType` and looks the rest up in
+  `WeaponData` ScriptableObjects (`EquipmentManager.GetWeaponData`, `Resources` under
+  `Data/Equipment Data/Weapons`): the combo chain (`Combos[]`, each hit its animation name, base
+  damage, reach and swipe prefab), the pickup animation, the icons, the modifier skin. A custom weapon
+  is `Object.Instantiate` of the base weapon's record (a deep copy of the serialised combos) with the
+  id, combos, pickup, icon and skin overwritten, answered from a postfix on `GetWeaponData` when the
+  game asks for an id it does not have. `PrimaryEquipmentType` stays the base family, which is what
+  every behavioural switch (heavy attack, rumble, sounds, fervour cost) branches on - a novel family
+  would fall through to the `default:` arms and lose the heavy attack.
+- **Ids are hashed, not counted.** `EquipmentType` is serialised as an int (the weapon pool lives in
+  the save; a peer sends it over the wire), so the id must be the same across sessions and machines.
+  FNV-1a of the lower-cased key, mapped onto the gaps below `Tentacles` (500) that the enum leaves
+  free (9-99, 108-199, ...), linear probing on collision in name order. Below 500 matters: the UI's
+  "is this a weapon" test is `type < Tentacles`. DEAD END: numbering in registration order - adding a
+  spine renumbers everything and a saved pool points at different weapons.
+- **The look travels like a fleece.** Vanilla's weapon skins (`Weapons/Normal`, `Weapons/Poison`, ...)
+  carry only the modifier tint; the weapon's shape is keyed in the attack animations by attachment
+  name (`WEAPON` -> `Weapons/Axe`). So a custom weapon's skin is a set of attachments, copied into the
+  live `PlayerSkin` after `SetSkin` rebuilt it, by slot **name** (indices differ between skeletons)
+  from the declaring spine's `SkeletonData`, whatever spine the wearer has on. Same rule the fleece
+  uses, same cross-atlas rendering. The home spine loads lazily like any other; a wearer that arrives
+  first gets dressed by the ready callback.
+- **Loading the declaring spine.** The art lives in that spine's parsed skeleton, which loads like any
+  other spine: at boot only when worn, otherwise on demand. Demand is raised when the weapon ENTERS
+  the world (a postfix on the podium's `TypeOfWeapon` setter, which every podium kind writes, and on
+  `Interaction_WeaponPickUp.SetWeapon`), not at pickup, so the walk to the podium covers the load.
+  The dresser never parses on the main thread: a boot-loaded spine whose warm-up has not landed has
+  `skeletonData == null`, and `GetSkeletonData(false)` there would block for seconds mid-run - the
+  dresser waits on a coroutine and dresses by callback instead (DEAD END: calling it directly, the
+  first version did). Until the art lands the wearer shows the base weapon's look. Loads raised by
+  weapons pass `announce: false` (the "Preparing" caption is the F7 panel's). `preloadWeapons: true`
+  on the spine config puts it in the boot-time eager list beside the worn spines (opt-in per spine
+  because a parsed player skeleton is hundreds of MB and seconds of boot, the cost lazy loading
+  exists to avoid).
+- **Animations cannot travel**, they are bound to their skeleton's bone and slot layout. So every
+  custom animation name maps to the base weapon's counterpart (`Fallbacks`), applied in a prefix on
+  `Spine.AnimationState.SetAnimation(int, string, bool)` and `AddAnimation` only when the skeleton
+  lacks the requested name. One choke point covers the six pickup sites, the combo coroutine and the
+  relic re-equip, and it is what keeps a foreign spine from throwing `Animation not found` - which
+  inside the pickup coroutine would strand the player in `CustomAnimation` for good.
+- **Per-hit speed is the track entry's `TimeScale`**, set in the `SetAnimation` postfix when the
+  requested name is a configured hit and the state belongs to a player holding that weapon (match
+  by `CurrentCombo`, else by name). Vanilla's speed is `skeletonAnimation.timeScale` set inside a
+  coroutine and reset at `CanBreak`; the entry scale composes with it and dies with the entry.
+  `WeaponData.Speed` is display only (the pickup card), set to the base value times the mean hit speed.
+- **Hitboxes are the base weapon's swipe.** `AttackDealDamage` instantiates the hit's `SwipeObject`
+  prefab in front of the player (offset `RangeRadius * RangeMultiplier` along the facing) and
+  `Swipe.Init` sets its `CircleCollider2D.radius` to the same number, for 0.1s. Nothing on the
+  skeleton collides. A custom hit is a `MemberwiseClone` of the base hit (prefab and curves shared),
+  with `range`, `knockback`, lunge, shake, attack type and the two queue/turn flags overwritten. A
+  separate `hitboxRadius` needs a hook because vanilla has one number for reach and radius: the
+  game's `AttackDealDamage` is bracketed (prefix/finalizer) to name the player whose LIGHT hit is
+  spawning, and a `Swipe.Init` postfix resizes the circle only inside that bracket - heavy attacks
+  and everything else that goes through `Swipe.Init` (gauntlet heavies, `CreateSwipe`) are untouched.
+- **Hit box gizmo** (`Debug / WeaponHitboxes`, `HitboxGizmo.cs`): a `Swipe.Init` postfix draws the
+  collider (circle, polygon or box, in world space from the collider's own transform, so the game's
+  scale flip for left-facing attacks is included) plus a spoke from `Origin` to the swipe, on a
+  LineRenderer that fades on unscaled time and destroys itself - independent of the swipe, which
+  lives 0.1s. Every swipe is drawn, not just custom ones, because the point is comparison; colour
+  says whose (custom light hit / player / other) using the same `AttackDealDamage` bracket.
+- **The Chain is not a swipe weapon.** `PlayerWeapon.ChainAttack` moves two `ChainHook` objects along
+  an `EllipseMovement` built from the hit record's ellipse fields (start angle, sweep, radii,
+  duration / attack rate, radius curve), each stepping in FixedUpdate at the owner spine's
+  timeScale; the chain is a LineRenderer bent along a bezier through the ellipse, the damage is the
+  hook's collider (`RangeRadius`) plus chain damage. The hook's sprite comes from a
+  `WeaponTypeToSprite` list on the prefab looked up by EXACT `EquipmentType`, so a custom id got a
+  null sprite: a `SetVisuals` postfix substitutes the configured `hookIcon` (private
+  `hook2DVisual`/`hook3DVisual` renderers via Traverse) after re-running with the base type, whose
+  sprite is then the SIZE reference: `Fit` rebuilds the custom sprite with a pixels-per-unit that
+  makes its larger side match the reference's `bounds.size` (times `hookScale`) and copies the
+  reference's normalised pivot - a sprite change, never a transform scale, so nothing leaks onto
+  the next weapon's hook. The podium/HUD icon is fitted the same way against the base
+  `WorldSprite`/`UISprite`, and falls back to `hookIcon` when `icon` is empty (DEAD END: raw
+  `CreateSpriteFromPath` output - a 275px hammer came out several units across).
+- **Chain sweep shapes are hit data; the move is the hit INDEX.** `ChainAttack` reads every ellipse
+  number from `Combos[CurrentCombo]` (`StartAngle` relative to facing, `AngleToMove`,
+  `EllipseRadiusY` = horizontal radius and `EllipseRadiusX` = vertical - the names are crossed
+  because the ctor takes them as radius1/radius2 against Right/Up - `OffsetMultiplier` along
+  the facing's perpendicular, `Duration` / attack rate, collider delays) but `switch (CurrentCombo)`
+  picks the arm: 0 left hook, 1 right hook, 2 the slam, default the untuned x/z half-circle. So
+  the `hook` block writes the numbers onto the cloned record, and `pattern` is done by routing:
+  a prefix on `ChainAttack` places the current hit's record at the pattern's index (swapping the
+  record that lives there) and points `CurrentCombo` at it; a finalizer restores both. The combo
+  advance runs later from the restored index, so the chain order is unaffected. `fallback` needs
+  an index >= 3 that still addresses a record, hence "four or more hits". Two consecutive `left`
+  hits re-Init the same `chainHook`, which the game already does on its own slam. The TEMPLATE
+  follows the pattern too: `SwipeObject` (the white arc VFX, spawned by `SpawnChainSwipeVFX` from
+  the record) and the curves are per-hit data, so a stab on slot three cloned from the slam's
+  record kept the slam's overhead arc even though the hook stabbed. `ColliderDisabledDelay` is
+  0.28s on the chain's thrusts (0.4 on the slam): a `duration` longer than that with no explicit
+  `colliderOff` is raised to the duration, or a 360 sweep hurts for its first half only.
+- **Two chains:** `PlayerWeapon` owns exactly two `ChainHook` objects (`chainHook`, `chainHook1`),
+  and only the slam Inits both. `hooks: 2` is a `ChainAttack` POSTFIX (after the game's own swing,
+  before the finalizer restores the routing, so `Combos[CurrentCombo]` is still the hit's record)
+  that Inits the other hook with a mirrored `CenterOffset` and `SecondStartAngle` added to the start
+  angle. Damage repeats the game's own line (`GetDamage`, a fresh `GetCritChance` roll, Skull/Spider
+  flags) rather than reading the first hook's, and the swipe VFX is spawned through the private
+  `SpawnChainSwipeVFX`. `_lastSwap` carries the real hit index into the postfix, since `CurrentCombo`
+  there is the routed one. Only moves 0 and 1 qualify: the slam already uses both and the fallback
+  arm builds its own hard-coded ellipse that the record does not describe. `secondDelay` (divided by
+  the attack rate, like every other duration) waits on a coroutine before Init - so every number is
+  COPIED off the record into a `SecondShot` first: the finalizer puts the record back the moment the
+  attack call returns, and a delayed shot reading it then would get the slot's original hit. Facing
+  is read at fire time, not capture time, so a delayed chain follows the player's turn.
+- **Hook motion:** `ChainHook.Init` puts the hook AT `GetEllipsePosition` at once (no travel from
+  the hand), `FixedUpdate` advances `currentTime` at the owner spine's timeScale, and completion
+  with `animatedHide` just deactivates the object. `RadiusMultiplierOverTime` is evaluated every
+  frame against the ellipse radii, so a thrust is a 0-degree sweep (the game's straight-line chain
+  mode, `AngleToMove < 0.1`) with a radius curve 0 -> 1 -> small; `ScaleMultiplierOverTime` sizes the
+  hook. Config pairs become an `AnimationCurve` with smoothed tangents. The gizmo follows the hook
+  with a `HookFollower` on the hook object (both `Init` overloads patched via TargetMethods; the
+  private `hookCollider`/`chainCollider` read by Traverse once), drawn in `LateUpdate` after the
+  hook moved, alpha from `Collider2D.enabled` so the collider delays are visible.
+- **Attack events are mandatory.** `PlayerWeapon` advances its attack state machine only on the
+  Spine events `Attack Deal Damage`, `Attack Can Break`, `Attack Has Finished` (and commits facing on
+  `Update Angle`); without the middle two the coroutine spins in `Begin` forever. Animations on the
+  home skeleton that carry none get an `EventTimeline` injected once (at 35%/65%/end, or the hit's
+  `hitAt`/`breakAt`), with `EventData` added to the skeleton if the name is missing. Only whole
+  absence triggers it: an animation with some of the events is the author's business.
+- **The pool.** `GetRandomWeaponInPool` drops any id whose `WeaponData` is null and any whose family
+  is not itself in the pool, so custom weapons are added to `DataManager.WeaponPool` (straight `Add`,
+  not `AddWeapon`, to skip the unlock alert) from the `PlayerFarming.Awake` prefix; families are in
+  the pool from a new game. Stale ids from a removed spine stay in the save and are filtered on every
+  roll. A `SetWeapon` prefix swaps an id with no data for the sword rather than let the attack code
+  dereference null.
+- **Multiplayer.** The id is what crosses the wire; both machines hash the same key to the same id as
+  long as both have the spine. The MP mod runs mirrored slots (the remote player is a real
+  `PlayerFarming` in the other slot) and applies the peer's weapon through `PlayerWeapon.SetWeapon`,
+  which rebuilds the skin, so the `SetSkin` postfix dresses the remote player with no MP change;
+  `ApplyWeaponSkin` stays public for any other skeleton that wants the look. Only the host's worn
+  skin folder is shipped (optional download), so a weapon whose spine the other machine lacks is
+  swapped for the sword there by the `SetWeapon` prefix - the wearer's own machine is unaffected.
 
 ### Shared spine folder recipe and memory (SpineFolderLoader.cs, SpineMemory.cs, StructureBuildingOverrideHelper.cs, StructureSpineHelper.cs)
 

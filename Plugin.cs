@@ -48,6 +48,9 @@ namespace CustomSpineLoader
 
         public static ConfigEntry<bool> DebugDumpFollowerSpineAtlas { get; set; }
 
+        /// Draw every attack swipe's collider where it lands, for tuning custom weapon hit boxes.
+        public static ConfigEntry<bool> DebugWeaponHitboxes { get; set; }
+
         public static ConfigEntry<bool> MapEditorVanillaPanelArt { get; set; }
         public static ConfigEntry<string> MapEditorPanelPlate { get; set; }
         public static ConfigEntry<string> MapEditorPanelSource { get; set; }
@@ -152,6 +155,11 @@ namespace CustomSpineLoader
             DebugDumpFollowerSpineAtlas = Config.Bind(
                 "Debug", "DumpFollowerSpineAtlas", false,
                 "If true, will dump the follower spine slots to a json file. May impact performance when enabled. Ensure followerSlots.json is not present before dumping.");
+            DebugWeaponHitboxes = Config.Bind(
+                "Debug", "WeaponHitboxes", false,
+                "Draw the outline of every attack hit box where it lands, with a line from the attacker to its centre: " +
+                "cyan for a custom weapon's light hit, amber for any other player attack, red for enemies. " +
+                "For tuning a custom weapon's range and hitboxRadius; leave off for play.");
             FleeceCyclingEnabled = Config.Bind("Fleece", "FleeceCyclingEnabled", true, "Enable Fleece Cycling for all players.");
 
             MapEditorVanillaPanelArt = Config.Bind(
@@ -256,6 +264,8 @@ namespace CustomSpineLoader
 
             SpineMemory.Phase("MapDungeons", MapEditor.CTMapDungeon.RegisterAll);
 
+            Api.CultTweakerApi.MarkReady();
+
             bootClock.Stop();
             Log.LogWarning($"STARTUP TOTAL: CultTweaker held the game's boot for {bootClock.ElapsedMilliseconds}ms " +
                            $"({SpineMemory.PhaseMilliseconds}ms of it in the phases above, " +
@@ -280,6 +290,19 @@ namespace CustomSpineLoader
                 {
                     _nextEditorNetErrorAt = Time.unscaledTime + 5f;
                     Log.LogError("EditorNet: tick failed: " + e);
+                }
+            }
+
+            try
+            {
+                APIHelper.NpcQuests.QuestRuntime.Tick();
+            }
+            catch (System.Exception e)
+            {
+                if (Time.unscaledTime >= _nextQuestErrorAt)
+                {
+                    _nextQuestErrorAt = Time.unscaledTime + 5f;
+                    Log.LogError("Quests: tick failed: " + e);
                 }
             }
 
@@ -337,6 +360,7 @@ namespace CustomSpineLoader
             }
         }
         private float _nextEditorNetErrorAt;
+        private float _nextQuestErrorAt;
 
         private void TestApplySpineOverride(int playerID = 0, bool cycle = true)
         {

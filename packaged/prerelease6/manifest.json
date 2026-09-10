@@ -1,0 +1,9 @@
+{
+    "name": "CotLSpineLoader",
+    "version_number": "2.0.5",
+    "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
+    "description": "[PRE-RELEASE 6] CultTweaker 2.0 experimental build: custom weapons, custom NPC quests, the Whiteboard tool, editing together over COTL MP Steam, and a modding API. For Cult of the Lamb 1.5.26. Back up your saves!",
+    "dependencies": [
+        "xhayper-COTL_API-0.3.4"
+    ]
+}

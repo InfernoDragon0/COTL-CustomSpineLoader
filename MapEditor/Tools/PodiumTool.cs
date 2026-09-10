@@ -109,6 +109,35 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         }
     }
 
+    /// The base podium honours ForceEquipmentType, but the prefab the tool spawns (the chest's
+    /// podium) is a subclass whose SetWeapon override rolls from the pool and never reads it. Both
+    /// overrides get the pin applied after their roll, before the podium picks its icon.
+    [HarmonyPatch]
+    private static class Podium_ForcedWeapon_Patch
+    {
+        [HarmonyTargetMethods]
+        private static IEnumerable<System.Reflection.MethodBase> Targets()
+        {
+            foreach (var type in new[] { typeof(Interaction_WeaponChoice), typeof(Interaction_WeaponChoiceChest) })
+            {
+                var method = AccessTools.Method(type, "SetWeapon", [typeof(int)]);
+                if (method != null && method.DeclaringType == type) yield return method;
+            }
+        }
+
+        [HarmonyPostfix]
+        private static void Postfix(Interaction_WeaponSelectionPodium __instance)
+        {
+            var forced = __instance.ForceEquipmentType;
+            if (forced == EquipmentType.None || __instance.TypeOfWeapon == forced) return;
+            if (__instance.Type != Interaction_WeaponSelectionPodium.Types.Weapon) return;
+            if (!__instance.gameObject.activeSelf) return;
+            if (EquipmentManager.GetWeaponData(forced) == null) return;
+
+            Traverse.Create(__instance).Property("TypeOfWeapon").SetValue(forced);
+        }
+    }
+
     public PodiumTool(RuntimeMapEditor editor)
     {
         _editor = editor;
@@ -121,10 +150,36 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
             if (index < 0 || index >= Types.Length) return;
 
             _type = type;
+            if (_type != "Weapon" && _weapon.Length > 0)
+            {
+                _weapon = "";
+                _weaponDropdown?.SetSelected(0);
+            }
+
             _placing = true;
             DestroyPreview();
-            _editor.SetStatus($"Selected {type} podium.");
+            _editor.SetStatus($"Selected {SelectedTypeName} podium.");
         });
+
+        _weaponOptions = WeaponOptions();
+        _weaponDropdown = ui.CreateDropdown(panel, "Weapon", _weaponOptions, (index, name) =>
+        {
+            if (index < 0 || index >= _weaponOptions.Count) return;
+
+            _weapon = index == 0 ? "" : name;
+            if (_weapon.Length > 0 && _type != "Weapon")
+            {
+                _type = "Weapon";
+                _typeDropdown?.SetSelected(System.Array.IndexOf(Types, "Weapon"));
+            }
+
+            _placing = true;
+            DestroyPreview();
+            _editor.SetStatus(_weapon.Length > 0
+                ? $"Weapon podium pinned to {_weapon}."
+                : "Weapon podium rolls from the pool.");
+        });
+        _weaponDropdown.SetSelected(0);
 
         ui.CreateToggle(panel, "Equip clears all", _clearAllOnEquip, v =>
         {
@@ -139,7 +194,37 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
 
     private static readonly string[] Types = ["Random", "Weapon", "Curse", "Relic"];
 
+    /// Podium types prefixed with this name a specific weapon: "Weapon:<spine>/<weapon>" for a
+    /// custom weapon, "Weapon:Axe" for a vanilla one.
+    public const string WeaponPrefix = "Weapon:";
+
+    private static readonly string[] VanillaWeapons =
+        ["Sword", "Axe", "Hammer", "Dagger", "Gauntlet", "Blunderbuss", "Shield", "Chain"];
+
+    private const string AnyWeapon = "Any (rolls from the pool)";
+
     private MapEditorDropdown _typeDropdown;
+    private MapEditorDropdown _weaponDropdown;
+    private List<string> _weaponOptions = [AnyWeapon];
+
+    /// The weapon a placed Weapon podium is pinned to: "" for the pool, a vanilla family name, or
+    /// a custom weapon's "<spine>/<name>" key.
+    private string _weapon = "";
+
+    /// What the next placement saves as its type: the plain type, or "Weapon:<name>" when pinned.
+    private string SelectedTypeName => _weapon.Length > 0 ? WeaponPrefix + _weapon : _type;
+
+    private static List<string> WeaponOptions()
+    {
+        var options = new List<string> { AnyWeapon };
+        options.AddRange(VanillaWeapons);
+
+        var keys = new List<string>();
+        foreach (var weapon in SpineLoaderHelper.CustomWeapons.All) keys.Add(weapon.Key);
+        keys.Sort(System.StringComparer.OrdinalIgnoreCase);
+        options.AddRange(keys);
+        return options;
+    }
 
     public void OnEnter()
     {
@@ -173,7 +258,7 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         UpdatePreview();
 
         if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
-        SpawnPodium(_editor.MouseWorld(), _type, _clearAllOnEquip);
+        SpawnPodium(_editor.MouseWorld(), SelectedTypeName, _clearAllOnEquip);
     }
 
     private void UpdatePreview()
@@ -194,7 +279,8 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
                 if (podium != null)
                 {
                     podium.RemoveIfNotFirstLayer = false;
-                    podium.Type = ResolveType(_type);
+                    podium.Type = ResolveType(SelectedTypeName);
+                    podium.ForceEquipmentType = ForcedWeapon(SelectedTypeName);
                 }
             });
         if (_preview != null) _preview.transform.position = _editor.MouseWorld();
@@ -280,6 +366,7 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         podium.RemoveIfNotFirstLayer = false;
         podium.WeaponTaken = false;
         podium.Type = ResolveType(typeName);
+        podium.ForceEquipmentType = ForcedWeapon(typeName);
         go.AddComponent<CTPodiumBehavior>().ClearAllOnEquip = clearAllOnEquip;
 
         go.transform.SetParent(parent, true);
@@ -298,8 +385,30 @@ public class PodiumTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcu
         return go;
     }
 
+    /// The weapon a "Weapon:<name>" podium is pinned to; None for every other type and for a
+    /// custom weapon this install does not have (the podium then rolls like a plain weapon podium).
+    public static EquipmentType ForcedWeapon(string typeName)
+    {
+        if (string.IsNullOrEmpty(typeName) || !typeName.StartsWith(WeaponPrefix, System.StringComparison.Ordinal))
+            return EquipmentType.None;
+
+        var name = typeName.Substring(WeaponPrefix.Length).Trim();
+        var custom = SpineLoaderHelper.CustomWeapons.ForKey(name);
+        if (custom != null) return custom.Type;
+
+        if (System.Enum.TryParse<EquipmentType>(name, true, out var vanilla) && vanilla < EquipmentType.Tentacles &&
+            EquipmentManager.GetWeaponData(vanilla) != null)
+            return vanilla;
+
+        Plugin.Log.LogWarning($"MapEditor: podium weapon '{name}' is not installed; the podium rolls instead.");
+        return EquipmentType.None;
+    }
+
     private static Interaction_WeaponSelectionPodium.Types ResolveType(string typeName)
     {
+        if (!string.IsNullOrEmpty(typeName) && typeName.StartsWith(WeaponPrefix, System.StringComparison.Ordinal))
+            return Interaction_WeaponSelectionPodium.Types.Weapon;
+
         if (!System.Enum.TryParse<Interaction_WeaponSelectionPodium.Types>(typeName, out var type))
             type = Interaction_WeaponSelectionPodium.Types.Random;
 

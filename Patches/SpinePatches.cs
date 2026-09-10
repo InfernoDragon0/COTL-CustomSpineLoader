@@ -101,6 +101,7 @@ namespace CustomSpineLoader.Patches
             }
 
             PlayerSpineLoader.EnsureSelectedLoaded();
+            CustomWeapons.EnsureInPool();
             return true;
         }
 
@@ -135,6 +136,8 @@ namespace CustomSpineLoader.Patches
             DressFleece(__instance, playerId, config);
 
             PlayerSpineLoader.HideSlots(__instance.Spine, config);
+
+            CustomWeapons.DressPlayer(__instance, __result);
         }
 
         private static void DressFleece(PlayerFarming player, int playerId, PlayerSpineConfig config)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CustomSpineLoader.MapEditor.Npc;
 using Spine.Unity;
 using UnityEngine;
@@ -19,6 +20,10 @@ public abstract class CustomNpc
     public virtual string TalkAnimation => "talk";
 
     public NpcDialogue Dialogue;
+
+    /// Quests this NPC hands out. Dialogue starts and finishes them; the objectives panel on the
+    /// right of the screen shows them while they run.
+    public List<NpcQuests.NpcQuestConfig> Quests;
 
     // ---- extension hooks ---------------------------------------------------------------------
 

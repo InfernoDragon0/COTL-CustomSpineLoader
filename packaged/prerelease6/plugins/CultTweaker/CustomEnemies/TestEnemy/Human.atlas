@@ -1,0 +1,1741 @@
+
+Human.png
+size: 2048,2031
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+Body/ArmDead
+  rotate: true
+  xy: 1169, 2003
+  size: 26, 66
+  orig: 26, 66
+  offset: 0, 0
+  index: -1
+Body/ArmSkeleton
+  rotate: true
+  xy: 1973, 1997
+  size: 32, 73
+  orig: 32, 73
+  offset: 0, 0
+  index: -1
+Body/Body1Skeleton
+  rotate: true
+  xy: 2, 1881
+  size: 58, 69
+  orig: 58, 69
+  offset: 0, 0
+  index: -1
+Body/BodyDead
+  rotate: false
+  xy: 1209, 1833
+  size: 73, 68
+  orig: 73, 68
+  offset: 0, 0
+  index: -1
+Body/BodyDead_Up
+  rotate: false
+  xy: 1284, 1833
+  size: 73, 68
+  orig: 73, 68
+  offset: 0, 0
+  index: -1
+Body/Leg1Skeleton
+  rotate: true
+  xy: 1237, 2003
+  size: 26, 53
+  orig: 26, 53
+  offset: 0, 0
+  index: -1
+Body/WeaponHandSkeleton
+  rotate: false
+  xy: 74, 1987
+  size: 34, 33
+  orig: 34, 33
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_ArmLeft
+  rotate: true
+  xy: 1269, 1752
+  size: 77, 158
+  orig: 77, 159
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_ArmRight
+  rotate: true
+  xy: 1591, 1747
+  size: 78, 160
+  orig: 78, 160
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Body
+  rotate: true
+  xy: 2, 2
+  size: 220, 224
+  orig: 220, 224
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Bow
+  rotate: true
+  xy: 714, 1194
+  size: 122, 412
+  orig: 122, 412
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Cape
+  rotate: false
+  xy: 1308, 54
+  size: 308, 210
+  orig: 308, 210
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Eye_Aiming
+  rotate: false
+  xy: 1587, 1644
+  size: 112, 101
+  orig: 113, 102
+  offset: 1, 0
+  index: -1
+Cult Enemies/ArcherBoss_Hand_Weapon
+  rotate: true
+  xy: 614, 1923
+  size: 46, 86
+  orig: 46, 86
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Leg
+  rotate: true
+  xy: 1827, 1892
+  size: 56, 101
+  orig: 56, 101
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Shawl
+  rotate: false
+  xy: 1365, 1539
+  size: 289, 103
+  orig: 289, 103
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_ShoulderDisk_Side
+  rotate: true
+  xy: 1618, 52
+  size: 211, 272
+  orig: 211, 272
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body
+  rotate: true
+  xy: 543, 1472
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body2
+  rotate: true
+  xy: 662, 1447
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Shadow
+  rotate: false
+  xy: 781, 1442
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Side
+  rotate: false
+  xy: 1158, 1424
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Side2
+  rotate: true
+  xy: 1537, 1413
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Side_Shadow
+  rotate: false
+  xy: 2, 1389
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Up
+  rotate: false
+  xy: 1656, 1369
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Up2
+  rotate: false
+  xy: 1782, 1368
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Body_Up_Shadow
+  rotate: false
+  xy: 1908, 1368
+  size: 124, 117
+  orig: 124, 117
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head
+  rotate: false
+  xy: 1657, 265
+  size: 225, 194
+  orig: 225, 194
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head2
+  rotate: false
+  xy: 2, 224
+  size: 225, 194
+  orig: 225, 194
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Down
+  rotate: true
+  xy: 1363, 642
+  size: 168, 214
+  orig: 168, 214
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Down2
+  rotate: true
+  xy: 1579, 642
+  size: 168, 214
+  orig: 168, 214
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Down_Shadow
+  rotate: true
+  xy: 1795, 642
+  size: 168, 214
+  orig: 168, 214
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Shadow
+  rotate: false
+  xy: 569, 361
+  size: 225, 190
+  orig: 225, 190
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Side
+  rotate: false
+  xy: 229, 188
+  size: 240, 194
+  orig: 240, 194
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Side2
+  rotate: false
+  xy: 471, 165
+  size: 240, 194
+  orig: 240, 194
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Side_Shadow
+  rotate: false
+  xy: 796, 334
+  size: 240, 190
+  orig: 240, 190
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Head_Up
+  rotate: true
+  xy: 1344, 461
+  size: 179, 193
+  orig: 182, 193
+  offset: 3, 0
+  index: -1
+Cult Enemies/Archer_Head_Up2
+  rotate: true
+  xy: 1539, 461
+  size: 179, 193
+  orig: 182, 193
+  offset: 3, 0
+  index: -1
+Cult Enemies/Archer_Head_Up_Shadow
+  rotate: true
+  xy: 1734, 461
+  size: 179, 193
+  orig: 182, 193
+  offset: 3, 0
+  index: -1
+Cult Enemies/Archer_Quiver
+  rotate: true
+  xy: 955, 1907
+  size: 52, 150
+  orig: 52, 150
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Quiver2
+  rotate: true
+  xy: 1107, 1904
+  size: 52, 150
+  orig: 52, 150
+  offset: 0, 0
+  index: -1
+Cult Enemies/Archer_Quiver_Shadow
+  rotate: true
+  xy: 1259, 1903
+  size: 52, 150
+  orig: 52, 150
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Left
+  rotate: true
+  xy: 1236, 1958
+  size: 43, 84
+  orig: 43, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Left_Scamp
+  rotate: true
+  xy: 1897, 1950
+  size: 45, 84
+  orig: 45, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Left_Scamp_Shadow
+  rotate: true
+  xy: 179, 1940
+  size: 45, 84
+  orig: 45, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Left_Shadow
+  rotate: true
+  xy: 1322, 1958
+  size: 43, 84
+  orig: 43, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Right
+  rotate: true
+  xy: 1408, 1957
+  size: 43, 84
+  orig: 43, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Right_Scamp
+  rotate: true
+  xy: 442, 1929
+  size: 45, 84
+  orig: 45, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Right_Scamp_Shadow
+  rotate: true
+  xy: 528, 1928
+  size: 45, 84
+  orig: 45, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arm_Right_Shadow
+  rotate: true
+  xy: 1494, 1956
+  size: 43, 84
+  orig: 43, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arms_Ritual
+  rotate: false
+  xy: 1930, 1870
+  size: 106, 64
+  orig: 106, 64
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arms_Ritual2
+  rotate: false
+  xy: 589, 1857
+  size: 106, 64
+  orig: 106, 64
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arms_Ritual_Scamp
+  rotate: false
+  xy: 1929, 1792
+  size: 106, 76
+  orig: 106, 76
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arrow
+  rotate: false
+  xy: 2, 1941
+  size: 175, 44
+  orig: 175, 44
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arrow_ArcherBoss
+  rotate: false
+  xy: 354, 1598
+  size: 312, 100
+  orig: 312, 101
+  offset: 0, 0
+  index: -1
+Cult Enemies/Arrow_Shadow
+  rotate: false
+  xy: 265, 1933
+  size: 175, 44
+  orig: 175, 44
+  offset: 0, 0
+  index: -1
+Cult Enemies/Bow_Cult
+  rotate: true
+  xy: 339, 1791
+  size: 75, 170
+  orig: 75, 170
+  offset: 0, 0
+  index: -1
+Cult Enemies/Bow_Cult2
+  rotate: true
+  xy: 439, 1700
+  size: 80, 247
+  orig: 80, 247
+  offset: 0, 0
+  index: -1
+Cult Enemies/Bow_Cult_Shadow
+  rotate: true
+  xy: 744, 1771
+  size: 75, 170
+  orig: 75, 170
+  offset: 0, 0
+  index: -1
+Cult Enemies/Bowstring
+  rotate: true
+  xy: 2, 2022
+  size: 7, 199
+  orig: 7, 199
+  offset: 0, 0
+  index: -1
+Cult Enemies/Cult_Dagger
+  rotate: false
+  xy: 1359, 1831
+  size: 160, 68
+  orig: 160, 69
+  offset: 0, 0
+  index: -1
+Cult Enemies/Cult_Dagger2
+  rotate: false
+  xy: 73, 1879
+  size: 157, 59
+  orig: 157, 60
+  offset: 0, 0
+  index: -1
+Cult Enemies/Cult_Dagger2_Shadow
+  rotate: false
+  xy: 232, 1872
+  size: 157, 59
+  orig: 157, 60
+  offset: 0, 0
+  index: -1
+Cult Enemies/Cult_Dagger3
+  rotate: false
+  xy: 1521, 1828
+  size: 160, 68
+  orig: 160, 69
+  offset: 0, 0
+  index: -1
+Cult Enemies/Cult_Dagger3_hilt
+  rotate: true
+  xy: 1025, 1961
+  size: 41, 59
+  orig: 41, 60
+  offset: 0, 0
+  index: -1
+Cult Enemies/Cult_Dagger_Shadow
+  rotate: false
+  xy: 2, 1809
+  size: 160, 68
+  orig: 160, 69
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye
+  rotate: true
+  xy: 1292, 2003
+  size: 26, 30
+  orig: 26, 30
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Angry
+  rotate: true
+  xy: 1629, 2000
+  size: 29, 30
+  orig: 29, 30
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Angry_Scamp
+  rotate: true
+  xy: 1904, 1998
+  size: 31, 32
+  orig: 31, 32
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Angry_Shadow
+  rotate: true
+  xy: 1661, 2000
+  size: 29, 30
+  orig: 29, 30
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Archer
+  rotate: true
+  xy: 976, 2005
+  size: 24, 49
+  orig: 24, 49
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Archer_Angry
+  rotate: false
+  xy: 874, 2007
+  size: 46, 22
+  orig: 47, 22
+  offset: 1, 0
+  index: -1
+Cult Enemies/Eye_Dead
+  rotate: false
+  xy: 1426, 2002
+  size: 28, 27
+  orig: 28, 27
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Dead_Scamp
+  rotate: false
+  xy: 1693, 2000
+  size: 30, 29
+  orig: 30, 29
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Dead_Shadow
+  rotate: false
+  xy: 1456, 2002
+  size: 28, 27
+  orig: 28, 27
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_HalfClosed
+  rotate: false
+  xy: 203, 2022
+  size: 37, 7
+  orig: 38, 7
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_HalfClosed_Scamp
+  rotate: false
+  xy: 324, 2020
+  size: 39, 9
+  orig: 40, 9
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_HalfClosed_Shadow
+  rotate: false
+  xy: 242, 2022
+  size: 37, 7
+  orig: 38, 7
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Scamp
+  rotate: true
+  xy: 1526, 2001
+  size: 28, 32
+  orig: 28, 32
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Scared
+  rotate: false
+  xy: 1027, 2005
+  size: 26, 24
+  orig: 26, 25
+  offset: 0, 1
+  index: -1
+Cult Enemies/Eye_Scared_Scamp
+  rotate: false
+  xy: 1324, 2003
+  size: 28, 26
+  orig: 28, 27
+  offset: 0, 1
+  index: -1
+Cult Enemies/Eye_Scared_Shadow
+  rotate: false
+  xy: 1055, 2005
+  size: 26, 24
+  orig: 26, 25
+  offset: 0, 1
+  index: -1
+Cult Enemies/Eye_Shadow
+  rotate: true
+  xy: 1354, 2003
+  size: 26, 30
+  orig: 26, 30
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Shocked
+  rotate: false
+  xy: 266, 1985
+  size: 36, 34
+  orig: 36, 34
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Shocked_Shadow
+  rotate: false
+  xy: 304, 1984
+  size: 36, 34
+  orig: 36, 34
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Sleeping
+  rotate: false
+  xy: 664, 2011
+  size: 36, 18
+  orig: 36, 18
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Sleeping_Scamp
+  rotate: false
+  xy: 796, 2009
+  size: 38, 20
+  orig: 38, 20
+  offset: 0, 0
+  index: -1
+Cult Enemies/Eye_Sleeping_Shadow
+  rotate: false
+  xy: 626, 2012
+  size: 36, 17
+  orig: 36, 18
+  offset: 0, 0
+  index: -1
+Cult Enemies/Hand_Weapon
+  rotate: true
+  xy: 1486, 2002
+  size: 27, 38
+  orig: 27, 38
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Body
+  rotate: false
+  xy: 1656, 1521
+  size: 116, 112
+  orig: 116, 112
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Body_Shadow
+  rotate: false
+  xy: 787, 1563
+  size: 116, 109
+  orig: 116, 109
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Body_Side
+  rotate: false
+  xy: 1246, 1543
+  size: 117, 111
+  orig: 117, 111
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Body_Side_Shadow
+  rotate: false
+  xy: 668, 1573
+  size: 117, 108
+  orig: 117, 108
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Body_Up
+  rotate: false
+  xy: 1774, 1488
+  size: 116, 112
+  orig: 116, 112
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Body_Up_Shadow
+  rotate: false
+  xy: 905, 1561
+  size: 116, 109
+  orig: 116, 109
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head
+  rotate: true
+  xy: 190, 615
+  size: 168, 190
+  orig: 168, 190
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Down
+  rotate: true
+  xy: 1451, 812
+  size: 164, 189
+  orig: 164, 189
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Down_Shadow
+  rotate: true
+  xy: 1642, 812
+  size: 164, 189
+  orig: 164, 189
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Shadow
+  rotate: true
+  xy: 382, 570
+  size: 168, 190
+  orig: 168, 190
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Side
+  rotate: true
+  xy: 641, 899
+  size: 158, 188
+  orig: 158, 188
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Side_Shadow
+  rotate: true
+  xy: 831, 898
+  size: 158, 188
+  orig: 158, 188
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Up
+  rotate: true
+  xy: 1833, 812
+  size: 164, 189
+  orig: 164, 189
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scamp_Head_Up_Shadow
+  rotate: true
+  xy: 2, 801
+  size: 164, 189
+  orig: 164, 189
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Arm_Left
+  rotate: true
+  xy: 1580, 1955
+  size: 43, 84
+  orig: 43, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Arm_Right
+  rotate: true
+  xy: 1666, 1955
+  size: 43, 84
+  orig: 43, 84
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Body
+  rotate: false
+  xy: 128, 1366
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Body_Side
+  rotate: false
+  xy: 254, 1361
+  size: 125, 118
+  orig: 125, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Body_Up
+  rotate: false
+  xy: 381, 1361
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Bomb1
+  rotate: false
+  xy: 1892, 1487
+  size: 128, 113
+  orig: 128, 113
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Bomb2
+  rotate: true
+  xy: 1328, 1170
+  size: 129, 149
+  orig: 129, 149
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Bomb3
+  rotate: false
+  xy: 1831, 1602
+  size: 119, 105
+  orig: 119, 105
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_BombPack
+  rotate: false
+  xy: 1021, 872
+  size: 255, 158
+  orig: 255, 158
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Eye
+  rotate: true
+  xy: 110, 1987
+  size: 33, 79
+  orig: 33, 79
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Head
+  rotate: false
+  xy: 1278, 846
+  size: 171, 184
+  orig: 171, 184
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Head_Down
+  rotate: true
+  xy: 2, 627
+  size: 172, 186
+  orig: 172, 186
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Head_Side
+  rotate: true
+  xy: 455, 908
+  size: 149, 184
+  orig: 149, 184
+  offset: 0, 0
+  index: -1
+Cult Enemies/Scout_Head_Up
+  rotate: true
+  xy: 574, 557
+  size: 172, 186
+  orig: 172, 186
+  offset: 0, 0
+  index: -1
+Cult Enemies/Shawl
+  rotate: false
+  xy: 1683, 1827
+  size: 121, 69
+  orig: 121, 69
+  offset: 0, 0
+  index: -1
+Cult Enemies/Shawl2
+  rotate: false
+  xy: 1086, 1835
+  size: 121, 67
+  orig: 121, 67
+  offset: 0, 0
+  index: -1
+Cult Enemies/Shawl_Coin
+  rotate: false
+  xy: 342, 1979
+  size: 35, 34
+  orig: 35, 34
+  offset: 0, 0
+  index: -1
+Cult Enemies/Shawl_Coin_Shadow
+  rotate: false
+  xy: 191, 1987
+  size: 35, 33
+  orig: 35, 34
+  offset: 0, 1
+  index: -1
+Cult Enemies/Shawl_Shadow
+  rotate: false
+  xy: 1806, 1821
+  size: 121, 69
+  orig: 121, 69
+  offset: 0, 0
+  index: -1
+Cult Enemies/SwordsmanScythe
+  rotate: true
+  xy: 1200, 1032
+  size: 136, 250
+  orig: 136, 251
+  offset: 0, 0
+  index: -1
+Cult Enemies/SwordsmanScythe_Shadow
+  rotate: true
+  xy: 2, 967
+  size: 136, 249
+  orig: 136, 251
+  offset: 0, 1
+  index: -1
+Cult Enemies/SwordsmanSpear
+  rotate: true
+  xy: 1571, 1898
+  size: 53, 254
+  orig: 54, 254
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body
+  rotate: false
+  xy: 507, 1352
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body2
+  rotate: false
+  xy: 633, 1327
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Shadow
+  rotate: false
+  xy: 759, 1322
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Side
+  rotate: false
+  xy: 885, 1318
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Side2
+  rotate: false
+  xy: 1011, 1318
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Side_Shadow
+  rotate: false
+  xy: 1137, 1304
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Up
+  rotate: false
+  xy: 1263, 1301
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Up2
+  rotate: false
+  xy: 1389, 1301
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Body_Up_Shadow
+  rotate: false
+  xy: 1515, 1293
+  size: 124, 118
+  orig: 124, 118
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head
+  rotate: false
+  xy: 2, 432
+  size: 184, 193
+  orig: 184, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head2
+  rotate: false
+  xy: 188, 420
+  size: 184, 193
+  orig: 184, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Down
+  rotate: true
+  xy: 193, 785
+  size: 166, 193
+  orig: 166, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Down2
+  rotate: true
+  xy: 388, 740
+  size: 166, 193
+  orig: 166, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Down_Shadow
+  rotate: true
+  xy: 583, 731
+  size: 166, 193
+  orig: 166, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Shadow
+  rotate: true
+  xy: 374, 384
+  size: 184, 193
+  orig: 184, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Side
+  rotate: true
+  xy: 956, 526
+  size: 176, 192
+  orig: 176, 192
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Side2
+  rotate: true
+  xy: 762, 553
+  size: 175, 192
+  orig: 175, 192
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Side_Shadow
+  rotate: true
+  xy: 1150, 500
+  size: 176, 192
+  orig: 176, 192
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Up
+  rotate: true
+  xy: 778, 730
+  size: 166, 193
+  orig: 166, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Up2
+  rotate: true
+  xy: 973, 704
+  size: 166, 193
+  orig: 166, 193
+  offset: 0, 0
+  index: -1
+Cult Enemies/Swordsman_Head_Up_Shadow
+  rotate: true
+  xy: 1168, 678
+  size: 166, 193
+  orig: 166, 193
+  offset: 0, 0
+  index: -1
+Face/EYE_SHOCKED
+  rotate: true
+  xy: 519, 1861
+  size: 65, 68
+  orig: 65, 68
+  offset: 0, 0
+  index: -1
+Goat Cult/Face/Cultist_Eye_Dead
+  rotate: false
+  xy: 1083, 2004
+  size: 27, 25
+  orig: 27, 26
+  offset: 0, 0
+  index: -1
+Goat Cult/Face/Cultist_Eye_Default
+  rotate: true
+  xy: 1560, 2001
+  size: 28, 35
+  orig: 29, 36
+  offset: 1, 1
+  index: -1
+Goat Cult/Face/Cultist_Eye_Shocked
+  rotate: false
+  xy: 1938, 1998
+  size: 33, 31
+  orig: 33, 31
+  offset: 0, 0
+  index: -1
+Goat Cult/Face/Cultist_Eye_Sleeping
+  rotate: false
+  xy: 836, 2009
+  size: 36, 20
+  orig: 38, 20
+  offset: 1, 0
+  index: -1
+Head/DeerAntler
+  rotate: true
+  xy: 2, 1728
+  size: 79, 112
+  orig: 79, 112
+  offset: 0, 0
+  index: -1
+Head/EYE
+  rotate: false
+  xy: 1983, 1936
+  size: 60, 59
+  orig: 60, 59
+  offset: 0, 0
+  index: -1
+Head/EYE_ANGRY
+  rotate: false
+  xy: 1086, 1961
+  size: 73, 41
+  orig: 73, 42
+  offset: 0, 0
+  index: -1
+Head/EYE_ANGRY_LEFT
+  rotate: false
+  xy: 1161, 1960
+  size: 73, 41
+  orig: 73, 42
+  offset: 0, 0
+  index: -1
+Head/EYE_CLOSED
+  rotate: false
+  xy: 1112, 2004
+  size: 55, 25
+  orig: 55, 25
+  offset: 0, 0
+  index: -1
+Head/EYE_HALF_CLOSED_ANGRY
+  rotate: false
+  xy: 1725, 2000
+  size: 71, 29
+  orig: 71, 30
+  offset: 0, 1
+  index: -1
+Head/EYE_HALF_CLOSED_ANGRY_LEFT
+  rotate: false
+  xy: 2, 1988
+  size: 70, 32
+  orig: 70, 32
+  offset: 0, 0
+  index: -1
+Head/EYE_SHOCKED
+  rotate: false
+  xy: 1018, 1839
+  size: 66, 66
+  orig: 66, 66
+  offset: 0, 0
+  index: -1
+Head/EYE_SQUINT
+  rotate: false
+  xy: 228, 1987
+  size: 36, 33
+  orig: 60, 55
+  offset: 8, 8
+  index: -1
+Head/Head_Skeleton
+  rotate: false
+  xy: 1479, 1162
+  size: 137, 129
+  orig: 137, 129
+  offset: 0, 0
+  index: -1
+Head/Head_SkeletonLamb1
+  rotate: false
+  xy: 382, 1223
+  size: 198, 127
+  orig: 198, 127
+  offset: 0, 0
+  index: -1
+Head/Head_SkeletonLamb1_Side
+  rotate: false
+  xy: 470, 1064
+  size: 134, 132
+  orig: 134, 132
+  offset: 0, 0
+  index: -1
+Head/Head_SkeletonLamb1_Up
+  rotate: false
+  xy: 1128, 1172
+  size: 198, 127
+  orig: 198, 127
+  offset: 0, 0
+  index: -1
+Head/Head_SkeletonLamb2
+  rotate: false
+  xy: 606, 1059
+  size: 301, 133
+  orig: 301, 133
+  offset: 0, 0
+  index: -1
+Head/Head_SkeletonLamb2_Side
+  rotate: false
+  xy: 909, 1058
+  size: 150, 134
+  orig: 150, 134
+  offset: 0, 0
+  index: -1
+Head/Head_SkeletonLamb2_Up
+  rotate: false
+  xy: 1612, 978
+  size: 301, 133
+  orig: 301, 133
+  offset: 0, 0
+  index: -1
+Head/Head_Skeleton_Cult
+  rotate: false
+  xy: 1061, 1036
+  size: 137, 134
+  orig: 137, 134
+  offset: 0, 0
+  index: -1
+Head/Head_Skeleton_Cult_Side
+  rotate: true
+  xy: 141, 1105
+  size: 130, 135
+  orig: 130, 135
+  offset: 0, 0
+  index: -1
+Head/Head_Skeleton_Cult_Up
+  rotate: false
+  xy: 1618, 1117
+  size: 137, 129
+  orig: 137, 129
+  offset: 0, 0
+  index: -1
+Head/Head_Skeleton_Side
+  rotate: false
+  xy: 582, 1198
+  size: 130, 127
+  orig: 130, 127
+  offset: 0, 0
+  index: -1
+Head/Head_Skeleton_Up
+  rotate: false
+  xy: 2, 1114
+  size: 137, 129
+  orig: 137, 129
+  offset: 0, 0
+  index: -1
+Head/MOUTH_HAPPY
+  rotate: false
+  xy: 554, 1975
+  size: 67, 36
+  orig: 67, 36
+  offset: 0, 0
+  index: -1
+Head/MOUTH_HAPPY-2
+  rotate: false
+  xy: 702, 2010
+  size: 29, 19
+  orig: 31, 19
+  offset: 2, 0
+  index: -1
+Head/MOUTH_INDIFFERENT
+  rotate: false
+  xy: 281, 2021
+  size: 41, 8
+  orig: 42, 8
+  offset: 1, 0
+  index: -1
+Head/MOUTH_MUMBLE
+  rotate: false
+  xy: 504, 2014
+  size: 42, 15
+  orig: 43, 16
+  offset: 1, 0
+  index: -1
+Head/MOUTH_SAD
+  rotate: false
+  xy: 922, 2007
+  size: 25, 22
+  orig: 25, 22
+  offset: 0, 0
+  index: -1
+Head/MOUTH_SCARED
+  rotate: false
+  xy: 488, 1976
+  size: 64, 35
+  orig: 64, 35
+  offset: 0, 0
+  index: -1
+Mushroom Cult/MushroomGruntArm_Left
+  rotate: true
+  xy: 1798, 1999
+  size: 30, 69
+  orig: 30, 71
+  offset: 0, 1
+  index: -1
+Mushroom Cult/MushroomGruntBody
+  rotate: true
+  xy: 966, 1672
+  size: 88, 100
+  orig: 90, 104
+  offset: 1, 2
+  index: -1
+Mushroom Cult/MushroomGruntHead
+  rotate: false
+  xy: 253, 953
+  size: 200, 136
+  orig: 200, 136
+  offset: 0, 0
+  index: -1
+Mushroom Cult/MushroomScampArm_Left
+  rotate: true
+  xy: 379, 1979
+  size: 34, 69
+  orig: 34, 70
+  offset: 0, 0
+  index: -1
+Mushroom Cult/MushroomScampBody
+  rotate: false
+  xy: 1924, 1709
+  size: 99, 81
+  orig: 99, 81
+  offset: 0, 0
+  index: -1
+Mushroom Cult/MushroomScampDagger
+  rotate: true
+  xy: 391, 1868
+  size: 59, 126
+  orig: 59, 126
+  offset: 0, 0
+  index: -1
+Mushroom Cult/MushroomScampHead
+  rotate: false
+  xy: 278, 1091
+  size: 190, 130
+  orig: 190, 130
+  offset: 0, 0
+  index: -1
+Mushroom Cult/MushroomSword
+  rotate: true
+  xy: 164, 1801
+  size: 69, 173
+  orig: 69, 173
+  offset: 0, 0
+  index: -1
+Mushroom Cult/Weapon_Hand
+  rotate: true
+  xy: 450, 1979
+  size: 34, 36
+  orig: 34, 36
+  offset: 0, 0
+  index: -1
+Other/DazedStar1
+  rotate: true
+  xy: 949, 2006
+  size: 23, 25
+  orig: 24, 25
+  offset: 1, 0
+  index: -1
+Other/DazedStar2
+  rotate: true
+  xy: 1869, 1999
+  size: 30, 33
+  orig: 31, 33
+  offset: 0, 0
+  index: -1
+Other/DazedStar3
+  rotate: true
+  xy: 623, 1971
+  size: 38, 43
+  orig: 38, 43
+  offset: 0, 0
+  index: -1
+Other/Fire/Fire_0
+  rotate: true
+  xy: 1023, 1556
+  size: 107, 221
+  orig: 150, 275
+  offset: 22, 27
+  index: -1
+Other/Fire/Fire_1
+  rotate: true
+  xy: 1641, 1248
+  size: 118, 201
+  orig: 150, 275
+  offset: 16, 37
+  index: -1
+Other/Fire/Fire_2
+  rotate: true
+  xy: 2, 1245
+  size: 119, 228
+  orig: 150, 275
+  offset: 15, 24
+  index: -1
+Other/Fire/Fire_3
+  rotate: true
+  xy: 907, 1438
+  size: 116, 249
+  orig: 150, 275
+  offset: 17, 13
+  index: -1
+Other/Fire/Fire_4
+  rotate: true
+  xy: 1284, 1421
+  size: 116, 251
+  orig: 150, 275
+  offset: 17, 12
+  index: -1
+Other/Fire/Fire_5
+  rotate: true
+  xy: 2, 1508
+  size: 108, 205
+  orig: 150, 275
+  offset: 21, 35
+  index: -1
+Other/Fire/Fire_6
+  rotate: true
+  xy: 329, 1481
+  size: 115, 212
+  orig: 150, 275
+  offset: 17, 32
+  index: -1
+Other/ParryEffect
+  rotate: true
+  xy: 1262, 1656
+  size: 94, 102
+  orig: 94, 103
+  offset: 0, 0
+  index: -1
+Other/Prop_drumstick
+  rotate: true
+  xy: 702, 1918
+  size: 49, 97
+  orig: 49, 98
+  offset: 0, 0
+  index: -1
+Other/SpawnParticles
+  rotate: true
+  xy: 1701, 1635
+  size: 104, 128
+  orig: 108, 131
+  offset: 2, 2
+  index: -1
+Other/SpawnParticles2
+  rotate: false
+  xy: 1757, 1113
+  size: 134, 129
+  orig: 137, 131
+  offset: 1, 1
+  index: -1
+Other/TeleportLeaves
+  rotate: true
+  xy: 232, 1601
+  size: 105, 120
+  orig: 107, 120
+  offset: 1, 0
+  index: -1
+Other/TeleportLeaves2
+  rotate: true
+  xy: 318, 1708
+  size: 81, 119
+  orig: 81, 119
+  offset: 0, 0
+  index: -1
+Other/TeleportLines
+  rotate: true
+  xy: 688, 1683
+  size: 86, 159
+  orig: 86, 159
+  offset: 0, 0
+  index: -1
+Other/Teleport_1
+  rotate: false
+  xy: 771, 1969
+  size: 99, 38
+  orig: 160, 55
+  offset: 35, 12
+  index: -1
+Other/Teleport_2
+  rotate: false
+  xy: 1752, 1953
+  size: 143, 44
+  orig: 160, 55
+  offset: 11, 7
+  index: -1
+Other/Teleport_3
+  rotate: false
+  xy: 801, 1911
+  size: 152, 50
+  orig: 160, 55
+  offset: 4, 3
+  index: -1
+Other/Teleport_4
+  rotate: false
+  xy: 1411, 1901
+  size: 158, 53
+  orig: 160, 55
+  offset: 1, 1
+  index: -1
+Other/WarningIcon
+  rotate: true
+  xy: 798, 1848
+  size: 61, 117
+  orig: 61, 117
+  offset: 0, 0
+  index: -1
+Other/mutate_bit_1
+  rotate: true
+  xy: 548, 2013
+  size: 16, 76
+  orig: 16, 76
+  offset: 0, 0
+  index: -1
+Other/mutate_bit_2
+  rotate: true
+  xy: 733, 2010
+  size: 19, 61
+  orig: 19, 61
+  offset: 0, 0
+  index: -1
+Other/mutate_bits
+  rotate: false
+  xy: 849, 1674
+  size: 115, 86
+  orig: 115, 86
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_ARM_LEFT
+  rotate: true
+  xy: 697, 1852
+  size: 64, 99
+  orig: 81, 101
+  offset: 16, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_ARM_RIGHT
+  rotate: true
+  xy: 917, 1841
+  size: 64, 99
+  orig: 98, 101
+  offset: 17, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_COLLAR_BACK
+  rotate: false
+  xy: 1429, 1749
+  size: 160, 77
+  orig: 160, 78
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_COLLAR_FRONT
+  rotate: false
+  xy: 916, 1762
+  size: 160, 75
+  orig: 162, 77
+  offset: 2, 2
+  index: -1
+SF_OCCULTIST/OCCULTIST_COLLAR_SIDE
+  rotate: false
+  xy: 1753, 1741
+  size: 169, 78
+  orig: 170, 79
+  offset: 1, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_COLLAR_STONE
+  rotate: true
+  xy: 872, 1967
+  size: 38, 47
+  orig: 38, 48
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_FACE_BACK
+  rotate: false
+  xy: 713, 136
+  size: 293, 196
+  orig: 293, 196
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_FACE_FRONT
+  rotate: false
+  xy: 1344, 266
+  size: 311, 193
+  orig: 311, 193
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_FACE_NORMAL
+  rotate: false
+  xy: 1008, 108
+  size: 298, 196
+  orig: 300, 196
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_FACE_SIDE
+  rotate: false
+  xy: 1038, 306
+  size: 304, 192
+  orig: 304, 192
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_HAND_HOLDING
+  rotate: false
+  xy: 1386, 2003
+  size: 38, 26
+  orig: 42, 30
+  offset: 2, 2
+  index: -1
+SF_OCCULTIST/OCCULTIST_HAT_RIBBON_FRONT
+  rotate: true
+  xy: 668, 1971
+  size: 37, 101
+  orig: 37, 101
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_HAT_RIBBON_SIDE
+  rotate: true
+  xy: 921, 1963
+  size: 40, 102
+  orig: 43, 107
+  offset: 1, 2
+  index: -1
+SF_OCCULTIST/OCCULTIST_ROBES_BACK
+  rotate: false
+  xy: 1844, 1244
+  size: 147, 122
+  orig: 147, 122
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_ROBES_FRONT
+  rotate: false
+  xy: 1893, 1113
+  size: 150, 129
+  orig: 150, 129
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_ROBES_SIDE
+  rotate: false
+  xy: 232, 1237
+  size: 148, 122
+  orig: 148, 122
+  offset: 0, 0
+  index: -1
+SF_OCCULTIST/OCCULTIST_WEAPON
+  rotate: true
+  xy: 116, 1719
+  size: 80, 200
+  orig: 85, 205
+  offset: 3, 2
+  index: -1
+Skeles/Face/Skele_Eye_0
+  rotate: true
+  xy: 365, 2015
+  size: 14, 26
+  orig: 14, 26
+  offset: 0, 0
+  index: -1
+Skeles/Face/Skele_Eye_1
+  rotate: true
+  xy: 393, 2015
+  size: 14, 26
+  orig: 14, 26
+  offset: 0, 0
+  index: -1
+Skeles/Face/Skele_Eye_3
+  rotate: false
+  xy: 1597, 2001
+  size: 30, 28
+  orig: 30, 28
+  offset: 0, 0
+  index: -1
+Skeles/Face/Skele_mouth_0
+  rotate: false
+  xy: 421, 2015
+  size: 81, 14
+  orig: 81, 14
+  offset: 0, 0
+  index: -1
+Weapons/AlarmHorn
+  rotate: false
+  xy: 1366, 1647
+  size: 219, 100
+  orig: 219, 101
+  offset: 0, 0
+  index: -1
+Weapons/AlarmHorn_Forest
+  rotate: false
+  xy: 1068, 1665
+  size: 192, 88
+  orig: 192, 88
+  offset: 0, 0
+  index: -1
+Weapons/Bomb
+  rotate: true
+  xy: 1452, 1011
+  size: 149, 158
+  orig: 150, 159
+  offset: 0, 0
+  index: -1
+Weapons/SkeletonLamb_Sword
+  rotate: true
+  xy: 511, 1782
+  size: 68, 231
+  orig: 68, 231
+  offset: 0, 0
+  index: -1
+Weapons/SkeletonSword
+  rotate: true
+  xy: 2, 1618
+  size: 99, 228
+  orig: 99, 229
+  offset: 0, 1
+  index: -1
+Weapons/SmallShield
+  rotate: false
+  xy: 209, 1486
+  size: 118, 113
+  orig: 118, 113
+  offset: 0, 0
+  index: -1
+Weapons/sword_Cult
+  rotate: true
+  xy: 1078, 1755
+  size: 76, 189
+  orig: 77, 189
+  offset: 1, 0
+  index: -1
+
+Human2.png
+size: 1202,555
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+Cult Enemies/ArcherBoss_Body_Side
+  rotate: true
+  xy: 977, 67
+  size: 235, 212
+  orig: 235, 212
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Head
+  rotate: false
+  xy: 728, 36
+  size: 247, 266
+  orig: 247, 266
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Head_Down
+  rotate: true
+  xy: 931, 304
+  size: 249, 269
+  orig: 249, 269
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Head_Side
+  rotate: false
+  xy: 273, 8
+  size: 233, 253
+  orig: 233, 253
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Head_Up
+  rotate: true
+  xy: 2, 11
+  size: 250, 269
+  orig: 250, 269
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_Shawl_Up
+  rotate: true
+  xy: 508, 2
+  size: 300, 218
+  orig: 300, 218
+  offset: 0, 0
+  index: -1
+Cult Enemies/ArcherBoss_ShoulderDisk
+  rotate: false
+  xy: 2, 263
+  size: 443, 290
+  orig: 443, 290
+  offset: 0, 0
+  index: -1
+Other/AttackSlash1
+  rotate: false
+  xy: 447, 326
+  size: 482, 227
+  orig: 515, 273
+  offset: 0, 32
+  index: -1

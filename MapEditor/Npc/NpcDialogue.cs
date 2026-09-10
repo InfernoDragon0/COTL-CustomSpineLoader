@@ -11,6 +11,12 @@ namespace CustomSpineLoader.MapEditor.Npc;
 public class NpcDialogue
 {
     public string Start = "";
+
+    /// Conditional ways in. The first entry whose conditions all hold decides which node the
+    /// conversation starts at; when none do, Start is used. This is how an NPC says something
+    /// different once a quest is under way, ready to hand in, or done.
+    public List<NpcDialogueEntry> Entry;
+
     public List<NpcDialogueNode> Nodes = [];
 
     public NpcDialogueNode FindNode(string id)
@@ -76,9 +82,17 @@ public class NpcDialogue
             }
         }
 
-        Nodes.RemoveAll(n => n.Lines.Count == 0 && n.Choices == null);
+        // A node with no words is still worth keeping when it does something: a silent node is how
+        // a quest is handed out or given up between two spoken ones.
+        Nodes.RemoveAll(n => n.Lines.Count == 0 && n.Choices == null && !DoesSomething(n));
         return FindNode(Start) != null;
     }
+
+    private static bool DoesSomething(NpcDialogueNode node) =>
+        !string.IsNullOrWhiteSpace(node.GiveQuest) ||
+        !string.IsNullOrWhiteSpace(node.TurnInQuest) ||
+        !string.IsNullOrWhiteSpace(node.AbandonQuest) ||
+        !string.IsNullOrWhiteSpace(node.SetFlag);
 
     // ---- localization ------------------------------------------------------------------------
 
@@ -131,7 +145,9 @@ public class NpcDialogue
         source.UpdateDictionary();
     }
 
-    private static string Register(LanguageSourceData source, string term, string text)
+    /// Also used by the quest registry: one term, translated the same in every language, because
+    /// mod text is written once and we have nothing to translate it with.
+    internal static string Register(LanguageSourceData source, string term, string text)
     {
         try
         {
@@ -156,6 +172,22 @@ public class NpcDialogue
     [NonSerialized] public string NameTerm;
 }
 
+/// One conditional way into a conversation. Every condition that is filled in has to hold; an
+/// entry with none is the catch-all, so put it last.
+[Serializable]
+public class NpcDialogueEntry
+{
+    /// Quest ids, or "npc/id" to name another NPC's quest.
+    public string QuestNotStarted;
+    public string QuestActive;
+    public string QuestReady;
+    public string QuestDone;
+    public string QuestFailed;
+
+    /// The node to start at.
+    public string Node;
+}
+
 [Serializable]
 public class NpcDialogueNode
 {
@@ -165,6 +197,18 @@ public class NpcDialogueNode
     public string Next;
 
     public List<NpcDialogueChoice> Choices;
+
+    /// Reaching this node hands the quest out.
+    public string GiveQuest;
+
+    /// Reaching this node finishes the quest, if every goal is met.
+    public string TurnInQuest;
+
+    /// Reaching this node gives the quest up; the NPC can offer it again afterwards.
+    public string AbandonQuest;
+
+    /// Reaching this node raises a flag, which any "flag" goal is watching for.
+    public string SetFlag;
 }
 
 [Serializable]
@@ -212,6 +256,13 @@ public class NpcDialogueChoice
     public string Text = "";
 
     public string Next;
+
+    /// The same four quest actions a node has, taken when the player picks this answer. Putting
+    /// GiveQuest on a choice is how "will you help me?" becomes a real yes or no.
+    public string GiveQuest;
+    public string TurnInQuest;
+    public string AbandonQuest;
+    public string SetFlag;
 
     [NonSerialized] public string Term;
 }

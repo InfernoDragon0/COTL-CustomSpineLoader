@@ -65,7 +65,9 @@ public class CustomItemLoader : Loader<CustomItemConfig>
                 );
 
                 Plugin.Log.LogInfo("Successfully created custom item with internal name : " + CustomItem.InternalName);
-                loadedItems.Add(CustomItemManager.Add(CustomItem));
+                var itemType = CustomItemManager.Add(CustomItem);
+                loadedItems.Add(itemType);
+                Api.CultTweakerApi.NoteContent("items", CustomItem.InternalName, (int)itemType);
             }
             catch (Exception e)
             {

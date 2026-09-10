@@ -31,8 +31,91 @@ public static class NpcDialogueRunner
 
         npc.Dialogue.EnsureRegistered(npc);
 
+        try
+        {
+            APIHelper.NpcQuests.QuestRuntime.NoteTalkedTo(npc.InternalName);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning("Custom NPC quests: noting the conversation failed: " + e.Message);
+        }
+
         IsRunning = true;
-        PlayNode(npc, speaker, npc.Dialogue.Start);
+        PlayNode(npc, speaker, ChooseStart(npc));
+    }
+
+    /// Picks the way in: the first entry whose conditions all hold, else the plain start node.
+    private static string ChooseStart(CustomNpc npc)
+    {
+        var entries = npc.Dialogue.Entry;
+        if (entries == null) return npc.Dialogue.Start;
+
+        foreach (var entry in entries)
+        {
+            if (entry == null || string.IsNullOrEmpty(entry.Node)) continue;
+            if (npc.Dialogue.FindNode(entry.Node) == null) continue;
+            if (!Holds(npc, entry)) continue;
+
+            return entry.Node;
+        }
+
+        return npc.Dialogue.Start;
+    }
+
+    private static bool Holds(CustomNpc npc, NpcDialogueEntry entry) =>
+        Is(npc, entry.QuestNotStarted, APIHelper.NpcQuests.QuestStatus.NotStarted) &&
+        Is(npc, entry.QuestActive, APIHelper.NpcQuests.QuestStatus.Active) &&
+        Is(npc, entry.QuestReady, APIHelper.NpcQuests.QuestStatus.Ready) &&
+        Is(npc, entry.QuestDone, APIHelper.NpcQuests.QuestStatus.Done) &&
+        Is(npc, entry.QuestFailed, APIHelper.NpcQuests.QuestStatus.Failed);
+
+    private static bool Is(CustomNpc npc, string idOrKey, APIHelper.NpcQuests.QuestStatus wanted)
+    {
+        if (string.IsNullOrWhiteSpace(idOrKey)) return true;
+
+        var quest = APIHelper.NpcQuests.QuestRegistry.Resolve(npc.InternalName, idOrKey);
+        if (quest == null)
+        {
+            Plugin.Log.LogWarning($"Custom NPC '{npc.InternalName}': dialogue asks about quest " +
+                                  $"'{idOrKey}', which nothing declares.");
+            return false;
+        }
+
+        return APIHelper.NpcQuests.QuestRuntime.State(quest.Key) == wanted;
+    }
+
+    /// The four things a node or an answer can do to a quest.
+    private static void QuestActions(CustomNpc npc, string give, string turnIn, string abandon,
+        string flag)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(flag)) APIHelper.NpcQuests.QuestRuntime.NoteFlag(flag);
+
+            Act(npc, give, APIHelper.NpcQuests.QuestRuntime.Accept);
+            Act(npc, turnIn, APIHelper.NpcQuests.QuestRuntime.TurnIn);
+            Act(npc, abandon, APIHelper.NpcQuests.QuestRuntime.Abandon);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"Custom NPC '{npc.InternalName}': a quest action failed: " + e.Message);
+        }
+    }
+
+    private static void Act(CustomNpc npc, string idOrKey,
+        Func<APIHelper.NpcQuests.QuestDefinition, bool> action)
+    {
+        if (string.IsNullOrWhiteSpace(idOrKey)) return;
+
+        var quest = APIHelper.NpcQuests.QuestRegistry.Resolve(npc.InternalName, idOrKey);
+        if (quest == null)
+        {
+            Plugin.Log.LogWarning($"Custom NPC '{npc.InternalName}': dialogue names quest " +
+                                  $"'{idOrKey}', which nothing declares.");
+            return;
+        }
+
+        action(quest);
     }
 
     private static void PlayNode(CustomNpc npc, UnityEngine.GameObject speaker, string nodeId)
@@ -55,10 +138,14 @@ public static class NpcDialogueRunner
             Plugin.Log.LogWarning($"Custom NPC '{npc.InternalName}' OnDialogueNode failed: {e.Message}");
         }
 
+        QuestActions(npc, node.GiveQuest, node.TurnInQuest, node.AbandonQuest, node.SetFlag);
+
         var entries = BuildEntries(npc, speaker, node);
         if (entries.Count == 0)
         {
-            EndConversation(npc, node.Id);
+            // A node with no words has already done whatever it was for; carry on if it points
+            // somewhere, otherwise the conversation is over.
+            Continue(npc, speaker, node.Id, node.Next);
             return;
         }
 
@@ -81,6 +168,9 @@ public static class NpcDialogueRunner
                     {
                         Plugin.Log.LogWarning($"Custom NPC '{npc.InternalName}' OnDialogueChoice failed: {e.Message}");
                     }
+
+                    QuestActions(npc, choice.GiveQuest, choice.TurnInQuest, choice.AbandonQuest,
+                        choice.SetFlag);
 
                     Continue(npc, speaker, node.Id, choice.Next);
                 }, choice.Term));
