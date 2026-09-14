@@ -1121,10 +1121,7 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         go.transform.SetParent(HandleRoot(), false);
 
         var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(30f, 30f);
-
-        var img = go.AddComponent<Image>();
-        img.color = new Color(1f, 0.82f, 0.15f, 0.95f);
+        MapEditorUI.DressHandle(go, MapEditorGizmos.GripColour, 30f);
 
         var handle = go.AddComponent<ShapeCenterHandle>();
         handle.Initialize(this, _editor);
@@ -1162,16 +1159,15 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
         _active.transform.position = new Vector3(world.x, world.y, z);
     }
 
+    private static readonly Color PointColour = new(0.25f, 0.85f, 1f, 0.95f);
+
     private GameObject CreateHandle(int index)
     {
         var go = new GameObject("ShapeHandle_" + index);
         go.transform.SetParent(HandleRoot(), false);
 
         var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(20f, 20f);
-
-        var img = go.AddComponent<Image>();
-        img.color = Color.cyan;
+        MapEditorUI.DressHandle(go, PointColour, 20f);
 
         var handle = go.AddComponent<ShapePointHandle>();
         handle.Initialize(this, _editor, index);

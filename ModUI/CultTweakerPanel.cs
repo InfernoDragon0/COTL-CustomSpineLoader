@@ -276,7 +276,13 @@ public class CultTweakerPanel : MonoBehaviour
 
     private void OnLookChanged(int playerId)
     {
-        if (_open) PlayerPreview.Redress(playerId);
+        if (!_open) return;
+
+        PlayerPreview.Redress(playerId);
+
+        // Re-dressed first: a sweep shown before the portrait wears the new broom would show the old
+        // one, which is the whole reason the sweep waits for the look to land.
+        PlayerDock.SweepIfWanted(playerId);
     }
 
     private void BuildAboutSection()
@@ -293,10 +299,13 @@ public class CultTweakerPanel : MonoBehaviour
         Note($"Custom structures: {Count(() => CustomStructureLoader.loadedStructures.Count)}");
         Note($"Building overrides: {Count(() => StructureBuildingOverrideHelper.StructureBuildingOverrides.Count)}");
         Note($"Follower skin overrides: {Count(() => FollowerSpineLoader.CustomFollowerSkins.Count)}");
+        Note($"Follower hats / clothes: {Count(() => FollowerWardrobe.HatKeys().Count)} / " +
+             $"{Count(() => FollowerWardrobe.ClothesKeys().Count)}");
         Note($"Custom NPCs: {Count(() => CustomNpcManager.CustomNpcList.Count)}");
         Note($"Player spine options: {PlayerSpines().Count}");
         Note($"Fleeces in rotation: {Count(() => PlayerSpineLoader.FleeceRotation.Count)}" +
              $"  (custom spines: {Count(() => PlayerSpineLoader.FleeceCyclingSpines.Count)})");
+        Note($"Brooms available: {Count(() => PlayerSpineLoader.BroomRotation.Count)}");
         Note($"Saved map blueprints: {FileCount(MapEditorSerialization.FolderName)}");
         Note($"Saved level blueprints: {FileCount(CTLevelSerialization.FolderName)}");
     }

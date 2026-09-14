@@ -85,4 +85,27 @@ public static class RoomChildPrefabs
             path = current.name + "/" + path;
         return path;
     }
+
+    /// Copies a piece out of a loaded prefab into the room, tagged with the key that finds it again.
+    public static GameObject Lift(GameObject source, Transform parent, string key)
+    {
+        if (source == null) return null;
+
+        var go = UnityEngine.Object.Instantiate(source, parent);
+
+        // Frozen before it is switched on: RandomEnable rolls in OnEnable and would switch the
+        // piece straight back off.
+        Tools.PropRandomisers.Freeze(go);
+        go.SetActive(true);
+
+        go.AddComponent<CTPropSource>().Key = key;
+        return go;
+    }
+}
+
+/// The key of the prefab piece an object was copied from, for things the object pool cannot name:
+/// a child lifted out of a room or a plot. Read by the snapshot, written by whoever lifted it.
+public class CTPropSource : MonoBehaviour
+{
+    public string Key = "";
 }

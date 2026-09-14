@@ -28,13 +28,8 @@ internal class WorldMapHandle : MonoBehaviour
 
         var rect = go.AddComponent<RectTransform>();
         rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
-        rect.sizeDelta = new Vector2(HandleSize, HandleSize);
 
-        var image = go.AddComponent<Image>();
-        image.sprite = MapEditorUI.RoundedPlate;
-        image.type = Image.Type.Sliced;
-        image.pixelsPerUnitMultiplier = 2f;
-        image.color = colour;
+        var image = MapEditorUI.DressHandle(go, colour, HandleSize);
         image.raycastTarget = false;
 
         var handle = go.AddComponent<WorldMapHandle>();

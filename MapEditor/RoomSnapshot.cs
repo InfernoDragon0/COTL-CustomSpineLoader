@@ -391,6 +391,15 @@ public static class RoomSnapshot
         key = null;
         isAddressable = true;
 
+        // Lifted out of another prefab: the pool never saw it and its name is not a catalog name,
+        // so the object carries the key itself.
+        var source = go.GetComponent<CTPropSource>();
+        if (source != null && !string.IsNullOrEmpty(source.Key))
+        {
+            key = source.Key;
+            return true;
+        }
+
         var pool = ObjectPool.instance;
         if (pool != null && pool.spawnedObjects.TryGetValue(go, out var prefab) && prefab != null &&
             prefabPaths.TryGetValue(prefab, out var entry))

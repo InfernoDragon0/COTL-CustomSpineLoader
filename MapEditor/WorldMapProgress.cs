@@ -71,17 +71,95 @@ public static class WorldMapProgress
         Save();
     }
 
-    public static void OpenLock(CTWorldMap map, CTWorldMapNode node)
+    /// Takes a node OUT of the completed set. Downstream nodes need no bookkeeping - state is
+    /// derived by the resolver each refresh, so re-locking follows on its own. A key node also
+    /// un-banks what it granted, clamped at zero: keys already spent on a lock cannot be clawed
+    /// back, and that lock stays open, because slamming shut a door the player paid for reaches
+    /// well beyond the node that was named.
+    public static bool Uncomplete(CTWorldMap map, string nodeId)
     {
-        if (map == null || node == null) return;
+        if (map == null || string.IsNullOrEmpty(nodeId)) return false;
 
         var record = For(map.MapName);
-        if (record.IsLockOpened(node.Id)) return;
 
-        record.KeysHeld = Math.Max(0, record.KeysHeld - Math.Max(0, node.KeysCost));
+        var index = record.CompletedNodes.FindIndex(
+            id => string.Equals(id, nodeId, StringComparison.OrdinalIgnoreCase));
+        var banked = record.KeyNodesBanked.FindIndex(
+            id => string.Equals(id, nodeId, StringComparison.OrdinalIgnoreCase));
+
+        if (index < 0 && banked < 0) return false;
+
+        if (index >= 0) record.CompletedNodes.RemoveAt(index);
+
+        if (banked >= 0)
+        {
+            record.KeyNodesBanked.RemoveAt(banked);
+
+            var node = map.FindNode(nodeId);
+            var granted = node != null ? Math.Max(0, node.KeysGranted) : 0;
+            record.KeysHeld = Math.Max(0, record.KeysHeld - granted);
+        }
+
+        Plugin.Log.LogInfo($"World map '{map.MapName}': node '{nodeId}' un-completed, " +
+                           $"{record.KeysHeld} key(s) held.");
+        Save();
+        return true;
+    }
+
+    /// False when the lock is already open or the player cannot pay. The guard lives here rather
+    /// than in the caller so a second caller cannot forget it; the map screen refuses earlier and
+    /// so never reaches this.
+    public static bool OpenLock(CTWorldMap map, CTWorldMapNode node)
+    {
+        if (map == null || node == null) return false;
+
+        var record = For(map.MapName);
+        if (record.IsLockOpened(node.Id)) return false;
+
+        var cost = Math.Max(0, node.KeysCost);
+        if (record.KeysHeld < cost)
+        {
+            Plugin.Log.LogInfo($"World map '{map.MapName}': lock '{node.Id}' costs {cost} key(s), " +
+                               $"{record.KeysHeld} held.");
+            return false;
+        }
+
+        record.KeysHeld -= cost;
         record.OpenedLocks.Add(node.Id);
         Plugin.Log.LogInfo($"World map '{map.MapName}': lock '{node.Id}' opened, " +
                            $"{record.KeysHeld} key(s) left.");
+        Save();
+        return true;
+    }
+
+    /// Shuts an opened lock and refunds what it cost - the exact inverse of OpenLock, and unlike
+    /// un-completing a key node there is nothing ambiguous to decide.
+    public static bool CloseLock(CTWorldMap map, CTWorldMapNode node)
+    {
+        if (map == null || node == null) return false;
+
+        var record = For(map.MapName);
+
+        var index = record.OpenedLocks.FindIndex(
+            id => string.Equals(id, node.Id, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return false;
+
+        record.OpenedLocks.RemoveAt(index);
+        record.KeysHeld += Math.Max(0, node.KeysCost);
+
+        Plugin.Log.LogInfo($"World map '{map.MapName}': lock '{node.Id}' closed, " +
+                           $"{record.KeysHeld} key(s) held.");
+        Save();
+        return true;
+    }
+
+    /// The wallet, set directly. Needed because For() hands back the live record while Save() is
+    /// private - writing KeysHeld on it looks like it works and is lost at the next slot change.
+    public static void SetKeys(string mapName, int keys)
+    {
+        if (string.IsNullOrEmpty(mapName)) return;
+
+        For(mapName).KeysHeld = Math.Max(0, keys);
         Save();
     }
 

@@ -100,6 +100,211 @@ public class MapEditorUI
         }
     }
 
+    // ---- handle ring -------------------------------------------------------------------------
+
+    private static Sprite _handleRing;
+
+    /// The editor's drag nodes: a hard ring with a faint disc inside it. White throughout, and the
+    /// alpha carries the shape, so one `Image.color` tints ring and fill together and every node
+    /// gets its own colour from one sprite. Never sliced - a circle cannot be stretched in nine parts.
+    public static Sprite HandleRing
+    {
+        get
+        {
+            if (_handleRing != null) return _handleRing;
+
+            const int size = 64;
+            // Thick enough that the smallest node (a shape point, 27px on screen) still draws a
+            // ring rather than a hairline; the sprite scales with the rect, so this is a ratio.
+            const float ringWidth = 7f;
+            const float fillAlpha = 0.28f;
+
+            var centre = size * 0.5f;
+            var outer = centre - 1.5f;
+            var inner = outer - ringWidth;
+
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.DontUnloadUnusedAsset,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var dx = x + 0.5f - centre;
+                    var dy = y + 0.5f - centre;
+                    var distance = Mathf.Sqrt(dx * dx + dy * dy);
+
+                    // Both edges of the ring feather over one pixel, and the disc is what is left
+                    // inside it, so the two never double up into a bright seam.
+                    var ring = Mathf.Clamp01(outer - distance + 0.5f) *
+                               Mathf.Clamp01(distance - inner + 0.5f);
+                    var fill = Mathf.Clamp01(inner - distance + 0.5f) * fillAlpha;
+
+                    var alpha = Mathf.Clamp01(Mathf.Max(ring, fill));
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+
+            _handleRing = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f),
+                100f, 0, SpriteMeshType.FullRect);
+            _handleRing.name = "CultTweaker_HandleRing";
+            _handleRing.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            return _handleRing;
+        }
+    }
+
+    /// Dresses an editor drag node. `size` is the size the node used to be; the ring is drawn a
+    /// little larger because an outline is a smaller target than a filled square of the same width.
+    public static Image DressHandle(GameObject go, Color colour, float size)
+    {
+        var rt = go.GetComponent<RectTransform>() ?? go.AddComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(size, size) * HandleGrowth;
+
+        var image = go.GetComponent<Image>() ?? go.AddComponent<Image>();
+        image.sprite = HandleRing;
+        image.type = Image.Type.Simple;
+        image.color = colour;
+        return image;
+    }
+
+    public const float HandleGrowth = 1.35f;
+
+    // ---- favourite star ----------------------------------------------------------------------
+
+    private static Sprite _star;
+
+    /// The badge a pinned structure wears. White throughout with the shape in the alpha, like the
+    /// drag rings, so one sprite serves the gold fill and the dark rim behind it.
+    public static Sprite Star
+    {
+        get
+        {
+            if (_star != null) return _star;
+
+            const int size = 32;
+            const int samples = 3;
+
+            var centre = size * 0.5f;
+            var outer = centre - 1f;
+            var inner = outer * 0.44f;
+
+            // Ten points around the circle, alternating long and short, starting at the top so the
+            // star stands upright.
+            var corners = new Vector2[10];
+            for (var i = 0; i < 10; i++)
+            {
+                var radius = (i & 1) == 0 ? outer : inner;
+                var angle = Mathf.PI * 0.5f + i * Mathf.PI / 5f;
+                corners[i] = new Vector2(centre + Mathf.Cos(angle) * radius,
+                    centre + Mathf.Sin(angle) * radius);
+            }
+
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.DontUnloadUnusedAsset,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    // A star has five spikes a single sample per pixel turns into gravel, so each
+                    // pixel is judged by a grid of sub-samples and the count becomes its alpha.
+                    var hits = 0;
+                    for (var sy = 0; sy < samples; sy++)
+                    {
+                        for (var sx = 0; sx < samples; sx++)
+                        {
+                            var px = x + (sx + 0.5f) / samples;
+                            var py = y + (sy + 0.5f) / samples;
+                            if (Inside(corners, px, py)) hits++;
+                        }
+                    }
+
+                    var alpha = hits / (float)(samples * samples);
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+
+            _star = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f),
+                100f, 0, SpriteMeshType.FullRect);
+            _star.name = "CultTweaker_Star";
+            _star.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            return _star;
+        }
+    }
+
+    /// Crossing count: a ray to the right of the point crosses an odd number of edges when the point
+    /// is inside. A star is not convex, so nothing simpler will do.
+    private static bool Inside(Vector2[] corners, float x, float y)
+    {
+        var inside = false;
+        for (int i = 0, j = corners.Length - 1; i < corners.Length; j = i++)
+        {
+            var a = corners[i];
+            var b = corners[j];
+            if (a.y > y == b.y > y) continue;
+            if (x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+        }
+        return inside;
+    }
+
+    /// A small star pinned to the top-right corner of a cell, dark rim behind gold so it reads on a
+    /// pale icon as well as a dark plate.
+    public static GameObject AddStarBadge(Transform parent, float size = 15f)
+    {
+        var badge = new GameObject("Star");
+        badge.transform.SetParent(parent, false);
+
+        var rt = badge.AddComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(1f, 1f);
+        rt.anchoredPosition = new Vector2(-2f, -2f);
+        rt.sizeDelta = new Vector2(size, size);
+
+        var rim = badge.AddComponent<Image>();
+        rim.sprite = Star;
+        rim.color = new Color(0f, 0f, 0f, 0.7f);
+        rim.raycastTarget = false;
+
+        var fill = new GameObject("Fill");
+        fill.transform.SetParent(badge.transform, false);
+        var fillRt = fill.AddComponent<RectTransform>();
+        fillRt.anchorMin = Vector2.zero;
+        fillRt.anchorMax = Vector2.one;
+        fillRt.offsetMin = new Vector2(1.5f, 1.5f);
+        fillRt.offsetMax = new Vector2(-1.5f, -1.5f);
+
+        var star = fill.AddComponent<Image>();
+        star.sprite = Star;
+        star.color = new Color(1f, 0.82f, 0.26f, 1f);
+        star.raycastTarget = false;
+
+        return badge;
+    }
+
+    /// Right mouse button on an element that already has a Button on it.
+    internal static MapEditorRightClick AttachRightClick(GameObject go, Action onRightClick)
+    {
+        var handler = go.GetComponent<MapEditorRightClick>() ?? go.AddComponent<MapEditorRightClick>();
+        handler.OnRightClick = onRightClick;
+        return handler;
+    }
+
     private static Sprite _outline;
 
     public static Sprite RoundedOutline
@@ -1260,5 +1465,18 @@ public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitH
 
         if (hovered) host.ShowHoverStatus(text);
         else host.ClearHoverStatus();
+    }
+}
+
+/// Right mouse button on a UI element. Unity's Button only answers to the left one, so a cell that
+/// wants both carries this alongside it - both components see the click and each takes its own.
+public class MapEditorRightClick : MonoBehaviour, IPointerClickHandler
+{
+    public Action OnRightClick;
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (eventData == null || eventData.button != PointerEventData.InputButton.Right) return;
+        OnRightClick?.Invoke();
     }
 }

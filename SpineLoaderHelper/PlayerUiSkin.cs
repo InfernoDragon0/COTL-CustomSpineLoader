@@ -179,7 +179,7 @@ internal sealed class PlayerUiMirror : MonoBehaviour
         var filter = _spine.GetComponent<MeshFilter>();
         var renderer = _spine.GetComponent<MeshRenderer>();
         var canvas = graphic.canvas;
-        Plugin.Log.LogInfo($"Player spine '{_name}' mirrored onto the {_where} skeleton: region " +
+        Plugin.Log.LogInfo($"Spine '{_name}' mirrored onto the {_where} skeleton: region " +
                            $"{_region.width:0.##}x{_region.height:0.##} units at {_region.center} x{_ppu} ppu, texture {_target.width}x{_target.height}; " +
                            $"mesh {(filter != null && filter.sharedMesh != null ? filter.sharedMesh.vertexCount : -1)} verts, " +
                            $"{(renderer != null ? renderer.sharedMaterials.Length : -1)} material(s); " +

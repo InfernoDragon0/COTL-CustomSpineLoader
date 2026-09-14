@@ -109,23 +109,12 @@ public class BlueprintLoader
         // ---- Phase 4: structures -----------------------------------------------------------
         if (structureTool != null)
         {
-            foreach (var s in bp.Structures)
+            yield return structureTool.PlaceMany(bp.Structures, (s, placed) =>
             {
-                if (!StructureTool.TryResolveType(s.TypeName, s.IsCustom, out var type))
-                {
-                    Plugin.Log.LogWarning($"MapEditor: structure '{s.TypeName}' could not be resolved, skipped.");
-                    continue;
-                }
-                var before = structureTool.LastPlacedInstance;
-                yield return structureTool.PlaceAt(type, s.IsCustom,
-                    MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
-                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough,
-                    wind: s.Wind);
-                var placed = structureTool.LastPlacedInstance;
-                if (placed == null || ReferenceEquals(placed, before)) continue;
+                if (placed == null) return;
                 ApplySavedScale(placed, s.Scale);
                 Net.EditorIds.Adopt(placed, s.Id);
-            }
+            });
         }
 
         if (doorTool != null)
@@ -203,10 +192,7 @@ public class BlueprintLoader
 
         if (triggerTool != null)
         {
-            foreach (var t in bp.Triggers)
-                triggerTool.CreateTrigger(MapEditorSerialization.ToVector3(t.Position),
-                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl,
-                    t.Blocking);
+            foreach (var t in bp.Triggers) triggerTool.CreateTrigger(t);
         }
 
         if (whiteboardTool != null && bp.Whiteboard != null)
@@ -559,6 +545,25 @@ public class BlueprintLoader
                 continue;
             }
 
+            if (RoomChildPrefabs.IsRoomKey(prop.Key))
+            {
+                GameObject source = null;
+                yield return RoomChildPrefabs.ResolveRoutine(prop.Key, go => source = go);
+                if (source == null)
+                {
+                    _propsFailed++;
+                    Plugin.Log.LogWarning($"MapEditor: piece '{prop.Key}' could not be read out of its " +
+                                          "prefab, so it is missing from the room.");
+                    continue;
+                }
+
+                _propsSpawned++;
+                var lifted = RoomChildPrefabs.Lift(source, parent, prop.Key);
+                ApplyPropTransform(lifted, prop, room);
+                Net.EditorIds.Adopt(lifted, prop.Id);
+                continue;
+            }
+
             var captured = prop;
             pending++;
             try
@@ -612,6 +617,10 @@ public class BlueprintLoader
         var piece = go.GetComponent<IslandPiece>();
         if (piece != null && room != null && room.Pieces != null && !room.Pieces.Contains(piece))
             room.Pieces.Add(piece);
+
+        // Every loaded prop passes through here - the loader, the base delta and the network entry
+        // kinds all call it - so it is the one place a brainless Structure has to be dealt with.
+        PropBrains.Adopt(go);
     }
 
     internal static Transform ParentFor(string tag, GenerateRoom room)

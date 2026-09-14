@@ -250,6 +250,7 @@ public class MapEditorGrid
         public Image Ring;
         public Image Icon;
         public GameObject Letter;
+        public GameObject Star;
         public string Display;
     }
 
@@ -455,6 +456,11 @@ public class MapEditorGrid
 
     public bool ShowNames { get; set; }
 
+    /// Set by a tool that has a right-click meaning for its cells, and a badge to show for it.
+    /// Both optional: left null, cells behave exactly as before.
+    public Action<string, string> OnRightClick;
+    public Func<string, bool> IsFavourite;
+
     public void AddCell(string id, string displayName, Sprite icon, Action onClick)
     {
         if (string.IsNullOrEmpty(id) || _byId.ContainsKey(id)) return;
@@ -484,7 +490,7 @@ public class MapEditorGrid
                 }
             };
 
-        _byId[id] = new Cell
+        var cell = new Cell
         {
             Root = go,
             Ring = border,
@@ -492,10 +498,41 @@ public class MapEditorGrid
             Letter = go.transform.Find("Label")?.gameObject,
             Display = displayName
         };
+        _byId[id] = cell;
+
+        if (OnRightClick != null)
+            MapEditorUI.AttachRightClick(go, () => OnRightClick?.Invoke(id, displayName));
+
+        SetStar(cell, IsFavourite != null && IsFavourite(id));
 
         if (border != null && _multi.Contains(id)) border.gameObject.SetActive(true);
 
         UpdateBoxHeight();
+    }
+
+    /// The badge is built the first time a cell needs one - the browser can hold several hundred
+    /// cells and almost none of them are favourites.
+    private static void SetStar(Cell cell, bool starred)
+    {
+        if (cell == null || cell.Root == null) return;
+
+        if (!starred)
+        {
+            if (cell.Star != null) cell.Star.SetActive(false);
+            return;
+        }
+
+        cell.Star ??= MapEditorUI.AddStarBadge(cell.Root.transform);
+        cell.Star.SetActive(true);
+        cell.Star.transform.SetAsLastSibling();
+    }
+
+    /// Re-asks IsFavourite for every cell on screen, for after a favourite is toggled elsewhere.
+    public void RefreshFavourites()
+    {
+        if (IsFavourite == null) return;
+
+        foreach (var pair in _byId) SetStar(pair.Value, IsFavourite(pair.Key));
     }
 
     private void AddCellName(GameObject cell, string displayName)

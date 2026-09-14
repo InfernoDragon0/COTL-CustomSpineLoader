@@ -4,6 +4,7 @@ using System.IO;
 using CustomSpineLoader.APIHelper;
 using CustomSpineLoader.APIHelper.NpcQuests;
 using CustomSpineLoader.MapEditor;
+using CustomSpineLoader.MapEditor.WorldMap;
 using CustomSpineLoader.SpineLoaderHelper;
 using UnityEngine;
 
@@ -13,7 +14,8 @@ public static class CultTweakerApi
 {
     /// Raised by one on every addition. A caller written against 1 keeps working on 2.
     /// 2 added the quest kind and the quest members at the end of this class.
-    public const int ContractVersion = 2;
+    /// 3 added the world map progress members at the end of this class.
+    public const int ContractVersion = 3;
 
     public const string PluginGuid = Plugin.PluginGuid;
 
@@ -112,6 +114,12 @@ public static class CultTweakerApi
         /// Custom follower skins by skin name.
         public const string FollowerSkins = "followerSkins";
 
+        /// Follower hats donated by wardrobe packs. Names are "packFolder/skinName".
+        public const string FollowerHats = "followerHats";
+
+        /// Follower clothes donated by wardrobe packs. Names are "packFolder/skinName".
+        public const string FollowerClothes = "followerClothes";
+
         /// Cutscene videos available to play.
         public const string Cutscenes = "cutscenes";
 
@@ -129,7 +137,8 @@ public static class CultTweakerApi
     [
         Kind.Dungeons, Kind.DungeonMaps, Kind.Levels, Kind.Rooms, Kind.WorldMaps, Kind.MainMenus,
         Kind.Npcs, Kind.Enemies, Kind.Structures, Kind.Items, Kind.Meals, Kind.Tarots,
-        Kind.Weapons, Kind.PlayerSkins, Kind.FollowerSkins, Kind.Cutscenes, Kind.ShapeProfiles,
+        Kind.Weapons, Kind.PlayerSkins, Kind.FollowerSkins, Kind.FollowerHats, Kind.FollowerClothes,
+        Kind.Cutscenes, Kind.ShapeProfiles,
         Kind.BuildingOverrides, Kind.Quests
     ];
 
@@ -156,6 +165,8 @@ public static class CultTweakerApi
             case "weapons":
             case "playerskins": return "PlayerSkins";
             case "followerskins": return "FollowerSkins";
+            case "followerhats":
+            case "followerclothes": return FollowerWardrobe.FolderName;
             case "cutscenes": return APIHelper.CustomCutsceneLoader.FolderName;
             case "shapeprofiles": return "CustomShapeProfiles";
             case "buildingoverrides": return "BuildingOverrides";
@@ -191,6 +202,8 @@ public static class CultTweakerApi
                 case "weapons": return WeaponNames();
                 case "playerskins": return PlayerSpineLoader.RegisteredSpineNames();
                 case "followerskins": return [.. FollowerSpineLoader.CustomFollowerSkins.Keys];
+                case "followerhats": return FollowerWardrobe.HatKeys();
+                case "followerclothes": return FollowerWardrobe.ClothesKeys();
                 case "cutscenes": return APIHelper.CustomCutsceneLoader.Names();
                 case "shapeprofiles": return ShapeProfileNames();
                 case "buildingoverrides":
@@ -425,6 +438,158 @@ public static class CultTweakerApi
 
         names.Sort(StringComparer.OrdinalIgnoreCase);
         return names;
+    }
+
+    // ---- world map progress ------------------------------------------------------------------
+
+    /// <summary>
+    /// The node ids of a world map, in the order the document lists them. Empty when this install
+    /// has no such map. Ids are what every other world map member takes; they are the author's own
+    /// strings and are stable across machines, unlike <see cref="IdOf"/> numbers.
+    /// </summary>
+    public static IReadOnlyList<string> WorldMapNodes(string mapName)
+    {
+        var map = WorldMap(mapName);
+        if (map == null) return Array.Empty<string>();
+
+        var ids = new List<string>(map.Nodes.Count);
+        foreach (var node in map.Nodes)
+            if (node != null && !string.IsNullOrEmpty(node.Id)) ids.Add(node.Id);
+
+        return ids;
+    }
+
+    /// <summary>
+    /// Where a node stands in the save the player has open: "hidden", "preview", "locked",
+    /// "selectable" or "completed". Null when this install has no such map or node.
+    /// <para>
+    /// State is DERIVED, never stored: it is recomputed from the map's graph and the saved record
+    /// every time. So there is nothing to assign - change the record with the members below and the
+    /// state follows. Reading re-reads the map document from disk, so do not poll this per frame.
+    /// </para>
+    /// </summary>
+    public static string WorldMapNodeState(string mapName, string nodeId)
+    {
+        if (string.IsNullOrEmpty(nodeId)) return null;
+
+        try
+        {
+            var map = WorldMap(mapName);
+            if (map == null || map.FindNode(nodeId) == null) return null;
+
+            var states = WorldMapStateResolver.Resolve(map, WorldMapProgress.For(map.MapName));
+            return states.TryGetValue(nodeId, out var state) ? state.ToString().ToLowerInvariant() : null;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"Api: reading world map '{mapName}' node '{nodeId}' failed: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Marks a node completed, as finishing a run from it would. A Key node also banks its keys,
+    /// once however often it is redone. False when this install has no such map or node.
+    /// </summary>
+    public static bool CompleteWorldMapNode(string mapName, string nodeId)
+    {
+        var map = WorldMap(mapName);
+        if (map == null || string.IsNullOrEmpty(nodeId) || map.FindNode(nodeId) == null) return false;
+
+        return Guarded($"completing '{nodeId}'", () =>
+        {
+            WorldMapProgress.MarkCompleted(map, nodeId);
+            return true;
+        });
+    }
+
+    /// <summary>
+    /// Takes a node back out of the completed set; anything downstream re-locks on its own, because
+    /// state is derived. A Key node un-banks what it granted, floored at zero - keys already spent
+    /// cannot be clawed back - and any lock those keys opened STAYS open. False when the node was
+    /// not completed here.
+    /// </summary>
+    public static bool UncompleteWorldMapNode(string mapName, string nodeId)
+    {
+        var map = WorldMap(mapName);
+        if (map == null || string.IsNullOrEmpty(nodeId)) return false;
+
+        return Guarded($"un-completing '{nodeId}'", () => WorldMapProgress.Uncomplete(map, nodeId));
+    }
+
+    /// <summary>
+    /// Opens a Lock node, spending its <c>KeysCost</c>. False when the node is not a lock, is
+    /// already open, or the player cannot pay - use <see cref="SetWorldMapKeys"/> first to force it.
+    /// </summary>
+    public static bool OpenWorldMapLock(string mapName, string nodeId)
+    {
+        var node = WorldMapNode(mapName, nodeId, out var map);
+        if (node == null || !node.IsLock) return false;
+
+        return Guarded($"opening lock '{nodeId}'", () => WorldMapProgress.OpenLock(map, node));
+    }
+
+    /// Shuts an opened Lock node and refunds its cost. False when it was not open.
+    public static bool CloseWorldMapLock(string mapName, string nodeId)
+    {
+        var node = WorldMapNode(mapName, nodeId, out var map);
+        if (node == null || !node.IsLock) return false;
+
+        return Guarded($"closing lock '{nodeId}'", () => WorldMapProgress.CloseLock(map, node));
+    }
+
+    /// Keys banked on this map in the save the player has open. Keys are per map, not shared.
+    public static int WorldMapKeys(string mapName) =>
+        string.IsNullOrEmpty(mapName) ? 0 : WorldMapProgress.For(mapName).KeysHeld;
+
+    /// Sets the key count directly, floored at zero. Which Key nodes are banked is left alone, so
+    /// this does not let a node grant its keys twice.
+    public static void SetWorldMapKeys(string mapName, int keys)
+    {
+        if (string.IsNullOrEmpty(mapName)) return;
+        Guarded($"setting keys on '{mapName}'", () => { WorldMapProgress.SetKeys(mapName, keys); return true; });
+    }
+
+    /// Throws away every completion, opened lock and key on this map for the save the player has
+    /// open. The map document itself is untouched.
+    public static void ResetWorldMap(string mapName)
+    {
+        if (string.IsNullOrEmpty(mapName)) return;
+        Guarded($"resetting '{mapName}'", () => { WorldMapProgress.WipeMap(mapName); return true; });
+    }
+
+    private static CTWorldMap WorldMap(string mapName)
+    {
+        if (string.IsNullOrEmpty(mapName)) return null;
+
+        try
+        {
+            return CTWorldMapSerialization.LoadByName(mapName);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogWarning($"Api: world map '{mapName}' could not be read: {e.Message}");
+            return null;
+        }
+    }
+
+    private static CTWorldMapNode WorldMapNode(string mapName, string nodeId, out CTWorldMap map)
+    {
+        map = WorldMap(mapName);
+        return map == null || string.IsNullOrEmpty(nodeId) ? null : map.FindNode(nodeId);
+    }
+
+    private static bool Guarded(string what, Func<bool> action)
+    {
+        try
+        {
+            return action();
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.LogError($"Api: world map, {what} failed: {e}");
+            return false;
+        }
     }
 
     // ---- where content lives ---------------------------------------------------------------------

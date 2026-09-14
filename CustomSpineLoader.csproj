@@ -12,6 +12,8 @@
         <OutputPath Condition=" '$(SolutionDir)' != '' ">$(SolutionDir)bin\$(Configuration)\$(MSBuildProjectName)\</OutputPath>
         <OutputPath Condition=" '$(SolutionDir)' == '' ">$(ProjectDir)bin\$(Configuration)\$(MSBuildProjectName)\</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <!-- tools/ holds standalone helper projects with their own obj/ output; keep them out of this build. -->
+        <DefaultItemExcludes>$(DefaultItemExcludes);tools/**</DefaultItemExcludes>
     </PropertyGroup>
 
     <ItemGroup>

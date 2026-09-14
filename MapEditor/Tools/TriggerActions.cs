@@ -45,7 +45,10 @@ public enum TriggerActionType
 
     ReturnToBase,
 
-    HubSpawnPoint
+    HubSpawnPoint,
+
+    PauseEnemyAi,
+    ResumeEnemyAi
 }
 
 public class TriggerAction
@@ -106,8 +109,13 @@ public class TriggerAction
         TriggerActionType.OpenWorldMap => $"World map: {Target}",
         TriggerActionType.ReturnToBase => "Return to base",
         TriggerActionType.HubSpawnPoint => "Hub spawn point",
+        TriggerActionType.PauseEnemyAi => $"Pause AI: {EnemyScope(Target)}",
+        TriggerActionType.ResumeEnemyAi => $"Resume AI: {EnemyScope(Target)}",
         _ => Type.ToString()
     };
+
+    private static string EnemyScope(string target) =>
+        string.IsNullOrEmpty(target) ? "every enemy" : ShortName(target);
 
     private string SubtextNote() => string.IsNullOrEmpty(Subtext) ? "" : " + subtext";
 
@@ -117,12 +125,7 @@ public class TriggerAction
         return text.Length <= 22 ? $"\"{text}\"" : $"\"{text.Substring(0, 21)}...\"";
     }
 
-    private static string ShortName(string path)
-    {
-        if (string.IsNullOrEmpty(path)) return "?";
-        var slash = path.LastIndexOf('/');
-        return slash >= 0 && slash < path.Length - 1 ? path.Substring(slash + 1) : path;
-    }
+    private static string ShortName(string path) => TriggerActions.DisplayName(path);
 }
 
 public static class TriggerActions
@@ -291,6 +294,14 @@ public static class TriggerActions
             }
 
             case TriggerActionType.HubSpawnPoint:
+                break;
+
+            case TriggerActionType.PauseEnemyAi:
+                TriggerEnemyActions.SetPaused(action.Target, true);
+                break;
+
+            case TriggerActionType.ResumeEnemyAi:
+                TriggerEnemyActions.SetPaused(action.Target, false);
                 break;
 
             case TriggerActionType.ReturnToBase:
@@ -693,9 +704,37 @@ public static class TriggerActions
         return path;
     }
 
+    public const string IdPrefix = "#";
+
+    /// How an object is written down: its editor id where it has one, its scene path otherwise.
+    public static string TargetOf(GameObject go)
+    {
+        if (go == null) return "";
+
+        var id = Net.EditorIds.Peek(go);
+        return string.IsNullOrEmpty(id) ? PathOf(go) : IdPrefix + id;
+    }
+
+    /// What an authored target is called in the panel and the status bar.
+    public static string DisplayName(string target)
+    {
+        if (string.IsNullOrEmpty(target)) return "?";
+
+        if (target[0] == '#')
+        {
+            var go = Net.EditorIds.Find(target.Substring(1));
+            return go != null ? go.name : "an enemy";
+        }
+
+        var slash = target.LastIndexOf('/');
+        return slash >= 0 && slash < target.Length - 1 ? target.Substring(slash + 1) : target;
+    }
+
     public static GameObject ResolveObject(string path)
     {
         if (string.IsNullOrEmpty(path)) return null;
+
+        if (path[0] == '#') return Net.EditorIds.Find(path.Substring(1));
 
         var direct = GameObject.Find(path);
         if (direct != null) return direct;

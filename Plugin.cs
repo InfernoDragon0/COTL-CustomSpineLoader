@@ -43,6 +43,12 @@ namespace CustomSpineLoader
         public static ConfigEntry<string> CurrentFleeceNameP1 { get; set; }
         public static ConfigEntry<string> CurrentFleeceNameP2 { get; set; }
 
+        public static ConfigEntry<int> CurrentBroomIndexP1 { get; set; }
+        public static ConfigEntry<int> CurrentBroomIndexP2 { get; set; }
+
+        public static ConfigEntry<string> CurrentBroomNameP1 { get; set; }
+        public static ConfigEntry<string> CurrentBroomNameP2 { get; set; }
+
         public static ConfigEntry<string> SelectedSpineP1 { get; set; }
         public static ConfigEntry<string> SelectedSpineP2 { get; set; }
 
@@ -83,6 +89,22 @@ namespace CustomSpineLoader
             if (FleeceTransmog[playerId] != null) FleeceTransmog[playerId].Value = on;
         }
 
+        public static readonly ConfigEntry<bool>[] BroomTransmog = new ConfigEntry<bool>[4];
+
+        public static bool BroomTransmogOn(int playerId)
+        {
+            if (playerId < 0 || playerId >= BroomTransmog.Length) return false;
+
+            var entry = BroomTransmog[playerId];
+            return entry != null && entry.Value;
+        }
+
+        public static void SetBroomTransmog(int playerId, bool on)
+        {
+            if (playerId < 0 || playerId >= BroomTransmog.Length) return;
+            if (BroomTransmog[playerId] != null) BroomTransmog[playerId].Value = on;
+        }
+
         private RuntimeMapEditor runtimeMapEditor;
 
         private static RuntimeMapEditor RoomEditor => RuntimeMapEditor.Active;
@@ -116,6 +138,11 @@ namespace CustomSpineLoader
             CurrentFleeceNameP1 = Config.Bind("Fleece", "CurrentFleeceNameP1", "", "Current fleece skin name for Player 1 (kept alongside the index so its spine can load at boot)");
             CurrentFleeceNameP2 = Config.Bind("Fleece", "CurrentFleeceNameP2", "", "Current fleece skin name for Player 2 (kept alongside the index so its spine can load at boot)");
 
+            CurrentBroomIndexP1 = Config.Bind("Broom", "CurrentBroomIndexP1", -1, "Current broom index for Player 1");
+            CurrentBroomIndexP2 = Config.Bind("Broom", "CurrentBroomIndexP2", -1, "Current broom index for Player 2");
+            CurrentBroomNameP1 = Config.Bind("Broom", "CurrentBroomNameP1", "", "Current broom skin name for Player 1 (kept alongside the index so a donated broom's spine can load at boot)");
+            CurrentBroomNameP2 = Config.Bind("Broom", "CurrentBroomNameP2", "", "Current broom skin name for Player 2 (kept alongside the index so a donated broom's spine can load at boot)");
+
             SelectedSpineP1 = Config.Bind("Spine", "SelectedSpineP1", "", "Chosen player spine for Player 1");
             SelectedSpineP2 = Config.Bind("Spine", "SelectedSpineP2", "", "Chosen player spine for Player 2");
 
@@ -147,6 +174,7 @@ namespace CustomSpineLoader
             SpineMemory.Phase("Enemies", () => CustomEnemyLoader.LoadAllCustomEnemies(this));
             Log.LogInfo("Loading Custom Follower Overrides...");
             SpineMemory.Phase("FollowerOverrides", FollowerSpineLoader.LoadAllNonSpineSkins);
+            SpineMemory.Phase("FollowerWardrobe", FollowerWardrobe.LoadAll);
 
             SpineMemory.TrimRepackCaches("startup skin builds");
             Log.LogInfo("Loading Custom NPCs...");
@@ -204,6 +232,13 @@ namespace CustomSpineLoader
 
             PlayerSpineLoader.FleeceIndexes[0] = CurrentFleeceIndexP1.Value;
             PlayerSpineLoader.FleeceIndexes[1] = CurrentFleeceIndexP2.Value;
+
+            for (var i = 0; i < BroomTransmog.Length; i++)
+                BroomTransmog[i] = Config.Bind("Broom", $"BroomTransmogP{i + 1}", false,
+                    $"Give player {i + 1} the broom chosen for them (F7 panel) instead of the one their chore level earned.");
+
+            PlayerSpineLoader.BroomIndexes[0] = CurrentBroomIndexP1.Value;
+            PlayerSpineLoader.BroomIndexes[1] = CurrentBroomIndexP2.Value;
 
             SceneManager.sceneLoaded += OnSceneLoaded;
 

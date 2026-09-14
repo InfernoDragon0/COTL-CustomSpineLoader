@@ -159,7 +159,7 @@ public class EnemyTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
 
     private const string RoomPrefix = "Assets/_Rooms/";
 
-    private static List<string> BossRoomKeys()
+    internal static List<string> BossRoomKeys()
     {
         var keys = new List<string>();
 

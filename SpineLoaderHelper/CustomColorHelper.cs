@@ -11,7 +11,6 @@ public class CustomColorHelper
 {
     //TODO: maybe, each part of the body can be a different color in the future
     public static Dictionary<int, CustomFollowerColor> CustomColors { get; private set; } = [];
-    public static Dictionary<int, CustomFollowerSpineSkin> CustomFollowerSkinConfigs { get; private set; } = [];
     public static void LoadCustomColors(int saveSlot)
     {
         if (!File.Exists(Path.Combine(Plugin.PluginPath, $"CustomColors{saveSlot}.json")))
@@ -68,6 +67,18 @@ public class CustomColorHelper
         }
     }
 
+    /// Which wardrobe hat and clothes the follower wears, as FollowerWardrobe keys; null for none.
+    public static void SetWardrobe(int id, string hat, string clothes)
+    {
+        if (!CustomColors.TryGetValue(id, out var record))
+        {
+            Plugin.Log.LogWarning("Tried to set wardrobe for follower " + id + " but no custom color exists. Enable Customization first.");
+            return;
+        }
+        record.CustomHat = string.IsNullOrEmpty(hat) ? null : hat;
+        record.CustomClothes = string.IsNullOrEmpty(clothes) ? null : clothes;
+    }
+
     public static void RemoveCustomColor(int id)
     {
         if (CustomColors.ContainsKey(id))
@@ -95,12 +106,8 @@ public class CustomFollowerColor(int id, float r, float g, float b, float a, flo
 
     public int FollowerNecklaceType { get; set; } = 0;
 
-    public float scale = Mathf.Clamp(scale, 0.1f, 5f);
-}
+    public string CustomHat { get; set; }
+    public string CustomClothes { get; set; }
 
-[Serializable]
-public class CustomFollowerSpineSkin
-{
-    public string SpineName;
-    public List<string> SkinsApplied;
+    public float scale = Mathf.Clamp(scale, 0.1f, 5f);
 }

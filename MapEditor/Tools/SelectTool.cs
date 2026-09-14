@@ -902,10 +902,7 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContribut
         go.transform.SetParent(GripRoot(), false);
 
         var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(size, size);
-
-        var img = go.AddComponent<Image>();
-        img.color = colour;
+        MapEditorUI.DressHandle(go, colour, size);
 
         var handle = go.AddComponent<SelectHandle>();
         handle.Initialize(this, _editor, mode);

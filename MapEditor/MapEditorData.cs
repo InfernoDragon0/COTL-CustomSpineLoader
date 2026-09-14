@@ -177,6 +177,10 @@ public class MapTriggerData
     public bool LockPlayerControl = true;
 
     public bool Blocking;
+
+    public string Method = "";
+    public string HealthTarget = "";
+    public float HealthThreshold = 0.5f;
 }
 
 [Serializable]

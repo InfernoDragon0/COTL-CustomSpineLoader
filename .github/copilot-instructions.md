@@ -4,13 +4,13 @@ Purpose: give an AI coding agent the minimal, actionable knowledge to be product
 
 1) Big picture
 - This repository is a BepInEx plugin for Cult of the Lamb that loads custom Spine skeletons and textures at runtime. See [Plugin.cs](Plugin.cs) for the entry/registration points. The plugin: registers follower commands (`CustomFollowerCommandManager.Add`), loads building overrides and uses Harmony patches.
-- Runtime flow: `PlayerSpineLoader.LoadAllPlayerSpines()` and `FollowerSpineLoader.LoadAllFollowerSpines()` scan folders under the plugin installation path (`Plugin.PluginPath`) named `PlayerSkins` and `FollowerSkins`, read `.json` (Spine skeleton), `.atlas`, and `.png` files, build Spine runtime assets and register them via `CustomSkinManager`.
+- Runtime flow: `PlayerSpineLoader.LoadAllPlayerSpines()` scans `PlayerSkins` under the plugin installation path (`Plugin.PluginPath`), reads `.json` (Spine skeleton), `.atlas`, and `.png` files, builds Spine runtime assets and registers them via `CustomSkinManager`. `FollowerSpineLoader.LoadAllNonSpineSkins()` bakes PNG-override follower skins from `FollowerSkins`; `FollowerWardrobe.LoadAll()` registers hat/clothes packs from `FollowerSpines` (loaded on first wear).
 
 2) Key files & directories (quick jump)
 - [Plugin.cs](Plugin.cs): registration, plugin path, logging hook.
 - [README.md](README.md): user-facing installation and skin folder layout (PlayerSkins/PlayerName/config.json examples).
 - [SpineLoaderHelper/PlayerSpineLoader.cs](SpineLoaderHelper/PlayerSpineLoader.cs): canonical example of how player skins are discovered, parsed, and registered.
-- [SpineLoaderHelper/FollowerSpineLoader.cs](SpineLoaderHelper/FollowerSpineLoader.cs): similar for follower skins (layered default skins, `FollowerSpineConfig`).
+- [SpineLoaderHelper/FollowerSpineLoader.cs](SpineLoaderHelper/FollowerSpineLoader.cs): PNG-override follower skins (`FollowerSkinConfig`); [SpineLoaderHelper/FollowerWardrobe.cs](SpineLoaderHelper/FollowerWardrobe.cs): follower hat/clothes packs (`FollowerSpineConfig`).
 - [Commands/CustomColorCommand.cs](Commands/CustomColorCommand.cs): demonstrates UI construction patterns and slot names used to recolor skins (e.g. `ARM_LEFT_SKIN`, `LEG_LEFT_SKIN`, `HEAD_SKIN_BTM`).
 - `lib/COTL_API.dll`: referenced API used for `CustomFollowerCommand`, `CustomSkinManager`, and helpers.
 

@@ -64,12 +64,20 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _groupKeys.Add(StructureGroup);
         options.Add(StructureGroup);
 
+        // No count in the label: the options are fixed when the panel is built and a number here
+        // would go stale the first time anything was pinned.
+        _groupKeys.Add(FavouritesGroup);
+        options.Add("Favourites");
+
         var customCount = CustomStructureManager.CustomStructureList.Count;
         if (customCount > 0)
         {
             _groupKeys.Add(CustomGroup);
             options.Add($"{CustomGroup} ({customCount})");
         }
+
+        _groupKeys.Add(BossSceneryGroup);
+        options.Add("Boss & special room pieces");
 
         foreach (var group in PropGroups().Keys)
         {
@@ -84,8 +92,31 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         });
 
         _grid = ui.CreateIconGrid(panel, "PlacementGrid", scrollHeight: GridHeight);
+        _grid.OnRightClick = RightClickCell;
+        _grid.IsFavourite = id => MapEditorFavourites.IsFavourite(EntryForCell(id, null)?.Key);
 
         ui.CreateToggle(panel, "Multi-select randomised placement", false, SetScatterMode);
+
+        ui.CreateToggle(panel, "Break apart randomised sets", true, on =>
+        {
+            _breakApart = on;
+            _editor.SetStatus(on
+                ? "A randomised set drops as separate pieces you can move and delete."
+                : "A randomised set drops whole, with its dice thrown away.");
+        });
+
+        WireQuickPick();
+
+        ui.CreateToggle(panel, "Structure quick pick dock", true, on =>
+        {
+            var bar = _editor.QuickPick;
+            if (bar != null) bar.Visible = on;
+
+            _editor.SetStatus(on
+                ? "Quick pick holds your pinned picks and the last things you placed; " +
+                  "1-9 or the wheel arms one, right-click pins and unpins."
+                : "Quick pick hidden; the wheel goes back to cycling tools.");
+        });
 
         _seeThroughToggle = ui.CreateToggle(panel, "Place see-through", false, on =>
         {
@@ -182,8 +213,15 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         var pick = _picks[Random.Range(0, _picks.Count)];
         var world = _editor.MouseWorld();
 
-        if (pick.IsProp) SpawnProp(pick.Path, world, isPreview: false);
-        else Place(pick.Type, world);
+        if (pick.IsProp)
+        {
+            NotePlacedProp(pick.Path);
+            SpawnProp(pick.Path, world, isPreview: false);
+        }
+        else
+        {
+            Place(pick.Type, world);
+        }
     }
 
     private const float GridHeight = 620f;
@@ -385,27 +423,31 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     private readonly Dictionary<string, StructureBrain.TYPES> _typesById = [];
 
+    private const string TypeCellPrefix = "type:";
+
     private MapEditorGrid.Entry StructureEntry(StructureBrain.TYPES type, string label)
     {
-        var id = "type:" + type;
+        var id = TypeCellPrefix + type;
         _typesById[id] = type;
 
         return new MapEditorGrid.Entry
         {
             Id = id,
             Display = label,
-            OnClick = () =>
-            {
-                _search?.Confirm();
-
-                if (TogglePick(id, label, isProp: false, path: null, type: type)) return;
-
-                _pending = type;
-                _propPath = null;
-                DestroyPropPreview();
-                _editor.SetStatus($"Selected {label}.");
-            }
+            OnClick = () => SelectStructure(type, label)
         };
+    }
+
+    private void SelectStructure(StructureBrain.TYPES type, string label)
+    {
+        _search?.Confirm();
+
+        if (TogglePick("type:" + type, label, isProp: false, path: null, type: type)) return;
+
+        _pending = type;
+        _propPath = null;
+        DestroyPropPreview();
+        _editor.SetStatus($"Selected {label}.");
     }
 
     // ---- search -------------------------------------------------------------------------------
@@ -429,11 +471,203 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         ShowGroup(_groupKeys[index]);
     }
 
+    private string _currentGroup = StructureGroup;
+
     private void ShowGroup(string group)
     {
+        _currentGroup = group;
+
         if (group == StructureGroup) ShowStructureGroup();
         else if (group == CustomGroup) ShowCustomGroup();
+        else if (ReferenceEquals(group, FavouritesGroup)) ShowFavouritesGroup();
+        else if (ReferenceEquals(group, BossSceneryGroup)) ShowBossSceneryGroup();
         else ShowPropGroup(group);
+    }
+
+    // ---- the pinned group ----------------------------------------------------------------------
+
+    private static readonly string FavouritesGroup = "\0favourites";
+
+    private void ShowFavouritesGroup()
+    {
+        if (_grid == null) return;
+
+        var pinned = MapEditorFavourites.Entries();
+        if (pinned.Count == 0)
+        {
+            _grid.Clear();
+            _editor.SetStatus("Nothing pinned yet - right-click anything in the browser to pin it.");
+            return;
+        }
+
+        var entries = new List<MapEditorGrid.Entry>(pinned.Count);
+        foreach (var entry in pinned)
+        {
+            if (!entry.IsProp)
+            {
+                entries.Add(StructureEntry(entry.Type, entry.Label));
+                continue;
+            }
+
+            var path = entry.Path;
+            var label = entry.Label;
+            entries.Add(new MapEditorGrid.Entry
+            {
+                Id = path,
+                Display = label,
+                OnClick = () => SelectProp(path, label)
+            });
+        }
+
+        // One group, both kinds: a structure's icon is a dictionary lookup and a prop's is a
+        // background load, so each id is asked the way its own group would ask.
+        MapEditorIcons.CancelPendingPropIcons();
+        _grid.Populate(_editor, entries, id =>
+        {
+            if (_typesById.TryGetValue(id, out var type))
+            {
+                _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
+                return;
+            }
+
+            MapEditorIcons.GetPropIcon(_editor, id, sprite => _grid?.SetCellIcon(id, sprite));
+        });
+
+        _editor.SetStatus($"{pinned.Count} pinned pick(s).");
+    }
+
+    // ---- pieces that only exist inside boss and special rooms ---------------------------------
+
+    private static readonly string BossSceneryGroup = "\0bossscenery";
+
+    private static List<(string label, string key)> _bossPieces;
+    private static int _bossScanToken;
+
+    private void ShowBossSceneryGroup()
+    {
+        if (_grid == null) return;
+
+        if (_bossPieces != null)
+        {
+            Populate(_bossPieces);
+            _editor.SetStatus($"{_bossPieces.Count} piece(s) from the boss and special rooms.");
+            return;
+        }
+
+        _editor.StartCoroutine(ScanBossScenery(++_bossScanToken));
+    }
+
+    private void Populate(List<(string label, string key)> pieces)
+    {
+        var entries = new List<MapEditorGrid.Entry>(pieces.Count);
+        foreach (var (label, key) in pieces)
+        {
+            var capturedKey = key;
+            var capturedLabel = label;
+            entries.Add(new MapEditorGrid.Entry
+            {
+                Id = capturedKey,
+                Display = capturedLabel,
+                OnClick = () => SelectProp(capturedKey, capturedLabel)
+            });
+        }
+
+        MapEditorIcons.CancelPendingPropIcons();
+        _grid.Populate(_editor, entries, id =>
+            MapEditorIcons.GetPropIcon(_editor, id, sprite => _grid?.SetCellIcon(id, sprite)));
+    }
+
+    private IEnumerator ScanBossScenery(int token)
+    {
+        _grid.Clear();
+
+        var rooms = EnemyTool.BossRoomKeys();
+        rooms.AddRange(DeathRoomKeys());
+
+        var found = new List<(string label, string key)>();
+
+        for (var i = 0; i < rooms.Count; i++)
+        {
+            if (token != _bossScanToken) yield break;
+
+            _editor.SetStatus($"Opening rooms - {i + 1} of {rooms.Count}...");
+
+            GameObject room = null;
+            yield return RoomSnapshot.LoadPrefabByKeyRoutine(rooms[i], p => room = p);
+            if (token != _bossScanToken) yield break;
+            if (room == null) continue;
+
+            foreach (var piece in ExtractPieces(room, rooms[i]))
+            {
+                if (_grid.Has(piece.key)) continue;
+                found.Add(piece);
+                _grid.AddCell(piece.key, piece.label, null, () => SelectProp(piece.key, piece.label));
+            }
+
+            _editor.RequestOptionsResize();
+        }
+
+        _bossPieces = found;
+        Populate(found);
+
+        Plugin.Log.LogInfo($"MapEditor: boss and special rooms hold {found.Count} placeable piece(s) " +
+                           $"across {rooms.Count} room(s).");
+
+        _editor.SetStatus(found.Count > 0
+            ? $"{found.Count} piece(s) from the boss and special rooms."
+            : "No scenery pieces found in those rooms.",
+            found.Count > 0 ? StatusSeverity.Info : StatusSeverity.Warning);
+    }
+
+    private const string DeathRoomPrefix = "Assets/Prefabs/Dungeon/Death Room/";
+
+    private static List<string> DeathRoomKeys()
+    {
+        var keys = new List<string>();
+
+        foreach (var locator in Addressables.ResourceLocators)
+        {
+            if (locator?.Keys == null) continue;
+            foreach (var keyObj in locator.Keys)
+            {
+                if (keyObj is not string key || !key.EndsWith(".prefab")) continue;
+                if (!key.StartsWith(DeathRoomPrefix)) continue;
+                if (!keys.Contains(key)) keys.Add(key);
+            }
+        }
+
+        keys.Sort(System.StringComparer.OrdinalIgnoreCase);
+        return keys;
+    }
+
+    /// Every drawn piece inside a room prefab, named by where it sits so it can be found again.
+    private static List<(string label, string key)> ExtractPieces(GameObject room, string roomKey)
+    {
+        var results = new List<(string label, string key)>();
+        var seen = new HashSet<string>();
+
+        foreach (var renderer in room.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer == null) continue;
+
+            var node = renderer.transform;
+            if (node == room.transform) continue;
+            if (node.GetComponentInParent<UnitObject>() != null) continue;
+            if (node.name.StartsWith("Room Back Sprite")) continue;
+            if (renderer is not SpriteRenderer && renderer is not MeshRenderer) continue;
+
+            // A spine draws through a MeshRenderer; take the skeleton's own node, not the mesh's.
+            var skeleton = node.GetComponentInParent<Spine.Unity.SkeletonRenderer>();
+            if (skeleton != null) node = skeleton.transform;
+            else if (renderer is MeshRenderer) continue;
+
+            var path = RoomChildPrefabs.PathOf(node, room.transform);
+            if (!seen.Add(path)) continue;
+
+            results.Add((node.name, RoomChildPrefabs.KeyFor(roomKey, path)));
+        }
+
+        return results;
     }
 
     private void ShowSearchResults(string needle)
@@ -479,6 +713,26 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             });
         }
 
+        // Only once the group has been opened: scanning every boss room to answer a keystroke would
+        // stall the search for as long as the rooms take to load.
+        if (_bossPieces != null)
+            foreach (var (label, key) in _bossPieces)
+            {
+                if (label.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                total++;
+                if (entries.Count >= MapEditorSearchRow.MaxResults) continue;
+
+                var capturedKey = key;
+                var capturedLabel = label;
+                entries.Add(new MapEditorGrid.Entry
+                {
+                    Id = capturedKey,
+                    Display = capturedLabel,
+                    OnClick = () => SelectProp(capturedKey, capturedLabel)
+                });
+            }
+
         _grid.Populate(_editor, entries, id =>
         {
             if (_typesById.TryGetValue(id, out var type)) _grid.SetCellIcon(id, MapEditorIcons.GetStructureIcon(type));
@@ -494,6 +748,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     private GameObject _propPreview;
     private string _propPreviewPath;
     private bool _propPreviewPending;
+
+    private bool _breakApart = true;
 
     private static SortedDictionary<string, List<string>> _propGroups;
 
@@ -697,6 +953,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         if (!Input.GetMouseButtonDown(0) || _editor.PointerOverUi()) return;
 
+        NotePlacedProp(_propPath);
         SpawnProp(_propPath, _editor.MouseWorld(), isPreview: false);
     }
 
@@ -716,13 +973,22 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         SpawnProp(_propPath, _editor.MouseWorld(), isPreview: true);
     }
 
+    private static Transform PropParent() =>
+        SceneRefs.Room != null && SceneRefs.Room.SceneryTransform != null
+            ? SceneRefs.Room.SceneryTransform.transform
+            : SceneRefs.ContentRoot;
+
     private void SpawnProp(string path, Vector3 position, bool isPreview)
     {
         if (string.IsNullOrEmpty(path)) return;
 
-        var parent = SceneRefs.Room != null && SceneRefs.Room.SceneryTransform != null
-            ? SceneRefs.Room.SceneryTransform.transform
-            : SceneRefs.ContentRoot;
+        if (RoomChildPrefabs.IsRoomKey(path))
+        {
+            _editor.StartCoroutine(SpawnLiftedProp(path, position, isPreview));
+            return;
+        }
+
+        var parent = PropParent();
 
         try
         {
@@ -732,10 +998,19 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 if (go == null) return;
 
                 go.transform.position = position;
+
                 if (!isPreview)
                 {
-                    _placedProps.Add(go);
                     var label = System.IO.Path.GetFileNameWithoutExtension(path);
+                    if (BreakApartPlaced(go, path, parent, label)) return;
+
+                    // Whichever way it went, no picker gets to run: this happens in the spawn
+                    // callback, before the first Update, so the prefab stays as it was authored
+                    // rather than as this one spawn happened to roll it.
+                    PropRandomisers.Freeze(go);
+                    PropBrains.Adopt(go);
+
+                    _placedProps.Add(go);
                     _editor.History.Push($"place {label}", () =>
                     {
                         if (!_placedProps.Remove(go) || go == null) return false;
@@ -744,6 +1019,8 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                     });
                     return;
                 }
+
+                PropRandomisers.Freeze(go);
 
                 if (_propPath != _propPreviewPath) { Object.Destroy(go); return; }
 
@@ -757,6 +1034,219 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
             Plugin.Log.LogWarning($"MapEditor: prop '{path}' failed to spawn: {e.Message}");
             _editor.SetStatus("Prop failed to spawn - see log.", StatusSeverity.Error);
         }
+    }
+
+    /// A piece that lives inside another prefab: the prefab is loaded, then the piece is copied out.
+    private IEnumerator SpawnLiftedProp(string key, Vector3 position, bool isPreview)
+    {
+        GameObject source = null;
+        yield return RoomChildPrefabs.ResolveRoutine(key, go => source = go);
+
+        var label = RoomChildPrefabs.Label(key) ?? key;
+        if (isPreview) _propPreviewPending = false;
+
+        if (source == null)
+        {
+            Plugin.Log.LogWarning($"MapEditor: '{key}' could not be read out of its prefab.");
+            if (!isPreview) _editor.SetStatus($"'{label}' could not be placed.", StatusSeverity.Error);
+            yield break;
+        }
+
+        var go = RoomChildPrefabs.Lift(source, PropParent(), key);
+        if (go == null) yield break;
+        go.transform.position = position;
+
+        if (isPreview)
+        {
+            if (_propPath != _propPreviewPath) { Object.Destroy(go); yield break; }
+            Fade(go, 0.6f);
+            _propPreview = go;
+            yield break;
+        }
+
+        PropBrains.Adopt(go);
+
+        _placedProps.Add(go);
+        _editor.History.Push($"place {label}", () =>
+        {
+            if (!_placedProps.Remove(go) || go == null) return false;
+            Object.Destroy(go);
+            return true;
+        });
+
+        _editor.SetStatus($"Placed {label}.");
+    }
+
+    // ---- quick pick ---------------------------------------------------------------------------
+
+    private void WireQuickPick()
+    {
+        var bar = _editor.QuickPick;
+        if (bar == null) return;
+
+        bar.OnPick = ArmQuickPick;
+        bar.Icon = QuickPickIcon;
+        bar.IsArmed = entry => entry.IsProp
+            ? _propPath == entry.Path
+            : _pending == entry.Type;
+
+        bar.Favourites = MapEditorFavourites.Entries;
+        bar.IsFavourite = entry => MapEditorFavourites.IsFavourite(entry?.Key);
+        bar.OnToggleFavourite = ToggleFavourite;
+    }
+
+    // ---- favourites ---------------------------------------------------------------------------
+
+    /// Right-click, from a browser cell or from a slot on the bar. Pinned things hold a slot for
+    /// good; unpinning drops them back to being whatever the recent list says they are.
+    private void ToggleFavourite(QuickPickEntry entry)
+    {
+        if (entry == null || string.IsNullOrEmpty(entry.Key)) return;
+
+        var pinned = MapEditorFavourites.Toggle(entry);
+
+        var bar = _editor.QuickPick;
+        bar?.Refresh();
+
+        // The pinned group IS the favourites, so a change there adds or removes a cell rather than
+        // only its star.
+        if (ReferenceEquals(_currentGroup, FavouritesGroup)) ShowFavouritesGroup();
+        else _grid?.RefreshFavourites();
+
+        if (!pinned)
+        {
+            _editor.SetStatus($"Unpinned {entry.Label}.");
+            return;
+        }
+
+        _editor.SetStatus(bar != null && bar.Visible
+            ? $"Pinned {entry.Label} to the quick pick."
+            : $"Pinned {entry.Label} - turn on the structure quick pick dock to reach it.");
+    }
+
+    private void RightClickCell(string id, string display)
+    {
+        var entry = EntryForCell(id, display);
+        if (entry == null) return;
+
+        ToggleFavourite(entry);
+    }
+
+    /// A browser cell's id in the form the quick pick speaks. Structure cells are "type:<TYPES>" and
+    /// carry their type in _typesById; everything else in this tool's grid is a prop path.
+    private QuickPickEntry EntryForCell(string id, string display)
+    {
+        if (string.IsNullOrEmpty(id) || id == TotemId) return null;
+
+        if (id.StartsWith(TypeCellPrefix, System.StringComparison.Ordinal))
+        {
+            if (!_typesById.TryGetValue(id, out var type)) return null;
+
+            var internalName = InternalNameOf(type);
+            return new QuickPickEntry
+            {
+                Key = "structure:" + internalName,
+                Label = ShortName(internalName),
+                Type = type,
+                IsCustom = CustomStructureManager.CustomStructureList.ContainsKey(type)
+            };
+        }
+
+        return new QuickPickEntry
+        {
+            Key = "prop:" + id,
+            Label = display ?? System.IO.Path.GetFileNameWithoutExtension(id),
+            IsProp = true,
+            Path = id
+        };
+    }
+
+    /// Choosing a slot arms it exactly as clicking its cell in the browser would - the bar is a
+    /// shortcut into this tool, never a second way of placing things.
+    private void ArmQuickPick(QuickPickEntry entry)
+    {
+        if (entry == null) return;
+
+        if (!ReferenceEquals(_editor.ActiveTool, this)) _editor.ActivateTool(this);
+
+        if (entry.IsProp) SelectProp(entry.Path, entry.Label);
+        else SelectStructure(entry.Type, entry.Label);
+    }
+
+    private Sprite QuickPickIcon(QuickPickEntry entry)
+    {
+        if (entry == null) return null;
+
+        if (!entry.IsProp) return MapEditorIcons.GetStructureIcon(entry.Type);
+
+        Sprite found = null;
+        MapEditorIcons.GetPropIcon(_editor, entry.Path, sprite => found = sprite);
+        return found;
+    }
+
+    private void NoteQuickPick(QuickPickEntry entry)
+    {
+        var bar = _editor.QuickPick;
+        if (bar == null || entry == null) return;
+
+        bar.Note(entry);
+    }
+
+    private void NotePlacedStructure(StructureBrain.TYPES type)
+    {
+        var label = InternalNameOf(type);
+        NoteQuickPick(new QuickPickEntry
+        {
+            Key = "structure:" + label,
+            Label = ShortName(label),
+            Type = type,
+            IsCustom = CustomStructureManager.CustomStructureList.ContainsKey(type)
+        });
+    }
+
+    private void NotePlacedProp(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+
+        var label = RoomChildPrefabs.IsRoomKey(path)
+            ? RoomChildPrefabs.Label(path) ?? path
+            : System.IO.Path.GetFileNameWithoutExtension(path);
+
+        NoteQuickPick(new QuickPickEntry
+        {
+            Key = "prop:" + path,
+            Label = label,
+            IsProp = true,
+            Path = path
+        });
+    }
+
+    /// True when the prefab was a randomised set and has been replaced by its pieces.
+    private bool BreakApartPlaced(GameObject go, string path, Transform parent, string label)
+    {
+        if (!_breakApart || !PropRandomisers.IsRandomisedSet(go)) return false;
+
+        var pieces = PropRandomisers.BreakApart(go, path, parent);
+        if (pieces == null || pieces.Count == 0) return false;
+
+        foreach (var piece in pieces) PropBrains.Adopt(piece);
+
+        _placedProps.AddRange(pieces);
+        _editor.History.Push($"place {label} ({pieces.Count} pieces)", () =>
+        {
+            var removed = 0;
+            foreach (var piece in pieces)
+            {
+                if (piece == null) continue;
+                _placedProps.Remove(piece);
+                Object.Destroy(piece);
+                removed++;
+            }
+            return removed > 0;
+        });
+
+        _editor.SetStatus($"{label} placed as {pieces.Count} separate piece(s) - move or delete each one.");
+        return true;
     }
 
     private static void Fade(GameObject go, float alpha)
@@ -794,7 +1284,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Place selected item")
+        ("LMB", "Place selected item"),
+        ("RMB", "Pin or unpin a browser cell"),
+        ("1-9", "Arm a quick pick slot"),
+        ("Wheel", "Step the quick pick, else cycle tools")
     ];
 
     public void OnExit()
@@ -1045,6 +1538,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     private void Place(StructureBrain.TYPES type, Vector3 position)
     {
         var isCustom = CustomStructureManager.CustomStructureList.ContainsKey(type);
+        NotePlacedStructure(type);
         _editor.StartCoroutine(PlaceAt(type, isCustom, position, 0f, false, deferNav: false));
     }
 
@@ -1119,79 +1613,184 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         float rotation, bool flipX, bool deferNav, bool seeThrough, bool fogThrough,
         bool wind = false)
     {
+        if (!Begin(type, isCustom, position, rotation, flipX, seeThrough, fogThrough, wind,
+                out var placement)) yield break;
+
+        while (!placement.Handle.IsDone) yield return null;
+
+        Finish(ref placement, deferNav);
+        if (!placement.Relook) yield break;
+
+        yield return null;
+        Relook(placement);
+    }
+
+    /// Loads a whole file's structures at once and settles them together. One at a time was the
+    /// cost that showed on a map with many of them; see the notes in MapEditor/README.md.
+    public IEnumerator PlaceMany(IList<MapStructureData> records,
+        System.Action<MapStructureData, GameObject> onPlaced)
+    {
+        if (records == null || records.Count == 0) yield break;
+
+        var owners = new List<MapStructureData>(records.Count);
+        var started = new List<Placement>(records.Count);
+
+        foreach (var record in records)
+        {
+            if (record == null) continue;
+
+            if (!TryResolveType(record.TypeName, record.IsCustom, out var type))
+            {
+                Plugin.Log.LogWarning($"MapEditor: structure '{record.TypeName}' could not be resolved, skipped.");
+                continue;
+            }
+
+            if (!Begin(type, record.IsCustom, MapEditorSerialization.ToVector3(record.Position),
+                    record.Rotation, record.FlipX, record.SeeThrough, record.FogThrough, record.Wind,
+                    out var placement)) continue;
+
+            owners.Add(record);
+            started.Add(placement);
+        }
+
+        if (started.Count == 0) yield break;
+
+        while (true)
+        {
+            var waiting = false;
+            foreach (var placement in started)
+                if (!placement.Handle.IsDone) { waiting = true; break; }
+
+            if (!waiting) break;
+            yield return null;
+        }
+
+        var relooks = new List<Placement>();
+
+        for (var i = 0; i < started.Count; i++)
+        {
+            var placement = started[i];
+            var go = Finish(ref placement, deferNav: true, quiet: true);
+            if (placement.Relook) relooks.Add(placement);
+            onPlaced?.Invoke(owners[i], go);
+        }
+
+        if (relooks.Count == 0) yield break;
+
+        yield return null;
+        foreach (var placement in relooks) Relook(placement);
+    }
+
+    /// A structure whose prefab is on its way. Addressables never lands an instantiate in the frame
+    /// it was asked for, so a batch starts every load before waiting on any of them.
+    private struct Placement
+    {
+        public AsyncOperationHandle<GameObject> Handle;
+        public string PrefabPath;
+        public StructureBrain.TYPES Type;
+        public bool IsCustom;
+        public Vector3 Position;
+        public float Rotation;
+        public bool FlipX;
+        public bool SeeThrough;
+        public bool FogThrough;
+        public bool Wind;
+
+        public GameObject Instance;
+        public bool Relook;
+    }
+
+    private bool Begin(StructureBrain.TYPES type, bool isCustom, Vector3 position, float rotation,
+        bool flipX, bool seeThrough, bool fogThrough, bool wind, out Placement placement)
+    {
+        placement = default;
+
         var root = SceneRefs.ContentRoot;
         if (root == null)
         {
             _editor.SetStatus("No room content root.", StatusSeverity.Error);
-            yield break;
+            return false;
         }
 
         var prefabPath = ResolvePrefabPath(type, isCustom);
         if (string.IsNullOrEmpty(prefabPath))
         {
             _editor.SetStatus($"{type} has no prefab path.", StatusSeverity.Error);
-            yield break;
+            return false;
         }
 
-        AsyncOperationHandle<GameObject> handle;
         try
         {
-            handle = Addressables.InstantiateAsync(prefabPath, root, false);
+            placement.Handle = Addressables.InstantiateAsync(prefabPath, root, false);
         }
         catch (System.Exception e)
         {
             Plugin.Log.LogWarning($"MapEditor: could not instantiate {type} ({prefabPath}): {e.Message}");
             _editor.SetStatus($"Failed to place {type}.", StatusSeverity.Error);
-            yield break;
+            return false;
         }
 
-        while (!handle.IsDone) yield return null;
+        placement.PrefabPath = prefabPath;
+        placement.Type = type;
+        placement.IsCustom = isCustom;
+        placement.Position = position;
+        placement.Rotation = rotation;
+        placement.FlipX = flipX;
+        placement.SeeThrough = seeThrough;
+        placement.FogThrough = fogThrough;
+        placement.Wind = wind;
+        return true;
+    }
 
-        if (handle.Status != AsyncOperationStatus.Succeeded || handle.Result == null)
+    private GameObject Finish(ref Placement placement, bool deferNav, bool quiet = false)
+    {
+        var type = placement.Type;
+
+        if (placement.Handle.Status != AsyncOperationStatus.Succeeded || placement.Handle.Result == null)
         {
-            Plugin.Log.LogWarning($"MapEditor: addressable load failed for {type} ({prefabPath}).");
+            Plugin.Log.LogWarning($"MapEditor: addressable load failed for {type} ({placement.PrefabPath}).");
             _editor.SetStatus($"Failed to load {type}.", StatusSeverity.Error);
-            yield break;
+            return null;
         }
 
-        var go = handle.Result;
-        go.transform.position = position;
+        var go = placement.Handle.Result;
+        go.transform.position = placement.Position;
         go.name = $"CultTweaker_Placed_{type}";
 
-        if (isCustom)
+        if (placement.IsCustom)
         {
             StructureSpineHelper.TryAttach(go, type);
             APIHelper.StructureShadows.TryEnable(go, type);
         }
 
-        if (Mathf.Abs(rotation) > 0.001f)
-            go.transform.eulerAngles = new Vector3(0f, rotation, 0f);
-        if (flipX)
+        if (Mathf.Abs(placement.Rotation) > 0.001f)
+            go.transform.eulerAngles = new Vector3(0f, placement.Rotation, 0f);
+        if (placement.FlipX)
         {
             var s = go.transform.localScale;
             go.transform.localScale = new Vector3(-s.x, s.y, s.z);
         }
 
-        if (seeThrough || fogThrough || wind) SeeThrough.Set(go, seeThrough, fogThrough, wind);
+        var dressed = placement.SeeThrough || placement.FogThrough || placement.Wind;
+        if (dressed) SeeThrough.Set(go, placement.SeeThrough, placement.FogThrough, placement.Wind);
 
-        BaseDelta.GiveBrain(go, type, position);
+        BaseDelta.GiveBrain(go, type, placement.Position);
 
-        // The brain brings sprites of its own, and they arrive after the look was applied.
-        if (seeThrough || fogThrough || wind)
-        {
-            yield return null;
-            if (go != null) SeeThrough.Set(go, seeThrough, fogThrough, wind);
-        }
+        // Sprites that arrive a frame late - a brain's own, and the art a Structure.Start postfix
+        // swaps into an overridden building - have to be dressed again. A batch waits once for all
+        // of them rather than once each.
+        placement.Instance = go;
+        placement.Relook = dressed;
 
         var placed = new PlacedStructure
         {
             Type = type,
-            IsCustom = isCustom,
+            IsCustom = placement.IsCustom,
             Instance = go,
-            Rotation = rotation,
-            FlipX = flipX,
-            SeeThrough = seeThrough,
-            FogThrough = fogThrough,
+            Rotation = placement.Rotation,
+            FlipX = placement.FlipX,
+            SeeThrough = placement.SeeThrough,
+            FogThrough = placement.FogThrough,
             Wind = SeeThrough.IsWind(go)
         };
         _placed.Add(placed);
@@ -1204,7 +1803,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         });
 
         if (!deferNav) SceneRefs.RescanNavigation();
-        _editor.SetStatus($"Placed {type}.");
+        if (!quiet) _editor.SetStatus($"Placed {type}.");
+        return go;
+    }
+
+    private static void Relook(Placement placement)
+    {
+        if (placement.Instance == null) return;
+        SeeThrough.Set(placement.Instance, placement.SeeThrough, placement.FogThrough, placement.Wind);
     }
 
     public int ClearPlaced()
@@ -1264,6 +1870,30 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
     }
 
     private static string CustomInternalName(StructureBrain.TYPES type) => InternalNameOf(type);
+
+    /// A custom structure's internal name with the registry prefix taken off, for lists narrow
+    /// enough that the prefix would be all the reader ever sees. Never written to a file.
+    public static string ShortName(string internalName)
+    {
+        if (string.IsNullOrEmpty(internalName)) return internalName;
+        if (!internalName.StartsWith(CustomPrefix, System.StringComparison.Ordinal)) return internalName;
+
+        var body = internalName.Substring(CustomPrefix.Length).Replace('_', ' ').Trim();
+        if (body.Length == 0) return internalName;
+
+        // The registry upper-cased whatever the author typed; sentence case is the closest thing
+        // to it that reads at a glance.
+        var words = body.Split(' ');
+        for (var i = 0; i < words.Length; i++)
+        {
+            if (words[i].Length == 0) continue;
+            words[i] = char.ToUpperInvariant(words[i][0]) + words[i].Substring(1).ToLowerInvariant();
+        }
+
+        return string.Join(" ", words);
+    }
+
+    private const string CustomPrefix = "CULT_TWEAKER_STRUCTURE_";
 
     public static string InternalNameOf(StructureBrain.TYPES type) =>
         CustomStructureManager.CustomStructureList.TryGetValue(type, out var custom) && custom != null

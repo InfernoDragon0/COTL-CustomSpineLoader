@@ -5,6 +5,13 @@ using UnityEngine.UI;
 
 namespace CustomSpineLoader.MapEditor.Tools;
 
+public enum TriggerMethod
+{
+    PlayerStep,
+    Blocking,
+    EnemyHealth
+}
+
 public class CTMapTrigger : MonoBehaviour
 {
     public string Id = "";
@@ -18,9 +25,14 @@ public class CTMapTrigger : MonoBehaviour
 
     public bool LockPlayerControl = true;
 
+    public TriggerMethod Method = TriggerMethod.PlayerStep;
+
     // A blocking volume is an invisible wall: a solid collider on the Obstacles layer, which is what
     // both the player and the enemies (and the grid graph, once rescanned) treat as terrain.
-    public bool Blocking;
+    public bool Blocking => Method == TriggerMethod.Blocking;
+
+    public string HealthTarget = "";
+    public float HealthThreshold = 0.5f;
 
     public static event System.Action<CTMapTrigger> Entered;
 
@@ -64,6 +76,7 @@ public class CTMapTrigger : MonoBehaviour
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (Muted) return;
+        if (Method != TriggerMethod.PlayerStep) return;
         if (other == null) return;
         if (other.GetComponent<PlayerFarming>() == null &&
             other.GetComponentInParent<PlayerFarming>() == null) return;
@@ -85,7 +98,15 @@ public class CTMapTrigger : MonoBehaviour
     {
         Size = new Vector2(Mathf.Max(0.5f, Size.x), Mathf.Max(0.5f, Size.y));
 
-        if (_box != null) _box.size = Size;
+        if (_box != null)
+        {
+            _box.size = Size;
+            _box.enabled = Method == TriggerMethod.PlayerStep;
+        }
+
+        _watched = null;
+        _watchedResolved = false;
+        _haveFraction = false;
         ApplyBlocking();
         if (_gizmo == null) return;
 
@@ -155,7 +176,12 @@ public class CTMapTrigger : MonoBehaviour
     {
         if (_outline == null) return;
 
-        var colour = Blocking ? Blocked : Once ? Idle : Repeating;
+        var colour = Method switch
+        {
+            TriggerMethod.Blocking => Blocked,
+            TriggerMethod.EnemyHealth => Watching,
+            _ => Once ? Idle : Repeating
+        };
         if (_flashUntil > Time.unscaledTime) colour = Firing;
         else if (_highlighted) colour = Selected;
         else if (Tripped && !Blocking) colour = Once ? Spent : Fired;
@@ -173,6 +199,7 @@ public class CTMapTrigger : MonoBehaviour
     private static readonly Color Spent = new(0.45f, 0.6f, 0.5f, 0.75f);
     private static readonly Color Fired = new(0.5f, 0.4f, 0.62f, 0.75f);
     private static readonly Color Blocked = new(1f, 0.24f, 0.2f, 0.95f);
+    private static readonly Color Watching = new(1f, 0.36f, 0.66f, 0.95f);
 
     private void BuildGizmo()
     {
@@ -234,15 +261,22 @@ public class CTMapTrigger : MonoBehaviour
     {
         if (RuntimeMapEditor.Active != null && RuntimeMapEditor.Active.IsEditing)
         {
-            _inside = AnyPlayerInside();
+            _inside = Method == TriggerMethod.PlayerStep && AnyPlayerInside();
             return;
         }
 
-        var inside = AnyPlayerInside();
+        if (Method == TriggerMethod.PlayerStep)
+        {
+            var inside = AnyPlayerInside();
 
-        if (Muted) { }  // see MuteFiring: _inside stays false so the entry lands when it lifts
-        else if (inside && !_inside) _inside = Fire();
-        else _inside = inside;
+            if (Muted) { }  // see MuteFiring: _inside stays false so the entry lands when it lifts
+            else if (inside && !_inside) _inside = Fire();
+            else _inside = inside;
+        }
+        else if (Method == TriggerMethod.EnemyHealth)
+        {
+            TickHealthWatch();
+        }
 
         if (_flashing && _flashUntil <= Time.unscaledTime)
         {
@@ -252,6 +286,64 @@ public class CTMapTrigger : MonoBehaviour
     }
 
     private bool _flashing;
+
+    // ---- enemy health watch --------------------------------------------------------------------
+
+    private const float HealthPollSeconds = 0.2f;
+
+    private float _nextHealthPoll;
+    private Health _watched;
+    private bool _watchedResolved;
+
+    private float _lastFraction;
+    private bool _haveFraction;
+
+    private void TickHealthWatch()
+    {
+        if (Muted || (Once && Tripped)) return;
+        if (Time.unscaledTime < _nextHealthPoll) return;
+        _nextHealthPoll = Time.unscaledTime + HealthPollSeconds;
+
+        if (!TryReadHealthFraction(out var fraction)) return;
+
+        var threshold = Mathf.Clamp01(HealthThreshold);
+
+        // The crossing, not the state; the first look counts as one.
+        var crossed = _haveFraction ? _lastFraction > threshold && fraction <= threshold : fraction <= threshold;
+
+        _lastFraction = fraction;
+        _haveFraction = true;
+
+        if (crossed) Fire();
+    }
+
+    /// The watched enemy's remaining health as 0-1; false while it has not been found yet.
+    private bool TryReadHealthFraction(out float fraction)
+    {
+        fraction = 1f;
+
+        if (_watched == null)
+        {
+            if (string.IsNullOrEmpty(HealthTarget)) return false;
+
+            var go = TriggerActions.ResolveObject(HealthTarget);
+            _watched = go != null ? go.GetComponentInChildren<Health>(true) : null;
+
+            if (_watched == null)
+            {
+                // Gone after it was found: killed, which is zero however the threshold is set.
+                if (!_watchedResolved) return false;
+                fraction = 0f;
+                return true;
+            }
+
+            _watchedResolved = true;
+        }
+
+        var total = _watched.totalHP;
+        fraction = total > 0f ? Mathf.Clamp01(_watched.HP / total) : 0f;
+        return true;
+    }
 
     private bool AnyPlayerInside()
     {
@@ -291,7 +383,11 @@ public class CTMapTrigger : MonoBehaviour
         _flashing = true;
         ApplyTint();
 
-        Plugin.Log.LogInfo($"MapEditor: trigger '{Id}' entered" +
+        var cause = Method == TriggerMethod.EnemyHealth
+            ? $"fired at {Mathf.RoundToInt(Mathf.Clamp01(HealthThreshold) * 100f)}% health"
+            : "entered";
+
+        Plugin.Log.LogInfo($"MapEditor: trigger '{Id}' {cause}" +
                            (Actions.Count == 0 ? " (no actions)." : $" -> {Actions.Count} action(s)."));
 
         try
@@ -329,6 +425,8 @@ public class CTMapTrigger : MonoBehaviour
 
     public static void ResetSequenceState()
     {
+        TriggerEnemyActions.ResumeAll();
+
         if (_sequenceOwner == null) return;
         _sequenceOwner = null;
         TriggerActions.SetControl(true);
@@ -340,6 +438,9 @@ public class CTMapTrigger : MonoBehaviour
         _inside = false;
         _flashing = false;
         _flashUntil = 0f;
+        _watched = null;
+        _watchedResolved = false;
+        _haveFraction = false;
         ApplyTint();
     }
 }
@@ -391,14 +492,16 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         trigger.LockPlayerControl = record.LockPlayerControl;
 
         var wasBlocking = trigger.Blocking;
-        trigger.Blocking = record.Blocking;
+        trigger.Method = MethodOf(record);
+        trigger.HealthTarget = record.HealthTarget ?? "";
+        trigger.HealthThreshold = Mathf.Clamp01(record.HealthThreshold);
 
         trigger.Actions.Clear();
         trigger.Actions.AddRange(TriggerActions.FromData(record.Actions, trigger.Id));
 
         trigger.Refresh();
         trigger.RefreshTint();
-        if (wasBlocking != record.Blocking) SceneRefs.RescanNavigation();
+        if (wasBlocking != trigger.Blocking) SceneRefs.RescanNavigation();
 
         if (_selected == trigger)
         {
@@ -418,8 +521,23 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Once = trigger.Once,
         Actions = TriggerActions.ToData(trigger.Actions),
         LockPlayerControl = trigger.LockPlayerControl,
-        Blocking = trigger.Blocking
+        Blocking = trigger.Blocking,
+        Method = trigger.Method.ToString(),
+        HealthTarget = trigger.HealthTarget ?? "",
+        HealthThreshold = trigger.HealthThreshold
     };
+
+    /// The method a record asks for; a file written before `Method` existed says only `Blocking`.
+    internal static TriggerMethod MethodOf(MapTriggerData record)
+    {
+        if (record == null) return TriggerMethod.PlayerStep;
+
+        if (!string.IsNullOrEmpty(record.Method) &&
+            System.Enum.TryParse<TriggerMethod>(record.Method, out var method))
+            return method;
+
+        return record.Blocking ? TriggerMethod.Blocking : TriggerMethod.PlayerStep;
+    }
 
     private readonly RuntimeMapEditor _editor;
     private readonly List<CTMapTrigger> _triggers = [];
@@ -469,19 +587,13 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 : $"{_selected.Id} leaves the players in control.");
         }).GetComponent<MapEditorToggle>();
 
-        _blockToggle = ui.CreateToggle(panel, "Blocking volume", false, value =>
-        {
-            if (_syncingWidgets || _selected == null) return;
-            _selected.Blocking = value;
+        _methodDropdown = ui.CreateLabelledDropdown(panel, "Trigger method", MethodLabels[0],
+            MethodLabels, OnMethodChosen);
 
-            _selected.ApplyBlocking();
-            _selected.RefreshTint();
-            SceneRefs.RescanNavigation();
+        _watchButton = ui.CreateButton(panel, WatchButtonIdle, BeginWatchPick, emphasis: MapEditorEmphasis.Quiet);
 
-            _editor.SetStatus(value
-                ? $"{_selected.Id} is an invisible wall to players and enemies."
-                : $"{_selected.Id} is walk-through again.");
-        }).GetComponent<MapEditorToggle>();
+        _thresholdDropdown = ui.CreateLabelledDropdown(panel, "Fires at", ThresholdLabels[1],
+            ThresholdLabels, OnThresholdChosen);
 
         ui.CreateToggle(panel, "Show volumes in play", CTMapTrigger.ShowInPlay, value =>
         {
@@ -514,11 +626,133 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         RebuildActionList();
         UpdateActionControls();
+        UpdateMethodControls();
     }
 
     private MapEditorToggle _onceToggle;
     private MapEditorToggle _lockToggle;
-    private MapEditorToggle _blockToggle;
+
+    // ---- trigger method -----------------------------------------------------------------------
+
+    private MapEditorDropdown _methodDropdown;
+    private MapEditorDropdown _thresholdDropdown;
+    private GameObject _watchButton;
+
+    private const string WatchButtonIdle = "Pick the enemy to watch";
+
+    private static readonly string[] MethodLabels =
+        ["On player step", "Blocking volume", "Enemy health threshold"];
+
+    private static readonly string[] ThresholdLabels =
+        ["75% health", "50% health", "25% health", "Defeated (0%)"];
+
+    private static readonly float[] ThresholdValues = [0.75f, 0.5f, 0.25f, 0f];
+
+    private static int ThresholdIndex(float value)
+    {
+        var best = 1;
+        var bestGap = float.MaxValue;
+
+        for (var i = 0; i < ThresholdValues.Length; i++)
+        {
+            var gap = Mathf.Abs(ThresholdValues[i] - value);
+            if (gap >= bestGap) continue;
+            bestGap = gap;
+            best = i;
+        }
+
+        return best;
+    }
+
+    private void OnMethodChosen(int index, string _)
+    {
+        if (_syncingWidgets || _selected == null) return;
+        if (index < 0 || index > 2) return;
+
+        var method = (TriggerMethod)index;
+        if (method == _selected.Method)
+        {
+            UpdateMethodControls();
+            return;
+        }
+
+        var wasBlocking = _selected.Blocking;
+        _selected.Method = method;
+        _selected.Refresh();
+        _selected.RefreshTint();
+        if (wasBlocking != _selected.Blocking) SceneRefs.RescanNavigation();
+
+        _editor.MarkEdited();
+        UpdateMethodControls();
+        UpdateInfo();
+
+        _editor.SetStatus(method switch
+        {
+            TriggerMethod.Blocking => $"{_selected.Id} is an invisible wall to players and enemies.",
+            TriggerMethod.EnemyHealth => string.IsNullOrEmpty(_selected.HealthTarget)
+                ? $"{_selected.Id} watches an enemy - pick which one."
+                : $"{_selected.Id} fires when {Leaf(_selected.HealthTarget)} reaches " +
+                  $"{Mathf.RoundToInt(_selected.HealthThreshold * 100f)}% health.",
+            _ => $"{_selected.Id} fires when a player steps in."
+        }, method == TriggerMethod.EnemyHealth && string.IsNullOrEmpty(_selected.HealthTarget)
+            ? StatusSeverity.Warning
+            : StatusSeverity.Info);
+    }
+
+    private void OnThresholdChosen(int index, string _)
+    {
+        if (_syncingWidgets || _selected == null) return;
+        if (index < 0 || index >= ThresholdValues.Length) return;
+
+        _selected.HealthThreshold = ThresholdValues[index];
+        _selected.Rearm();
+        _editor.MarkEdited();
+        UpdateInfo();
+        _editor.SetStatus($"{_selected.Id} fires at {ThresholdLabels[index]}.");
+    }
+
+    private void BeginWatchPick()
+    {
+        if (_selected == null)
+        {
+            _editor.SetStatus("Select a trigger first.", StatusSeverity.Warning);
+            return;
+        }
+
+        _pickingObject = false;
+        _pickingWatchTarget = true;
+        _editor.SetStatus("Click the enemy whose health this trigger watches (Esc cancels).");
+    }
+
+    /// The method dropdown owns which of its two extra rows are on screen.
+    private void UpdateMethodControls()
+    {
+        var method = _selected?.Method ?? TriggerMethod.PlayerStep;
+        var watching = _selected != null && method == TriggerMethod.EnemyHealth;
+
+        var methodRow = _methodDropdown?.ListFrom?.gameObject;
+        if (methodRow != null && methodRow.activeSelf != (_selected != null))
+            methodRow.SetActive(_selected != null);
+
+        var thresholdRow = _thresholdDropdown?.ListFrom?.gameObject;
+        if (thresholdRow != null && thresholdRow.activeSelf != watching) thresholdRow.SetActive(watching);
+
+        if (_watchButton != null && _watchButton.activeSelf != watching) _watchButton.SetActive(watching);
+
+        if (watching)
+        {
+            var label = _watchButton?.GetComponentInChildren<TMPro.TMP_Text>();
+            if (label != null)
+                label.text = string.IsNullOrEmpty(_selected.HealthTarget)
+                    ? WatchButtonIdle
+                    : "Watching " + Leaf(_selected.HealthTarget);
+        }
+
+        _editor.RequestOptionsResize();
+    }
+
+    private static string Leaf(string target) =>
+        string.IsNullOrEmpty(target) ? "nothing" : TriggerActions.DisplayName(target);
 
     public int LiveCount()
     {
@@ -545,6 +779,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         "Player actions",
         "Camera actions",
         "Screen text",
+        "Enemy actions",
         "Ambient actions",
         "Wait for seconds"
     ];
@@ -574,6 +809,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             TriggerActionType.ShowCaption,
             TriggerActionType.ShowTitleText,
             TriggerActionType.ShowFullscreenText
+        ],
+        [
+            TriggerActionType.PauseEnemyAi,
+            TriggerActionType.ResumeEnemyAi
         ],
         [
             TriggerActionType.ApplyLighting,
@@ -611,6 +850,8 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         TriggerActionType.ShowCaption => "Caption (bottom right)",
         TriggerActionType.ShowTitleText => "Title (top of screen)",
         TriggerActionType.ShowFullscreenText => "Fullscreen text (centre)",
+        TriggerActionType.PauseEnemyAi => "Pause enemy AI",
+        TriggerActionType.ResumeEnemyAi => "Resume enemy AI",
         _ => type.ToString()
     };
 
@@ -637,7 +878,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         LookTrigger,
         Cutscene,
         CutsceneSkip,
-        WorldMap
+        WorldMap,
+
+        EnemyScope
     }
 
     private TargetStage _stage;
@@ -659,6 +902,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     private static readonly string[] CutsceneSkipModes =
         ["Skippable (Esc)", "Cannot be skipped"];
+
+    private static readonly string[] EnemyScopeLabels =
+        ["Every enemy in the room", "One enemy (click it)"];
 
     private static readonly string[] ZoomLabels =
     [
@@ -820,7 +1066,10 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     private void SyncTargetHighlight()
     {
         _targetBounds.Clear();
+
         if (_selectedAction != null && _gizmosVisible) CollectTargetBounds(_selectedAction, _targetBounds);
+        else if (_gizmosVisible && _selected != null && _selected.Method == TriggerMethod.EnemyHealth)
+            CollectWatchedBounds(_selected, _targetBounds);
 
         for (var i = 0; i < _targetBounds.Count; i++)
         {
@@ -836,6 +1085,29 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         for (var i = _targetBounds.Count; i < _targetBoxes.Count; i++)
             if (_targetBoxes[i] != null && _targetBoxes[i].activeSelf) _targetBoxes[i].SetActive(false);
+    }
+
+    private static string _watchResolvedFor;
+    private static GameObject _watchResolved;
+    private static float _nextWatchResolveAt;
+
+    /// The same half-second resolve cache the action targets use, keyed on the watched enemy.
+    private static void CollectWatchedBounds(CTMapTrigger trigger, List<Bounds> into)
+    {
+        var target = trigger.HealthTarget;
+        if (string.IsNullOrEmpty(target)) return;
+
+        if ((_watchResolvedFor != target || _watchResolved == null) &&
+            Time.unscaledTime >= _nextWatchResolveAt)
+        {
+            _nextWatchResolveAt = Time.unscaledTime + 0.5f;
+            _watchResolvedFor = target;
+            _watchResolved = TriggerActions.ResolveObject(target);
+        }
+
+        if (_watchResolved != null && _watchResolvedFor == target &&
+            MapEditorGizmos.TryGetBounds(_watchResolved, out var bounds))
+            into.Add(bounds);
     }
 
     private static TriggerAction _resolvedFor;
@@ -899,6 +1171,17 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                     }
                     return null;
                 });
+                if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
+                break;
+            }
+
+            case TriggerActionType.PauseEnemyAi:
+            case TriggerActionType.ResumeEnemyAi:
+            {
+                // "Every enemy in the room" has no single thing to point at.
+                if (string.IsNullOrEmpty(action.Target)) break;
+
+                var go = ResolveTargetCached(action, () => TriggerActions.ResolveObject(action.Target));
                 if (go != null && MapEditorGizmos.TryGetBounds(go, out var bounds)) into.Add(bounds);
                 break;
             }
@@ -1031,6 +1314,11 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
             case TriggerActionType.Wait:
                 OpenTargets(TargetStage.Seconds, SecondsLabels);
+                break;
+
+            case TriggerActionType.PauseEnemyAi:
+            case TriggerActionType.ResumeEnemyAi:
+                OpenTargets(TargetStage.EnemyScope, EnemyScopeLabels);
                 break;
 
             case TriggerActionType.CameraZoom:
@@ -1365,6 +1653,22 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
                 OpenTargets(TargetStage.Seconds, SecondsLabels);
                 break;
 
+            case TargetStage.EnemyScope:
+                if (index == 1)
+                {
+                    _pickingObject = true;
+                    _stage = TargetStage.None;
+                    UpdateActionControls();
+                    _editor.SetStatus(_pendingType == TriggerActionType.PauseEnemyAi
+                        ? "Click the enemy to freeze."
+                        : "Click the enemy to set going again.");
+                    break;
+                }
+
+
+                AddAction(new TriggerAction { Type = _pendingType, Target = TriggerEnemyActions.AllEnemies });
+                break;
+
             case TargetStage.Seconds:
                 FinishTimedAction(index >= 0 && index < SecondsValues.Length
                     ? SecondsValues[index]
@@ -1460,6 +1764,13 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             return true;
         }
 
+        if (_pickingWatchTarget)
+        {
+            _pickingWatchTarget = false;
+            _editor.SetStatus("Watched enemy unchanged.");
+            return true;
+        }
+
         if (_pickingObject)
         {
             _pickingObject = false;
@@ -1531,6 +1842,43 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             existsCheck: _ => false, existsNoun: "text", characterLimit: 160);
     }
 
+    /// The enemy a click landed on; the collider is usually a hit box hanging off it.
+    private static UnitObject UnitAt(GameObject picked)
+    {
+        if (picked == null) return null;
+        var unit = picked.GetComponentInParent<UnitObject>();
+        return unit != null ? unit : picked.GetComponentInChildren<UnitObject>(true);
+    }
+
+    private bool _pickingWatchTarget;
+
+    private bool TryPickWatchTarget(Vector3 world)
+    {
+        var picked = SelectTool.PickWorldObject(world);
+        if (picked != null && picked.GetComponentInParent<CTMapTrigger>() != null) picked = null;
+
+        var unit = UnitAt(picked);
+        if (unit == null)
+        {
+            _editor.SetStatus("Nothing to watch there - click an enemy.", StatusSeverity.Warning);
+            return false;
+        }
+
+        _pickingWatchTarget = false;
+
+        if (_selected == null) return false;
+
+        _selected.HealthTarget = TriggerActions.TargetOf(unit.gameObject);
+        _selected.Rearm();
+        _editor.MarkEdited();
+
+        UpdateMethodControls();
+        UpdateInfo();
+        _editor.SetStatus($"{_selected.Id} watches {unit.gameObject.name}, firing at " +
+                          $"{Mathf.RoundToInt(_selected.HealthThreshold * 100f)}% health.");
+        return true;
+    }
+
     private bool TryPickObject(Vector3 world)
     {
         var picked = SelectTool.PickWorldObject(world);
@@ -1570,6 +1918,27 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             return true;
         }
 
+        if (_pendingType is TriggerActionType.PauseEnemyAi or TriggerActionType.ResumeEnemyAi)
+        {
+            var unit = UnitAt(picked);
+            if (unit == null)
+            {
+                _pickingObject = true;
+                _editor.SetStatus($"'{picked.name}' is not an enemy - click one that fights.",
+                    StatusSeverity.Warning);
+                return false;
+            }
+
+            AddAction(new TriggerAction
+            {
+                Type = _pendingType,
+                Target = TriggerActions.TargetOf(unit.gameObject)
+            });
+
+            UpdateActionControls();
+            return true;
+        }
+
         AddAction(new TriggerAction
         {
             Type = TriggerActionType.MovePlayersToObject,
@@ -1603,6 +1972,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         Select(null);
         _cloneDragging = false;
         _pickingObject = false;
+        _pickingWatchTarget = false;
         _capturingOffset = false;
         _stage = TargetStage.None;
         ClearTargetHighlight();
@@ -1622,6 +1992,12 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         if (Input.GetMouseButtonDown(0) && !_capturingOffset && !_editor.PointerOverUi())
         {
             var world = _editor.MouseWorld();
+
+            if (_pickingWatchTarget)
+            {
+                TryPickWatchTarget(world);
+                return;
+            }
 
             if (_pickingObject)
             {
@@ -1668,10 +2044,9 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
     {
         if (source == null) return false;
 
-        var clone = CreateTrigger(source.transform.position, source.Size.x, source.Size.y,
-            id: null, action: source.Action, once: source.Once,
-            actions: TriggerActions.ToData(source.Actions),
-            lockPlayerControl: source.LockPlayerControl, blocking: source.Blocking);
+        var record = Describe(source);
+        record.Id = "";
+        var clone = CreateTrigger(record);
 
         if (clone == null) return false;
 
@@ -1711,10 +2086,29 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     // ---- placement --------------------------------------------------------------------------
 
+    /// Builds a trigger from its saved form - every loader's route in, and the only one that carries
+    /// the method and what it watches.
+    public CTMapTrigger CreateTrigger(MapTriggerData record)
+    {
+        if (record == null) return null;
+
+        var trigger = CreateTrigger(MapEditorSerialization.ToVector3(record.Position),
+            record.Width, record.Height, record.Id, record.Action, record.Once,
+            record.Actions, record.LockPlayerControl, MethodOf(record));
+
+        if (trigger == null) return null;
+
+        trigger.HealthTarget = record.HealthTarget ?? "";
+        trigger.HealthThreshold = Mathf.Clamp01(record.HealthThreshold);
+        trigger.Refresh();
+        trigger.RefreshTint();
+        return trigger;
+    }
+
     public CTMapTrigger CreateTrigger(Vector3 position, float width, float height,
         string id = null, string action = "", bool once = true,
         List<MapTriggerActionData> actions = null, bool lockPlayerControl = true,
-        bool blocking = false)
+        TriggerMethod method = TriggerMethod.PlayerStep)
     {
         var parent = SceneRefs.ContentRoot;
         if (parent == null)
@@ -1732,7 +2126,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         trigger.Action = action ?? "";
         trigger.Once = once;
         trigger.LockPlayerControl = lockPlayerControl;
-        trigger.Blocking = blocking;
+        trigger.Method = method;
         trigger.Actions.AddRange(TriggerActions.FromData(actions, trigger.Id));
         trigger.Size = new Vector2(Mathf.Max(0.5f, width), Mathf.Max(0.5f, height));
         trigger.Refresh();
@@ -1811,11 +2205,12 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
         _stage = TargetStage.None;
         _pickingObject = false;
+        _pickingWatchTarget = false;
 
         if (_selected == null)
         {
             SetHandlesActive(false);
-            if (_info != null) _info.text = "No trigger selected";
+            ClearSelectionPanel();
             RebuildActionList();
             UpdateActionControls();
             return;
@@ -1857,8 +2252,11 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         _syncingWidgets = true;
         _onceToggle?.SetValue(_selected.Once, notify: false);
         _lockToggle?.SetValue(_selected.LockPlayerControl, notify: false);
-        _blockToggle?.SetValue(_selected.Blocking, notify: false);
+        _methodDropdown?.SetSelected((int)_selected.Method);
+        _thresholdDropdown?.SetSelected(ThresholdIndex(_selected.HealthThreshold));
         _syncingWidgets = false;
+
+        UpdateMethodControls();
     }
 
     private void UpdateInfo()
@@ -1869,6 +2267,13 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
             ? "No trigger selected"
             : $"{_selected.Id}  -  {_selected.Size.x:0.#} x {_selected.Size.y:0.#}" +
               $"  -  {_selected.Actions.Count} action(s)";
+    }
+
+    /// The panel with nothing selected; the method rows have to go with the selection.
+    private void ClearSelectionPanel()
+    {
+        if (_info != null) _info.text = "No trigger selected";
+        UpdateMethodControls();
     }
 
     // ---- handles ------------------------------------------------------------------------------
@@ -1935,13 +2340,7 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
         go.transform.SetParent(_handleCanvas.transform, false);
 
         var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(size, size);
-
-        var image = go.AddComponent<Image>();
-        image.sprite = MapEditorUI.RoundedPlate;
-        image.type = Image.Type.Sliced;
-        image.pixelsPerUnitMultiplier = 3f;
-        image.color = colour;
+        MapEditorUI.DressHandle(go, colour, size);
 
         go.AddComponent<TriggerHandle>().Initialize(this, _editor, mode);
         _editor.RegisterUiBlocker(rt);

@@ -98,6 +98,85 @@ name.
 Both settings apply per player and only while that spine is worn; other skins in the same file, and
 the vanilla lamb, are untouched.
 
+#### Adding brooms
+
+```
+{
+    "defaultSkin": "A_Tiger",
+    "skins": [ "A_Tiger" ],
+    "brooms": [ "Mops/Feather", "Mops/Bone" ]
+}
+```
+
+**brooms** (default empty) lists skins in this spine that are brooms — the thing the lamb sweeps poop
+with. They join the broom picker in the F7 panel and can be worn by **any** spine, not just yours,
+because only the `TOOLS` slot is taken from them: the artwork comes out of your atlas and goes onto
+whatever skeleton the player is wearing, the same way a custom fleece does. They show in the picker
+as `YourFolderName: Mops/Feather`, so two mods offering a broom of the same name stay apart.
+
+A broom skin must put its art on the **`TOOLS`** slot. Name the attachment `Tools/Mop`, as the game's
+own `Mops/1`–`Mops/10` skins do; if your skin has exactly one attachment on that slot it is taken
+whatever it is called, so a hand-built skin works too.
+
+This is independent of `disableFleeceCycling` and of `fleeceCyclingOnly` — a spine can donate brooms
+and still be a wearable skin, or be nothing but a bag of brooms. The spine is only loaded when
+somebody actually picks one of its brooms, and a broom chosen in a previous session loads its spine
+at startup so the player comes up holding it.
+
+### Follower hats and clothes
+
+Followers can wear hats and clothes that other mods draw. A **wardrobe pack** is a Spine export
+of the follower rig in `BepInEx > plugins > CultTweaker > FollowerSpines > YourPack`, with a
+config that says which of its skins are hats and which are clothes:
+
+```
+| FollowerSpines
+    | YourPack
+        | Follower.json
+        | Follower.atlas
+        | Follower.png
+        | config.json
+```
+
+```
+{
+    "hats": [ "Hats/Crown", "Hats/Beanie" ],
+    "clothes": [ "Clothes/Armour", "Clothes/Sundress" ]
+}
+```
+
+Each name is a skin in your export. To wear one, talk to a follower, pick **Customize Follower**,
+turn on **Enable Customization** and **Follower Costume Override**, and choose from **Custom Hat**
+and **Custom Clothes**; the follower changes as you scroll and keeps the look when you close the
+menu. Turning the costume override off takes the hat and clothes off with it, like the other
+costume choices on that page. It shows as
+`YourPack: Hats/Crown`, so two packs offering the same name stay apart. The follower's own
+hat, necklace and everything else the game dresses it in stays, and can still be changed with the
+costume override on the same page: a custom hat covers the game's hat art, custom clothes cover
+the game's clothes art, and the game's hat and necklace go back on top of custom clothes.
+
+**How to make one.** Start from the rig in `followerSkel/stripped/` (see its README): open the
+JSON in Spine, add a skin, put your art on the slots, export as JSON with an atlas. A **hat** is a
+skin with attachments on `HAT_NORMAL` and `HAT_UP` (the two head angles). **Clothes** are one
+skin with as many pieces as the garment needs: the game's robe covers `BODY_TOP`, `BODY_BTM`,
+`BODY_EXTRA`, `SHAWL_TOP`, `SHAWL_BTM` and the four `SLEEVE_*` slots, and yours can use any of
+those or fewer. Every piece in the skin comes across together, so a coat with sleeves and a
+collar is still one entry in `clothes`. Keep the attachment names the rig already uses on each
+slot (`HAT_NORMAL` on `HAT_NORMAL`, and so on); a slot given exactly one attachment under a
+different name is taken as that slot's anyway. Meshes, weights and cross-atlas art all work, as
+they do for fleeces, on one condition: **do not delete, add or reorder bones** in the rig. A
+pack whose bones differ from the game's is refused with the reason in the log.
+
+**Exporting.** Export the whole template as it is, Cat and all, with its full atlas. Only the
+skins you list are ever used; the rest is parsed and ignored. Do **not** delete the Cat or any
+other skin before exporting: a skin owns bones, the editor deletes those bones with it, and the
+pack is then refused. Linked meshes work, so the easiest clothes are the robe's attachments
+duplicated as linked meshes with your image swapped in. A full-template export is bigger than it
+needs to be, which only shows as a longer first wear.
+
+The pack is only loaded when a follower first wears something from it, so unused packs cost
+nothing at startup.
+
 ### Custom NPC Quests
 
 A custom NPC can hand out quests. They appear in the objectives panel on the right of the screen

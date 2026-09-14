@@ -194,6 +194,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     internal string ActiveToolName => _activeTool != null ? _activeTool.Name : "";
 
+    internal IMapEditorTool ActiveTool => _activeTool;
+
+    /// Switches tools from a panel that is not the dock - the quick pick bar stays on screen under
+    /// every tool, and choosing from it has to bring its own tool forward.
+    internal void ActivateTool(IMapEditorTool tool) => SelectTool(tool);
+
     /// What this player has hold of, by presence id, for the peer's locks and colours.
     internal List<string> SelectedIds()
     {
@@ -739,6 +745,19 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         try
         {
+            QuickPick?.Tick();
+        }
+        catch (System.Exception e)
+        {
+            if (Time.unscaledTime >= _nextUpdateErrorAt)
+            {
+                _nextUpdateErrorAt = Time.unscaledTime + 5f;
+                Plugin.Log.LogError("MapEditor: quick pick update failed: " + e);
+            }
+        }
+
+        try
+        {
             _layers?.Tick();
         }
         catch (System.Exception e)
@@ -858,7 +877,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         if (Time.unscaledTime - _lastToolSwitch < ToolSwitchCooldown) return;
         _lastToolSwitch = Time.unscaledTime;
 
-        CycleTool(scroll > 0f ? -1 : 1);
+        var direction = scroll > 0f ? -1 : 1;
+
+        // A hotbar on screen is what the wheel is for. It hands the wheel back when it is hidden or
+        // has nothing in it, so the wheel is never a key that does nothing.
+        if (QuickPick != null && QuickPick.Step(direction)) return;
+
+        CycleTool(direction);
     }
 
     private bool ScrollUiUnderPointer(float delta)
@@ -1185,6 +1210,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         CreateOptionsPanel();
         CreateStatusBar();
         CreateShortcutPanel();
+        QuickPick = new MapEditorQuickPick(this, _ui, _canvas.transform, DockHeight + 76f);
         _layers = new MapEditorLayerPanel(this, _ui, _canvas.transform);
 
         _ownChrome.Clear();
@@ -1200,6 +1226,10 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             _optionColumns[tool.Name] = content;
             root.SetActive(false);
         }
+
+        // Shown only once the tools have built their panels: the Structure tool's BuildPanel is what
+        // hands the bar its icons and its pinned list, so showing it before this would draw it blank.
+        if (QuickPick != null) QuickPick.Visible = true;
     }
 
     private MapEditorConfirm _confirm;
@@ -1215,6 +1245,9 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private const float DockHeight = ToolIconSize + DockPadding * 2;
 
     private float _dockWidth = 600f;
+
+    /// The Structure tool's nine-slot recent bar; it sits above the status bar and that tool fills it.
+    public MapEditorQuickPick QuickPick { get; private set; }
 
     private RectTransform _dock;
     private EditorContext _dockContext;

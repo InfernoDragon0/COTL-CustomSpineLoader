@@ -561,7 +561,7 @@ public class MapEditorLayerPanel
 
         if (_editor.GetTool<StructureTool>()?.TryGetPlacedName(root, out var placed) == true)
         {
-            label = placed;
+            label = StructureTool.ShortName(placed);
             return "Structures";
         }
 

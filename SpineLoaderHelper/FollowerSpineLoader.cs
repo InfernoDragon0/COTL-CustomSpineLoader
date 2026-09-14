@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using COTL_API.CustomSkins;
 using COTL_API.Helpers;
 using Newtonsoft.Json;
 using Spine;
@@ -25,82 +24,6 @@ public class FollowerSpineLoader
     // skin names contain underscores too -- so the folder is remembered rather than derived.
     public static Dictionary<string, string> FollowerSkinFolders = [];
 
-    public static void LoadAllFollowerSpines(Material material = null)
-    {
-        var followerFolder = Path.Combine(Plugin.PluginPath, "FollowerSpines");
-        if (!Directory.Exists(followerFolder))
-            Directory.CreateDirectory(followerFolder);
-
-        var folders = APIHelper.ModContentPaths.DirectoriesIn("FollowerSpines");
-
-        foreach (var folder in folders)
-        {
-            var followerSpineName = Path.GetFileName(folder);
-
-            var spineSkeleton = Directory.GetFiles(folder, "*.json", SearchOption.TopDirectoryOnly).Where(x => !x.Contains("config")).ToArray();
-            var spineTextures = Directory.GetFiles(folder, "*.png", SearchOption.TopDirectoryOnly);
-            var spineAtlas = Directory.GetFiles(folder, "*.atlas", SearchOption.TopDirectoryOnly);
-            var config = Directory.GetFiles(folder, "config.json", SearchOption.TopDirectoryOnly);
-
-            List<string> defaultSkinName = ["Cat"];
-            var skinList = new string[0];
-
-            if (config.Length > 0)
-            {
-                var configJson = new TextAsset(File.ReadAllText(config[0]));
-                var configObj = JsonConvert.DeserializeObject<FollowerSpineConfig>(configJson.text);
-                if (configObj != null)
-                {
-                    defaultSkinName = configObj.DefaultSkin;
-                    skinList = configObj.Skins;
-                    Plugin.Log.LogInfo($"Using default skin: {defaultSkinName}");
-                    Plugin.Log.LogInfo($"Using skin list: {string.Join(", ", skinList)}");
-                }
-            }
-
-            if (spineSkeleton.Length > 0 && spineTextures.Length > 0 && spineAtlas.Length > 0)
-            {
-                Plugin.Log.LogInfo("Reading atlas from " + spineAtlas[0]);
-                var atlasTxt = new TextAsset(File.ReadAllText(spineAtlas[0]));
-
-                Plugin.Log.LogInfo("Reading skeleton from " + spineSkeleton[0]);
-                var skele = new TextAsset(File.ReadAllText(spineSkeleton[0]));
-                var textures = new Texture2D[spineTextures.Length];
-
-                foreach (var textureFile in spineTextures)
-                {
-                    Plugin.Log.LogInfo("Reading texture from " + textureFile);
-                    Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
-                    tex.name = Path.GetFileNameWithoutExtension(textureFile);
-                    SpineFolderLoader.Keep(tex);
-                    textures[Array.IndexOf(spineTextures, textureFile)] = tex;
-                }
-
-                var mat = material ?? new Material(SpineFolderLoader.SpineShader());
-                SpineFolderLoader.Keep(mat);
-                var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
-                SpineFolderLoader.Keep(runtimeAtlasAsset);
-                var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
-                SpineFolderLoader.Keep(runtimeSkeletonAsset);
-                Plugin.Log.LogInfo("Creating skeleton for " + followerSpineName);
-                Plugin.Log.LogInfo("Using material name " + mat.name);
-                CustomSkinManager.AddFollowerSpine(followerSpineName, runtimeSkeletonAsset);
-
-                for (int i = 0; i < defaultSkinName.Count; i++)
-                {
-                    var skinToApply = defaultSkinName[i];
-
-                }
-
-            }
-            else
-            {
-                Plugin.Log.LogInfo($"Failed to load follower skin {followerSpineName}, ensure that the folder contains at least one of each .json, .png and .atlas file.");
-            }
-
-        }
-    }
-
     public const string FolderName = "FollowerSkins";
 
     public static void LoadAllNonSpineSkins()
@@ -114,35 +37,6 @@ public class FollowerSpineLoader
         foreach (var folder in folders)
         {
             LoadSkinFolder(folder);
-
-            // if (spineSkeleton.Length > 0 && spineTextures.Length > 0 && spineAtlas.Length > 0)
-            // {
-            //     var atlasTxt = new TextAsset(File.ReadAllText(spineAtlas[0]));
-
-            //     var skele = new TextAsset(File.ReadAllText(spineSkeleton[0]));
-            //     var textures = new Texture2D[spineTextures.Length];
-
-            //     {
-            //         Texture2D tex = TextureHelper.CreateTextureFromPath(textureFile);
-            //         tex.name = Path.GetFileNameWithoutExtension(textureFile);
-            //         textures[Array.IndexOf(spineTextures, textureFile)] = tex;
-            //     }
-
-            //     var mat = material ?? new Material(Shader.Find("Spine/Skeleton")); //TODO: find out what shader cotl uses
-            //     var runtimeAtlasAsset = Spine.Unity.SpineAtlasAsset.CreateRuntimeInstance(atlasTxt, textures, mat, true);
-            //     var runtimeSkeletonAsset = Spine.Unity.SkeletonDataAsset.CreateRuntimeInstance(skele, runtimeAtlasAsset, true, 0.005f);
-            //     Plugin.Log.LogInfo("Creating skeleton for " + followerSpineName);
-            //     Plugin.Log.LogInfo("Using material name " + mat.name);
-            //     CustomSkinManager.AddFollowerSpine(followerSpineName, runtimeSkeletonAsset);
-
-            //     for (int i = 0; i < defaultSkinName.Count; i++)
-            //     {
-            //         var skinToApply = defaultSkinName[i];
-
-            //     }
-
-            // }
-
         }
     }
 
@@ -540,39 +434,6 @@ public class FollowerSpineLoader
     }
 
 }
-
-public class FollowerSpineConfig
-{
-    public List<string> DefaultSkin { get; set; }
-    public string[] Skins { get; set; }
-
-    public bool InitializeWithoutBase { get; set; } = true;
-}
-
-    /* {
-        partConfigs: {
-            nameOfImage: {
-                    "slotName": "HEAD",
-                    "partName": "HEAD",
-                    "scaleX": 1.0,
-                    "scaleY": 1.0,
-                    "rotation": 0.0,
-                    "offsetX": 0.0,
-                    "offsetY": 0.0,
-                    "colorChoices": ["#FF0000", "#00FF00", "#0000FF"]
-                },
-            nameOfImage2: {
-                "slotName": "Clothes",
-                "partName": "Clothes",
-                "scaleX": 1.0,
-                "scaleY": 1.0,
-                "rotation": 0.0,
-                "offsetX": 0.0,
-                "offsetY": 0.0
-            } ...
-        }
-    }
-    */
 
 [Serializable]
 public class FollowerSkinConfig

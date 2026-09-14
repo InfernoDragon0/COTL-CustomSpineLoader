@@ -154,10 +154,19 @@ public static class MapEditorIcons
 
     private static void LoadPropIcon(string path, Action<Sprite> done)
     {
+        // A piece lifted out of another prefab: load the prefab, then walk to the piece.
+        var childPath = "";
+        var assetKey = path;
+        if (RoomChildPrefabs.TryParse(path, out var owner, out var inside))
+        {
+            assetKey = owner;
+            childPath = inside;
+        }
+
         AsyncOperationHandle<GameObject> handle;
         try
         {
-            handle = Addressables.LoadAssetAsync<GameObject>(path);
+            handle = Addressables.LoadAssetAsync<GameObject>(assetKey);
         }
         catch (Exception e)
         {
@@ -173,7 +182,11 @@ public static class MapEditorIcons
             try
             {
                 if (op.Status == AsyncOperationStatus.Succeeded && op.Result != null)
-                    sprite = op.Result.GetComponentInChildren<SpriteRenderer>(true)?.sprite;
+                {
+                    var root = op.Result.transform;
+                    if (childPath.Length > 0) root = RoomChildPrefabs.FindByPath(root, childPath);
+                    sprite = root != null ? root.GetComponentInChildren<SpriteRenderer>(true)?.sprite : null;
+                }
             }
             catch (Exception e)
             {

@@ -368,27 +368,13 @@ public static class BaseDelta
         // ---- structures, npcs, triggers ---------------------------------------------------------
         if (structureTool != null)
         {
-            foreach (var s in file.Content.Structures)
+            yield return structureTool.PlaceMany(file.Content.Structures, (s, instance) =>
             {
-                if (!StructureTool.TryResolveType(s.TypeName, s.IsCustom, out var type))
-                {
-                    Plugin.Log.LogWarning($"Base editor: structure '{s.TypeName}' could not be " +
-                                          "resolved, skipped.");
-                    continue;
-                }
-
-                var before = structureTool.LastPlacedInstance;
-                yield return structureTool.PlaceAt(type, s.IsCustom,
-                    MapEditorSerialization.ToVector3(s.Position), s.Rotation, s.FlipX,
-                    deferNav: true, seeThrough: s.SeeThrough, fogThrough: s.FogThrough,
-                    wind: s.Wind);
-
-                var instance = structureTool.LastPlacedInstance;
-                if (instance == null || ReferenceEquals(instance, before)) continue;
+                if (instance == null) return;
                 if (s.Scale != null && s.Scale.X != 0f)
                     instance.transform.localScale = MapEditorSerialization.ToVector3(s.Scale);
                 Net.EditorIds.Adopt(instance, s.Id);
-            }
+            });
             report.Add($"{file.Content.Structures.Count} structure(s)");
         }
 
@@ -407,10 +393,7 @@ public static class BaseDelta
 
         if (triggerTool != null)
         {
-            foreach (var t in file.Content.Triggers)
-                triggerTool.CreateTrigger(MapEditorSerialization.ToVector3(t.Position),
-                    t.Width, t.Height, t.Id, t.Action, t.Once, t.Actions, t.LockPlayerControl,
-                    t.Blocking);
+            foreach (var t in file.Content.Triggers) triggerTool.CreateTrigger(t);
             report.Add($"{file.Content.Triggers.Count} trigger(s)");
         }
 

@@ -89,6 +89,12 @@ namespace CustomSpineLoader.Patches
                 PlayerSpineLoader.LoadedFleeceCycling = true;
             }
 
+            if (!PlayerSpineLoader.LoadedBroomList)
+            {
+                PlayerSpineLoader.CollectBrooms(__instance.Spine);
+                PlayerSpineLoader.LoadedBroomList = true;
+            }
+
             if (!PlayerSpineLoader.LoadedCustomSpines)
             {
                 Plugin.Log.LogInfo("PlayerFarming Awake called, checking for custom spines...");
@@ -135,6 +141,8 @@ namespace CustomSpineLoader.Patches
 
             DressFleece(__instance, playerId, config);
 
+            DressBroom(__instance, playerId, config);
+
             PlayerSpineLoader.HideSlots(__instance.Spine, config);
 
             CustomWeapons.DressPlayer(__instance, __result);
@@ -175,6 +183,25 @@ namespace CustomSpineLoader.Patches
             }
 
             PlayerSpineLoader.ApplyFleeceAttachments(lambSpine, lambSkin, config);
+        }
+
+        /// SetSkin rebuilds the whole skin and adds the Mops skin the chore level earned, so the
+        /// chosen broom has to be laid back over it every time.
+        private static void DressBroom(PlayerFarming player, int playerId, PlayerSpineConfig config)
+        {
+            if (!Plugin.BroomTransmogOn(playerId)) return;
+
+            var broomIndex = PlayerSpineLoader.GetBroomIndex(playerId);
+            if (broomIndex < 0 || broomIndex >= PlayerSpineLoader.BroomRotation.Count) return;
+
+            var spine = player.Spine;
+            if (spine == null) return;
+
+            var broomSkin = PlayerSpineLoader.ResolveBroomSkin(
+                PlayerSpineLoader.BroomRotation[broomIndex], spine, out var sourceData);
+            if (broomSkin == null) return;
+
+            PlayerSpineLoader.ApplyBroomAttachments(spine, broomSkin, config, sourceData);
         }
 
         [HarmonyPatch(typeof(Follower), nameof(Follower.Update))]
@@ -287,6 +314,25 @@ namespace CustomSpineLoader.Patches
                 return;
             }
 
+        }
+
+        [HarmonyPatch(typeof(FollowerBrain), nameof(FollowerBrain.SetFollowerCostume),
+            [typeof(Skeleton), typeof(int), typeof(string), typeof(int), typeof(FollowerOutfitType),
+                typeof(FollowerHatType), typeof(FollowerClothingType), typeof(FollowerCustomisationType),
+                typeof(FollowerSpecialType), typeof(InventoryItem.ITEM_TYPE), typeof(string), typeof(FollowerInfo)])]
+        [HarmonyPostfix]
+        private static void FollowerBrain_SetFollowerCostume_Wardrobe(Skeleton skeleton, int followerLevel,
+            FollowerHatType hat, FollowerCustomisationType customisation, InventoryItem.ITEM_TYPE necklace,
+            FollowerInfo info)
+        {
+            FollowerWardrobe.Dress(skeleton, info, followerLevel, hat, customisation, necklace);
+        }
+
+        [HarmonyPatch(typeof(SkeletonGraphic), nameof(SkeletonGraphic.Initialize), [typeof(bool)])]
+        [HarmonyPostfix]
+        private static void SkeletonGraphic_Initialize(SkeletonGraphic __instance)
+        {
+            FollowerWardrobe.NoteGraphic(__instance);
         }
 
         [HarmonyPatch(typeof(SaveAndLoad), nameof(SaveAndLoad.Load))]

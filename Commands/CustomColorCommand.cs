@@ -42,6 +42,10 @@ public class CustomColorCommand : CustomFollowerCommand
     public int selectedOutfitTypeIndex = 0;
     public int selectedNecklaceTypeIndex = 0;
 
+    // Wardrobe keys ("pack/skin") the menu is trying on; null for none.
+    private string _selectedHatKey;
+    private string _selectedClothesKey;
+
     public override string GetTitle(Follower follower)
     {
         return "Customize Follower";
@@ -63,9 +67,13 @@ public class CustomColorCommand : CustomFollowerCommand
             _followerSummaryMenuController.OnHidden += () =>
             {
                 _followerSummaryMenuController = null;
+                FollowerWardrobe.EndPreview(interaction.follower.Brain.Info.ID);
                 if (isCustomColorEnabled)
                 {
                     CustomColorHelper.SetCustomColor(interaction.follower.Brain.Info.ID, currentRed, currentGreen, currentBlue, currentAlpha, currentScale);
+                    CustomColorHelper.SetWardrobe(interaction.follower.Brain.Info.ID,
+                        isCustomFollowerCostumeEnabled ? _selectedHatKey : null,
+                        isCustomFollowerCostumeEnabled ? _selectedClothesKey : null);
                     interaction.follower.Spine.skeleton.FindSlot("ARM_LEFT_SKIN").SetColor(new Color(currentRed, currentGreen, currentBlue, 1));
                     interaction.follower.Spine.skeleton.FindSlot("LEG_LEFT_SKIN").SetColor(new Color(currentRed, currentGreen, currentBlue, 1));
                     interaction.follower.Spine.skeleton.FindSlot("LEG_RIGHT_SKIN").SetColor(new Color(currentRed, currentGreen, currentBlue, 1));
@@ -209,6 +217,20 @@ public class CustomColorCommand : CustomFollowerCommand
 
         var spacerInstance9 = UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
         var horizontalNecklaceType = UnityEngine.Object.Instantiate(horizontalTemplate, leftContentScrollViewViewportContent);
+
+        var hatKeys = FollowerWardrobe.HatKeys();
+        var clothesKeys = FollowerWardrobe.ClothesKeys();
+        GameObject horizontalCustomHat = null, horizontalCustomClothes = null;
+        if (hatKeys.Count > 0)
+        {
+            UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
+            horizontalCustomHat = UnityEngine.Object.Instantiate(horizontalTemplate, leftContentScrollViewViewportContent);
+        }
+        if (clothesKeys.Count > 0)
+        {
+            UnityEngine.Object.Instantiate(spacer, leftContentScrollViewViewportContent);
+            horizontalCustomClothes = UnityEngine.Object.Instantiate(horizontalTemplate, leftContentScrollViewViewportContent);
+        }
         #endregion
 
         #region SLIDER AND TOGGLE SETUP
@@ -340,6 +362,11 @@ public class CustomColorCommand : CustomFollowerCommand
         #endregion
 
         var hasCustomColor = CustomColorHelper.GetCustomColor(_followerSummaryMenuController._follower.Brain.Info.ID);
+        _selectedHatKey = hasCustomColor?.CustomHat;
+        _selectedClothesKey = hasCustomColor?.CustomClothes;
+        WireWardrobe(horizontalCustomHat, "Custom Hat", hatKeys, _selectedHatKey, key => _selectedHatKey = key);
+        WireWardrobe(horizontalCustomClothes, "Custom Clothes", clothesKeys, _selectedClothesKey, key => _selectedClothesKey = key);
+
         if (hasCustomColor != null)
         {
             toggleCustomColorComponent.Value = true;
@@ -454,6 +481,64 @@ public class CustomColorCommand : CustomFollowerCommand
 
     }
 
+    private void WireWardrobe(GameObject selectorObject, string title, List<string> keys, string current, Action<string> chosen)
+    {
+        if (selectorObject == null) return;
+
+        selectorObject.name = title.Replace(" ", "");
+        selectorObject.GetComponentInChildren<TMP_Text>().text = title;
+
+        var options = new List<string> { "None" };
+        options.AddRange(keys.Select(FollowerWardrobe.Label));
+
+        var selector = selectorObject.GetComponentInChildren<MMHorizontalSelector>();
+        selector._localizeContent = false;
+        selector.UpdateContent([.. options]);
+        selector.ContentIndex = Mathf.Max(0, keys.IndexOf(current) + 1);
+        selector.OnSelectionChanged += index =>
+        {
+            chosen(index > 0 && index <= keys.Count ? keys[index - 1] : null);
+            var follower = _followerSummaryMenuController?._follower;
+            if (follower == null) return;
+
+            if (!SyncWardrobePreview(follower))
+            {
+                Plugin.Log.LogInfo("Custom follower costume not enabled, skipping wardrobe set.");
+                return;
+            }
+            OnFollowerCostumeSelectorsChanged(typeof(FollowerClothingType), selectedClothingTypeIndex);
+        };
+    }
+
+    /// The wardrobe is part of the costume override, so the menu's preview is on only while both
+    /// Enable Customization and Follower Costume Override are. Returns whether it is.
+    private bool SyncWardrobePreview(Follower follower)
+    {
+        var on = isCustomColorEnabled && isCustomFollowerCostumeEnabled;
+        FollowerWardrobe.Preview(follower.Brain.Info.ID, on ? _selectedHatKey : null, on ? _selectedClothesKey : null);
+        return on;
+    }
+
+    /// Dresses the follower as the game would, from its own info. The wardrobe postfix then lays
+    /// whatever the follower wears (saved or previewed) on top.
+    private static void ResetCostume(Follower follower)
+    {
+        FollowerBrain.SetFollowerCostume(
+            follower.Spine.skeleton,
+            follower.Brain.Info.XPLevel,
+            follower.Brain.Info.SkinName,
+            follower.Brain.Info.SkinColour,
+            follower.Brain.Info.Outfit,
+            follower.Brain.Info.Hat,
+            follower.Brain.Info.Clothing,
+            follower.Brain.Info.Customisation,
+            follower.Brain.Info.Special,
+            follower.Brain.Info.Necklace,
+            "",
+            follower.Brain._directInfoAccess
+        );
+    }
+
     public static string GetSnowmanRandomSkin(FollowerSpecialType snowmanType)
     {
         var prefix = snowmanType switch
@@ -487,23 +572,11 @@ public class CustomColorCommand : CustomFollowerCommand
     {
         Debug.Log($"Follower costume toggle changed to {value}");
         isCustomFollowerCostumeEnabled = value;
+        SyncWardrobePreview(follower);
         if (!isCustomFollowerCostumeEnabled)
         {
             Debug.Log("Custom follower costume disabled, reset costume.");
-            FollowerBrain.SetFollowerCostume(
-                follower.Spine.skeleton,
-                follower.Brain.Info.XPLevel,
-                follower.Brain.Info.SkinName,
-                follower.Brain.Info.SkinColour,
-                follower.Brain.Info.Outfit,
-                follower.Brain.Info.Hat,
-                follower.Brain.Info.Clothing,
-                follower.Brain.Info.Customisation,
-                follower.Brain.Info.Special,
-                follower.Brain.Info.Necklace,
-                "",
-                follower.Brain._directInfoAccess
-            );
+            ResetCostume(follower);
             return;
         }
         else
@@ -516,24 +589,12 @@ public class CustomColorCommand : CustomFollowerCommand
     {
         Debug.Log($"Toggle value changed to {value}");
         isCustomColorEnabled = value;
+        SyncWardrobePreview(follower);
 
         if (!isCustomColorEnabled)
         {
             Debug.Log("Custom color disabled, reset to default colors.");
-            FollowerBrain.SetFollowerCostume(
-                follower.Spine.skeleton,
-                follower.Brain.Info.XPLevel,
-                follower.Brain.Info.SkinName,
-                follower.Brain.Info.SkinColour,
-                follower.Brain.Info.Outfit,
-                follower.Brain.Info.Hat,
-                follower.Brain.Info.Clothing,
-                follower.Brain.Info.Customisation,
-                follower.Brain.Info.Special,
-                follower.Brain.Info.Necklace,
-                "",
-                follower.Brain._directInfoAccess
-            );
+            ResetCostume(follower);
         }
     }
 

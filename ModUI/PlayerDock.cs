@@ -119,6 +119,7 @@ public class PlayerDock
         BuildAnimationBox(card.transform, playerId, present);
         BuildTransmogBox(card.transform, playerId);
         BuildFleeceBox(card.transform, playerId, present);
+        BuildBroomBox(card.transform, playerId);
         BuildSpineBox(card.transform, playerId);
     }
 
@@ -234,6 +235,29 @@ public class PlayerDock
 
             PlayerPreview.Redress(playerId);
         });
+
+        _ui.CreateToggle(box, "Broom transmog", Plugin.BroomTransmogOn(playerId), on =>
+        {
+            Plugin.SetBroomTransmog(playerId, on);
+
+            if (on)
+            {
+                var index = PlayerSpineLoader.GetBroomIndex(playerId);
+                if (index >= 0)
+                {
+                    // Armed before applying, because applying announces the look synchronously when
+                    // the broom is already to hand.
+                    ShowOffBroom(playerId);
+                    PlayerSpineLoader.ApplyBroom(playerId, index);
+                }
+            }
+            else
+            {
+                PlayerSpineLoader.ResolvePlayer(playerId)?.SetSkin();
+            }
+
+            PlayerPreview.Redress(playerId);
+        });
     }
 
     private void BuildFleeceBox(Transform parent, int playerId, bool present)
@@ -268,6 +292,71 @@ public class PlayerDock
         var config = PlayerSpineLoader.ConfigFor(playerId);
         if (config != null && config.DisableFleeceCycling)
             Caption(box, "This spine keeps its own", 13, new Color(1f, 0.8f, 0.45f));
+    }
+
+    private void BuildBroomBox(Transform parent, int playerId)
+    {
+        var brooms = PlayerSpineLoader.BroomRotation;
+        var box = Box(parent, "Broom");
+
+        if (brooms.Count == 0)
+        {
+            Caption(box, "No brooms found yet", 14, new Color(1f, 1f, 1f, 0.6f));
+            return;
+        }
+
+        Caption(box, "Broom", 15, new Color(0.98f, 0.94f, 0.85f));
+
+        var labels = new List<string>(brooms.Count);
+        foreach (var broom in brooms) labels.Add(PlayerSpineLoader.BroomLabel(broom));
+
+        var dropdown = _ui.CreateDropdown(box, "Broom", labels, (index, _) =>
+        {
+            if (!Plugin.BroomTransmogOn(playerId))
+            {
+                Plugin.Log.LogWarning($"Broom transmog is off for player {playerId + 1}.");
+                return;
+            }
+
+            ShowOffBroom(playerId);
+            PlayerSpineLoader.ApplyBroom(playerId, index);
+        });
+
+        var current = PlayerSpineLoader.GetBroomIndex(playerId);
+        if (current >= 0 && current < brooms.Count) dropdown.SetSelected(current);
+    }
+
+    // The broom lives in the TOOLS slot, which is empty in every resting pose, so a broom that has
+    // just been chosen is invisible until the lamb sweeps with it. "cleaning" is the animation the
+    // game itself plays over a poop.
+    private static readonly string[] MopAnimations =
+        ["cleaning", "actions/cleaning-animal", "Mop/collect"];
+
+    // A donated broom's spine may still be preparing, and ApplyBroom then defers and comes back by
+    // callback seconds later. Sweeping straight away would show the OLD broom, so the sweep is armed
+    // here and spent when the look LANDS on the skeleton (LookChanged), not when it is asked for.
+    private static readonly Dictionary<int, float> _sweepWanted = [];
+
+    private const float SweepWindow = 30f;
+
+    private static void ShowOffBroom(int playerId) => _sweepWanted[playerId] = Time.unscaledTime;
+
+    /// Called from the panel when a look lands on a player. Plays a waiting broom sweep if there is
+    /// one, and keeps waiting when there is nothing to play it on yet.
+    public static void SweepIfWanted(int playerId)
+    {
+        if (!_sweepWanted.TryGetValue(playerId, out var armed)) return;
+
+        // A load that never finished must not leave a sweep primed to go off on some unrelated look
+        // change minutes later.
+        if (Time.unscaledTime - armed > SweepWindow)
+        {
+            _sweepWanted.Remove(playerId);
+            return;
+        }
+
+        // Still no portrait means a spine swap is in flight; stay armed for the next look.
+        if (PlayerPreview.PlayOnce(playerId, MopAnimations)) _sweepWanted.Remove(playerId);
     }
 
     private void BuildSpineBox(Transform parent, int playerId)

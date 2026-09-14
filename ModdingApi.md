@@ -10,6 +10,7 @@ assembly and call a small contract. Most mods want the first.
 - [Queries](#queries)
 - [Actions](#actions)
 - [Quests (contract version 2)](#quests-contract-version-2)
+- [World map progress (contract version 3)](#world-map-progress-contract-version-3)
 - [Where content lives](#where-content-lives)
 - [Ids and why you must not save them](#ids-and-why-you-must-not-save-them)
 - [Load order](#load-order)
@@ -116,6 +117,8 @@ Pass one of these to the queries. The constants are on `CultTweakerApi.Kind`.
 | `Weapons` | Custom weapons, as `spineFolder/weaponName` | `PlayerSkins` |
 | `PlayerSkins` | Player spines, as `spineFolder/skinName` | `PlayerSkins` |
 | `FollowerSkins` | Custom follower skins | `FollowerSkins` |
+| `FollowerHats` | Follower hats from wardrobe packs, as `packFolder/skinName` | `FollowerSpines` |
+| `FollowerClothes` | Follower clothes from wardrobe packs, as `packFolder/skinName` | `FollowerSpines` |
 | `Cutscenes` | Cutscene videos | `CustomCutscenes` |
 | `ShapeProfiles` | Sprite shape profiles | `CustomShapeProfiles` |
 | `BuildingOverrides` | Buildings with overridden art | `BuildingOverrides` |
@@ -175,6 +178,49 @@ only reach for these calls when it needs to drive one.
 Quest progress is CultTweaker's own per-slot file, not the game's save, and it is keyed by name
 throughout, so none of this carries the id warning below.
 
+## World map progress (contract version 3)
+
+```csharp
+IReadOnlyList<string> WorldMapNodes(string mapName);
+string                WorldMapNodeState(string mapName, string nodeId);
+bool                  CompleteWorldMapNode(string mapName, string nodeId);
+bool                  UncompleteWorldMapNode(string mapName, string nodeId);
+bool                  OpenWorldMapLock(string mapName, string nodeId);
+bool                  CloseWorldMapLock(string mapName, string nodeId);
+int                   WorldMapKeys(string mapName);
+void                  SetWorldMapKeys(string mapName, int keys);
+void                  ResetWorldMap(string mapName);
+```
+
+Map names are what `Names(Kind.WorldMaps)` returns; node ids come from `WorldMapNodes` and are the
+author's own strings, stable across machines.
+
+**State is derived, never assigned.** `WorldMapNodeState` returns `hidden`, `preview`, `locked`,
+`selectable` or `completed`, recomputed each time from the map's graph — `InitialState`, the
+`Children` cascade, `RequiredNodes` with `RequiredCompletedCount`, and the lock nodes — combined
+with the saved record. So there is no "unlock this node" call and there cannot be one. You change
+the record, and which nodes are open follows. Reading re-reads the map document from disk, so query
+it when something happens, not every frame.
+
+Keys are a per-map currency: a **Key** node banks `KeysGranted` when completed (once, however often
+it is replayed), a **Lock** node costs `KeysCost` and blocks its branch until opened. Keys earned on
+one map cannot be spent on another. `OpenWorldMapLock` refuses when the player cannot pay — call
+`SetWorldMapKeys` first if you mean to force it.
+
+Two asymmetries worth knowing before you rely on them:
+
+- `UncompleteWorldMapNode` on a **Key** node un-banks what it granted, floored at zero, and any lock
+  those keys already opened **stays open**. Shutting a door the player paid for would reach well
+  beyond the node you named. So un-completing is not always an exact inverse of completing;
+  `ResetWorldMap` is, for the whole map.
+- You can drive a map into a state its own rules would never produce — a node completed while its
+  prerequisites are not, or a lock closed with completed nodes past it. Nothing breaks and nothing
+  becomes unreachable, because state is recomputed from scratch; it will simply look odd. Prefer
+  driving the record the way play would.
+
+Progress is CultTweaker's own per-save-slot file, not the game's save, and is keyed by name
+throughout, so none of this carries the id warning below.
+
 ## Where content lives
 
 ```csharp
@@ -226,6 +272,7 @@ if (CultTweakerApi.ContractVersion >= 2) { /* the quest members */ }
 | --- | --- |
 | 1 | The kinds, the queries, the actions, the content paths, `OnReady`. |
 | 2 | `Kind.Quests` and the quest members. |
+| 3 | The world map progress members. |
 
 If you need something the contract does not expose, ask rather than reflecting into the assembly:
 anything reached by reflection will break the next time those internals move.

@@ -602,10 +602,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
         go.transform.SetParent(DotRoot(), false);
 
         var rt = go.AddComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(26f, 26f);
-
-        var img = go.AddComponent<Image>();
-        img.color = MapEditorGizmos.GripColour;
+        MapEditorUI.DressHandle(go, MapEditorGizmos.GripColour, 26f);
 
         var handle = go.AddComponent<DoorDragHandle>();
         handle.Initialize(this, _editor, door);

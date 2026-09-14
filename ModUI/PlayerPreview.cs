@@ -140,6 +140,38 @@ public static class PlayerPreview
         }
     }
 
+    /// Plays the first of `candidates` the portrait actually has, once, then goes back to whatever it
+    /// was doing. Some changes are invisible standing still - a broom only exists while the lamb
+    /// sweeps with it - so the panel shows them off rather than leaving the player to guess.
+    public static bool PlayOnce(int playerId, params string[] candidates)
+    {
+        if (!_portraits.TryGetValue(playerId, out var portrait) || portrait.Spine == null) return false;
+
+        var wanted = First(portrait, exact: true, candidates);
+        if (string.IsNullOrEmpty(wanted)) return false;
+
+        try
+        {
+            var back = portrait.Spine.AnimationState?.GetCurrent(0)?.Animation?.Name;
+
+            // Playing it a second time while it is still running would leave nothing to return to
+            // and freeze the portrait on the last frame.
+            if (string.IsNullOrEmpty(back) || back == wanted)
+                back = First(portrait, "idle-front", "idle-down", "idle-side", "idle", "Idle",
+                    "idle-back", "idle-up");
+
+            portrait.Spine.AnimationState.SetAnimation(0, wanted, false);
+            if (!string.IsNullOrEmpty(back)) portrait.Spine.AnimationState.AddAnimation(0, back, true, 0f);
+
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            Plugin.Log.LogWarning($"CultTweaker: '{wanted}' would not play once: {e.Message}");
+            return false;
+        }
+    }
+
     // ---- building --------------------------------------------------------------------------------------
 
     private static Portrait Build(int playerId, SkeletonAnimation live, float width, float height)
@@ -302,13 +334,20 @@ public static class PlayerPreview
         }
     }
 
-    private static string First(Portrait portrait, params string[] candidates)
+    private static string First(Portrait portrait, params string[] candidates) =>
+        First(portrait, exact: false, candidates);
+
+    /// `exact` false adds the "anything with idle in the name" sweep, which is right when hunting for
+    /// a resting pose and wrong when hunting for one particular action.
+    private static string First(Portrait portrait, bool exact, string[] candidates)
     {
         var data = portrait.Spine.Skeleton?.Data;
         if (data == null) return null;
 
         foreach (var name in candidates)
-            if (data.FindAnimation(name) != null) return name;
+            if (!string.IsNullOrEmpty(name) && data.FindAnimation(name) != null) return name;
+
+        if (exact) return null;
 
         foreach (var animation in data.Animations)
             if (animation.Name.IndexOf("idle", System.StringComparison.OrdinalIgnoreCase) >= 0)

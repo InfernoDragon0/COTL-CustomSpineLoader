@@ -22,8 +22,12 @@ public class PlayerSpineLoader
     public static List<string> FleeceRotation = []; //string of skin names that have fleeces
     public static Dictionary<string, Tuple<SkeletonDataAsset, List<string>>> FleeceCyclingSpines = []; //spineName: Skel and list of skin names
 
+    public static List<string> BroomRotation = []; //skin names that carry a broom, "Mops/1" and up
+    public static Dictionary<string, Tuple<SkeletonDataAsset, List<string>>> BroomSpines = []; //spineName: Skel and its broom skin names
+
     public static Dictionary<string, PlayerSpineConfig> SpineConfigs = [];
     public static readonly int[] FleeceIndexes = [-1, -1, -1, -1];
+    public static readonly int[] BroomIndexes = [-1, -1, -1, -1];
 
     public static Action<int> LookChanged;
 
@@ -47,6 +51,78 @@ public class PlayerSpineLoader
 
     public static bool LoadedCustomSpines = false;
     public static bool LoadedFleeceCycling = false;
+    public static bool LoadedBroomList = false;
+
+    private const string BroomSkinPrefix = "Mops/";
+
+    /// Every broom the player skeleton carries, in the order the game earns them. The game picks one
+    /// by chore level in SetSkin; the transmog pins whichever the player chose instead.
+    public static void CollectBrooms(SkeletonAnimation playerSpine)
+    {
+        if (playerSpine == null || playerSpine.Skeleton == null) return;
+
+        var found = new List<string>();
+        foreach (var skin in playerSpine.Skeleton.Data.Skins)
+        {
+            if (skin.Name == null) continue;
+            if (!skin.Name.StartsWith(BroomSkinPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!found.Contains(skin.Name)) found.Add(skin.Name);
+        }
+
+        found.Sort((a, b) => BroomNumber(a).CompareTo(BroomNumber(b)));
+
+        // Installed spines' brooms come after the game's own, in registry order, and are named the
+        // way custom fleeces are so one parser serves both.
+        foreach (var (spineName, brooms) in BroomDonorEntries())
+        {
+            foreach (var broom in brooms)
+            {
+                var key = CustomPrefix + spineName + "_" + broom;
+                if (!found.Contains(key)) found.Add(key);
+            }
+        }
+
+        BroomRotation = found;
+        Plugin.Log.LogInfo(found.Count == 0
+            ? "No brooms found on the player skeleton."
+            : $"Found {found.Count} broom(s): {string.Join(", ", found)}");
+    }
+
+    public const string CustomPrefix = "CultTweaker_";
+
+    /// "Mops/10" sorts after "Mops/9", which a plain string sort would get backwards.
+    private static int BroomNumber(string skinName)
+    {
+        if (!skinName.StartsWith(BroomSkinPrefix, StringComparison.OrdinalIgnoreCase)) return int.MaxValue;
+
+        var tail = skinName.Substring(BroomSkinPrefix.Length);
+        return int.TryParse(tail, out var number) ? number : int.MaxValue;
+    }
+
+    /// "Broom 3" reads better than "Mops/3" in a dropdown, and a donated one is named for the spine
+    /// that brought it so two mods offering a "Straw" broom stay apart.
+    public static string BroomLabel(string skinName)
+    {
+        if (string.IsNullOrEmpty(skinName)) return "";
+
+        if (skinName.StartsWith(CustomPrefix, StringComparison.Ordinal))
+        {
+            var split = skinName.Split(['_'], count: 3);
+            if (split.Length == 3) return split[1] + ": " + split[2];
+        }
+
+        var number = BroomNumber(skinName);
+        return number == int.MaxValue ? skinName : "Broom " + number;
+    }
+
+    public static string SpineNameFromBroom(string broomSkinName)
+    {
+        if (string.IsNullOrEmpty(broomSkinName) ||
+            !broomSkinName.StartsWith(CustomPrefix, StringComparison.Ordinal)) return null;
+
+        var split = broomSkinName.Split(['_'], count: 3);
+        return split.Length < 3 ? null : split[1];
+    }
 
     public static List<(string, string)> FleeceOverrideSlots = [ //(slot index, slot name)
         ("images/PonchoLeft", "PonchoLeft"),
@@ -64,6 +140,10 @@ public class PlayerSpineLoader
         ("images/Bell", "Bell"),
         ("images/Body", "Body")
     ]; //Tuple<string, string>
+
+    public static List<(string, string)> BroomOverrideSlots = [ //(slot name, attachment name)
+        ("TOOLS", "Tools/Mop")
+    ];
 
     public static int CycleNextFleece(int playerID)
     {
@@ -426,17 +506,35 @@ public class PlayerSpineLoader
     public static void ApplyFleeceAttachments(SkeletonAnimation spine, Skin fleeceSkin,
         PlayerSpineConfig config = null)
     {
-        if (spine == null || fleeceSkin == null) return;
+        ApplyOverrideSlots(spine, fleeceSkin, FleeceOverrideSlots, config);
+    }
+
+    /// `sourceData` is the skeleton the skin came from when that is not the one being dressed - a
+    /// broom donated by another spine. Slot indexes are per skeleton, so the donor's have to be read
+    /// with the donor's numbering or the wrong attachment comes back.
+    public static void ApplyBroomAttachments(SkeletonAnimation spine, Skin broomSkin,
+        PlayerSpineConfig config = null, SkeletonData sourceData = null)
+    {
+        ApplyOverrideSlots(spine, broomSkin, BroomOverrideSlots, config, sourceData);
+    }
+
+    private static void ApplyOverrideSlots(SkeletonAnimation spine, Skin source,
+        List<(string, string)> slots, PlayerSpineConfig config, SkeletonData sourceData = null)
+    {
+        if (spine == null || source == null) return;
 
         var hidden = HiddenSlotNames(config);
         var currentSkin = spine.Skeleton.Skin;
 
-        foreach (var slot in FleeceOverrideSlots)
+        foreach (var slot in slots)
         {
             var slotIndex = spine.Skeleton.FindSlotIndex(slot.Item1);
-            var attachment = hidden != null && hidden.Contains(slot.Item1)
+            var readIndex = sourceData == null ? slotIndex : SlotIndexIn(sourceData, slot.Item1);
+
+            var attachment = hidden != null && hidden.Contains(slot.Item1) || readIndex < 0
                 ? null
-                : fleeceSkin.GetAttachment(slotIndex, slot.Item2);
+                : source.GetAttachment(readIndex, slot.Item2)
+                  ?? OnlyAttachmentOn(source, readIndex);
 
             if (attachment == null)
                 currentSkin.RemoveAttachment(slotIndex, slot.Item2);
@@ -448,6 +546,33 @@ public class PlayerSpineLoader
 
         spine.Skeleton.SetSlotsToSetupPose();
         spine.Update(0);
+    }
+
+    private static int SlotIndexIn(SkeletonData data, string slotName)
+    {
+        var slots = data?.Slots;
+        if (slots == null) return -1;
+
+        for (var i = 0; i < slots.Count; i++)
+            if (slots.Items[i].Name == slotName) return i;
+
+        return -1;
+    }
+
+    /// A hand-made donor skin may not have named its attachment the way the vanilla one does. When
+    /// the slot holds exactly one thing there is no ambiguity about which was meant.
+    private static Attachment OnlyAttachmentOn(Skin skin, int slotIndex)
+    {
+        Attachment only = null;
+
+        foreach (var entry in skin.Attachments)
+        {
+            if (entry.SlotIndex != slotIndex) continue;
+            if (only != null) return null;
+            only = entry.Attachment;
+        }
+
+        return only;
     }
 
     public static PlayerFarming ResolvePlayer(int playerId)
@@ -537,6 +662,115 @@ public class PlayerSpineLoader
                 break;
         }
     }
+
+    // ---- broom application ----------------------------------------------------------------------
+
+    public static int GetBroomIndex(int playerId) =>
+        playerId >= 0 && playerId < BroomIndexes.Length ? BroomIndexes[playerId] : -1;
+
+    /// A plain name is a skin on the wearer's own skeleton; a "CultTweaker_&lt;spine&gt;_&lt;skin&gt;" one comes
+    /// from another installed spine, and `sourceData` then says which so its slot numbering is used.
+    public static Skin ResolveBroomSkin(string broomSkinName, SkeletonAnimation targetSpine,
+        out SkeletonData sourceData)
+    {
+        sourceData = null;
+        if (string.IsNullOrEmpty(broomSkinName) || targetSpine == null) return null;
+
+        if (!broomSkinName.StartsWith(CustomPrefix, StringComparison.Ordinal))
+            return targetSpine.Skeleton.Data.FindSkin(broomSkinName);
+
+        var split = broomSkinName.Split(['_'], count: 3);
+        if (split.Length < 3)
+        {
+            Plugin.Log.LogWarning("Invalid custom broom skin name: " + broomSkinName);
+            return null;
+        }
+
+        if (!BroomSpines.TryGetValue(split[1], out var donor) || donor?.Item1 == null)
+        {
+            Plugin.Log.LogWarning($"Broom {broomSkinName} names a spine that is not loaded: {split[1]}");
+            return null;
+        }
+
+        var data = donor.Item1.GetSkeletonData(false);
+        var skin = data != null ? data.FindSkin(split[2]) : null;
+        if (skin == null)
+        {
+            Plugin.Log.LogWarning($"{split[1]} has no skin called {split[2]}; its broom is skipped.");
+            return null;
+        }
+
+        sourceData = data;
+        return skin;
+    }
+
+    public static Skin ResolveBroomSkin(string broomSkinName, SkeletonAnimation targetSpine) =>
+        ResolveBroomSkin(broomSkinName, targetSpine, out _);
+
+    public static bool ApplyBroom(int playerId, int broomIndex, bool persist = true)
+    {
+        if (broomIndex < 0 || broomIndex >= BroomRotation.Count)
+        {
+            Plugin.Log.LogWarning($"Broom index {broomIndex} is out of range (0-{BroomRotation.Count - 1}).");
+            return false;
+        }
+
+        var player = ResolvePlayer(playerId);
+        if (player == null || player.Spine == null)
+        {
+            Plugin.Log.LogInfo($"Player {playerId + 1} is not in the game; no broom applied.");
+            return false;
+        }
+
+        var broomSkinName = BroomRotation[broomIndex];
+
+        if (persist) RememberBroom(playerId, broomIndex);
+
+        // A donated broom whose spine has not been loaded yet: load it, then come back. Same shape
+        // as the fleece path, and the same reason - the choice is remembered either way.
+        var donorName = SpineNameFromBroom(broomSkinName);
+        if (donorName != null && !BroomSpines.ContainsKey(donorName) && Registry.ContainsKey(donorName))
+        {
+            var id = playerId;
+            var index = broomIndex;
+            EnsureLoaded(donorName, () => ApplyBroom(id, index, persist: false));
+            return false;
+        }
+
+        var broomSkin = ResolveBroomSkin(broomSkinName, player.Spine, out var sourceData);
+        if (broomSkin == null)
+        {
+            Plugin.Log.LogWarning($"Broom skin could not be resolved: {broomSkinName}; " +
+                                  "the current broom is kept.");
+            return false;
+        }
+
+        ApplyBroomAttachments(player.Spine, broomSkin, ConfigFor(playerId), sourceData);
+
+        Plugin.Log.LogInfo($"Player {playerId + 1} is sweeping with {broomSkinName}.");
+
+        AnnounceLook(playerId);
+        return true;
+    }
+
+    private static void RememberBroom(int playerId, int broomIndex)
+    {
+        if (playerId >= 0 && playerId < BroomIndexes.Length) BroomIndexes[playerId] = broomIndex;
+
+        switch (playerId)
+        {
+            case 0:
+                if (Plugin.CurrentBroomIndexP1 != null) Plugin.CurrentBroomIndexP1.Value = broomIndex;
+                if (Plugin.CurrentBroomNameP1 != null)
+                    Plugin.CurrentBroomNameP1.Value = BroomRotation[broomIndex];
+                break;
+            case 1:
+                if (Plugin.CurrentBroomIndexP2 != null) Plugin.CurrentBroomIndexP2.Value = broomIndex;
+                if (Plugin.CurrentBroomNameP2 != null)
+                    Plugin.CurrentBroomNameP2.Value = BroomRotation[broomIndex];
+                break;
+        }
+    }
     // ---- lazy loading -------------------------------------------------------------------------
 
     private enum SpineState { NotLoaded, Loading, Ready }
@@ -548,6 +782,7 @@ public class PlayerSpineLoader
         public PlayerSpineConfig Config;
         public string DefaultSkin = "Lamb";
         public string[] Skins = [];
+        public string[] Brooms = [];
         public bool IsFleece;
         public SpineState State;
         public SkeletonDataAsset Asset;
@@ -601,6 +836,14 @@ public class PlayerSpineLoader
     {
         foreach (var entry in Registry.Values)
             if (entry.IsFleece) yield return (entry.Name, entry.Skins);
+    }
+
+    /// Read from the REGISTRY, not from BroomSpines: the picker has to list a donated broom before
+    /// its spine has been loaded, or nobody could ever choose the thing that triggers the load.
+    public static IEnumerable<(string Name, string[] Brooms)> BroomDonorEntries()
+    {
+        foreach (var entry in Registry.Values)
+            if (entry.Brooms is { Length: > 0 }) yield return (entry.Name, entry.Brooms);
     }
 
     public static string SpineNameFromFleece(string fleeceSkinName)
@@ -710,6 +953,15 @@ public class PlayerSpineLoader
                     var index = GetFleeceIndex(id);
                     if (index >= 0) ApplyFleece(id, index, persist: false);
                 });
+
+            var broom = SpineNameFromBroom(playerId == 0
+                ? Plugin.CurrentBroomNameP1?.Value : Plugin.CurrentBroomNameP2?.Value);
+            if (broom != null && Registry.ContainsKey(broom) && !IsLoaded(broom))
+                EnsureLoaded(broom, () =>
+                {
+                    var index = GetBroomIndex(id);
+                    if (index >= 0 && Plugin.BroomTransmogOn(id)) ApplyBroom(id, index, persist: false);
+                });
         }
     }
 
@@ -741,6 +993,7 @@ public class PlayerSpineLoader
                         entry.Config = configObj;
                         entry.DefaultSkin = string.IsNullOrEmpty(configObj.DefaultSkin) ? "Lamb" : configObj.DefaultSkin;
                         entry.Skins = configObj.Skins ?? [];
+                        entry.Brooms = configObj.Brooms ?? [];
                         entry.IsFleece = configObj.FleeceCyclingOnly;
                     }
                 }
@@ -770,7 +1023,9 @@ public class PlayerSpineLoader
             ActiveSpineName(0), ActiveSpineName(1),
             SpineNameFromKey(RememberedSpineKey(0)), SpineNameFromKey(RememberedSpineKey(1)),
             SpineNameFromFleece(Plugin.CurrentFleeceNameP1?.Value),
-            SpineNameFromFleece(Plugin.CurrentFleeceNameP2?.Value)
+            SpineNameFromFleece(Plugin.CurrentFleeceNameP2?.Value),
+            SpineNameFromBroom(Plugin.CurrentBroomNameP1?.Value),
+            SpineNameFromBroom(Plugin.CurrentBroomNameP2?.Value)
         };
 
         // Spines that asked for their weapons to be ready from the first room pay the load at boot.
@@ -934,6 +1189,14 @@ public class PlayerSpineLoader
     {
         if (entry.Asset == null) return;
 
+        // Outside the fleece/wearable split on purpose: a spine can donate brooms whether or not it
+        // is something a player can wear.
+        if (entry.Brooms is { Length: > 0 } && !BroomSpines.ContainsKey(entry.Name))
+        {
+            Plugin.Log.LogInfo($"Skin: {entry.Name} donates {entry.Brooms.Length} broom(s).");
+            BroomSpines.Add(entry.Name, new(entry.Asset, [.. entry.Brooms]));
+        }
+
         if (entry.IsFleece)
         {
             if (!FleeceCyclingSpines.ContainsKey(entry.Name))
@@ -972,6 +1235,14 @@ public class PlayerSpineConfig
     public string DefaultSkin { get; set; }
     public string[] Skins { get; set; }
     public bool FleeceCyclingOnly { get; set; } = false;
+
+    /// Skins in this spine that are brooms. They are offered to every player in the F7 panel
+    /// whatever spine is worn, because only the TOOLS slot is taken from them - the art crosses
+    /// atlases the way a fleece's does. A broom skin must put its art on the TOOLS slot; the
+    /// attachment is normally called "Tools/Mop", but a slot holding exactly one attachment is
+    /// taken whatever that attachment is named. Independent of FleeceCyclingOnly: a spine can
+    /// donate brooms and still be wearable, or be nothing but a bag of brooms.
+    public string[] Brooms { get; set; } = [];
 
     public bool DisableFleeceCycling { get; set; } = false;
 

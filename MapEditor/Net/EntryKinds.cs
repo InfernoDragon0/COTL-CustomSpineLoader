@@ -194,6 +194,22 @@ internal sealed class PropKind : EntryKind
             yield break;
         }
 
+        if (RoomChildPrefabs.IsRoomKey(record.Key))
+        {
+            GameObject source = null;
+            yield return RoomChildPrefabs.ResolveRoutine(record.Key, go => source = go);
+            if (source == null)
+            {
+                Plugin.Log.LogWarning($"EditorNet: piece '{record.Key}' could not be read out of its prefab, skipped.");
+                yield break;
+            }
+
+            var lifted = RoomChildPrefabs.Lift(source, parent, record.Key);
+            BlueprintLoader.ApplyPropTransform(lifted, record, room);
+            EditorIds.Adopt(lifted, id);
+            yield break;
+        }
+
         var done = false;
         try
         {
@@ -510,8 +526,7 @@ internal sealed class TriggerKind : EntryKind
             yield break;
         }
 
-        var created = tool.CreateTrigger(V(record.Position), record.Width, record.Height, record.Id,
-            record.Action, record.Once, record.Actions, record.LockPlayerControl, record.Blocking);
+        var created = tool.CreateTrigger(record);
         if (created != null) EditorIds.Adopt(created.gameObject, id);
     }
 
