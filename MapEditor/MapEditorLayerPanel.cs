@@ -26,10 +26,7 @@ namespace CustomSpineLoader.MapEditor;
 /// </summary>
 public class MapEditorLayerPanel
 {
-    private const float Width = 300f;
-    private const float HeaderHeight = 34f;
-    private const float Top = 80f;
-    private const float BottomReserve = 70f;
+    private const float FilterHeight = 36f;
     private const float RowHeight = 28f;
     private const float RowSpacing = 2f;
     private const float Pitch = RowHeight + RowSpacing;
@@ -65,7 +62,11 @@ public class MapEditorLayerPanel
     private readonly GameObject _content;
     private readonly RectTransform _column;
     private readonly ScrollRect _scroll;
-    private readonly TMP_Text _collapseLabel;
+    private readonly Chrome.EditorSidebar _sidebar;
+    private readonly MapEditorSearchRow _search;
+
+    private string _filter = "";
+    private string _summary;
 
     private bool _collapsed = true;
     private bool _hiddenForTool;
@@ -169,53 +170,26 @@ public class MapEditorLayerPanel
     private int _lastStamp = int.MinValue;
     private bool _forceScan;
 
-    public MapEditorLayerPanel(RuntimeMapEditor editor, MapEditorUI ui, Transform canvas)
+    /// <summary>
+    /// The tree lives in the lower half of the sidebar now, under a header the sidebar owns, so it
+    /// carries no plate and no title of its own. What it gained is a filter row: in a base with a
+    /// few hundred objects, scrolling for one torch was the slowest thing in the editor.
+    /// </summary>
+    public MapEditorLayerPanel(RuntimeMapEditor editor, MapEditorUI ui, Chrome.EditorSidebar sidebar)
     {
         _editor = editor;
         _ui = ui;
+        _sidebar = sidebar;
 
         var go = new GameObject("Layers");
-        go.transform.SetParent(canvas, false);
+        go.transform.SetParent(sidebar.LayersContent, false);
         _panel = go.AddComponent<RectTransform>();
-        _panel.anchorMin = _panel.anchorMax = new Vector2(0f, 1f);
-        _panel.pivot = new Vector2(0f, 1f);
-        _panel.sizeDelta = new Vector2(Width, HeaderHeight);
-        _panel.anchoredPosition = new Vector2(16f, -Top);
-        VanillaChrome.Dress(go.AddComponent<Image>());
-        editor.RegisterUiBlocker(_panel);
+        _panel.anchorMin = Vector2.zero;
+        _panel.anchorMax = Vector2.one;
+        _panel.offsetMin = Vector2.zero;
+        _panel.offsetMax = Vector2.zero;
 
-        var header = new GameObject("Header");
-        header.transform.SetParent(_panel, false);
-        var headerRt = header.AddComponent<RectTransform>();
-        headerRt.anchorMin = new Vector2(0f, 1f);
-        headerRt.anchorMax = new Vector2(1f, 1f);
-        headerRt.pivot = new Vector2(0.5f, 1f);
-        headerRt.sizeDelta = new Vector2(0f, HeaderHeight);
-        headerRt.anchoredPosition = Vector2.zero;
-        var headerPlate = header.AddComponent<Image>();
-        headerPlate.color = new Color(1f, 1f, 1f, 0.08f);
-
-        var title = ui.CreateLabel(header.transform, "Layers", 21);
-        var titleRt = title.GetComponent<RectTransform>();
-        titleRt.anchorMin = Vector2.zero;
-        titleRt.anchorMax = Vector2.one;
-        titleRt.offsetMin = new Vector2(12f, 0f);
-        titleRt.offsetMax = new Vector2(-36f, 0f);
-        var titleText = title.GetComponent<TMP_Text>();
-        titleText.enableWordWrapping = false;
-        titleText.raycastTarget = false;
-
-        // The whole header toggles, not just the small button: it is the one row that is always there.
-        MapEditorUI.AttachButton(header, headerPlate, () => SetCollapsed(!_collapsed));
-        MapEditorUI.AddHover(header, headerPlate, new Color(1f, 1f, 1f, 0.08f), new Color(1f, 1f, 1f, 0.16f), null);
-
-        var collapse = ui.CreateButton(header.transform, "+", () => SetCollapsed(!_collapsed), 26f);
-        var collapseRt = collapse.GetComponent<RectTransform>();
-        collapseRt.anchorMin = collapseRt.anchorMax = new Vector2(1f, 0.5f);
-        collapseRt.pivot = new Vector2(1f, 0.5f);
-        collapseRt.sizeDelta = new Vector2(26f, 26f);
-        collapseRt.anchoredPosition = new Vector2(-4f, 0f);
-        _collapseLabel = collapse.GetComponentInChildren<TMP_Text>();
+        sidebar.LayersToggled += open => SetCollapsed(!open);
 
         _content = new GameObject("Content");
         _content.transform.SetParent(_panel, false);
@@ -223,7 +197,35 @@ public class MapEditorLayerPanel
         contentRt.anchorMin = Vector2.zero;
         contentRt.anchorMax = Vector2.one;
         contentRt.offsetMin = Vector2.zero;
-        contentRt.offsetMax = new Vector2(0f, -HeaderHeight);
+        contentRt.offsetMax = Vector2.zero;
+
+        var filter = new GameObject("Filter");
+        filter.transform.SetParent(contentRt, false);
+        var filterRt = filter.AddComponent<RectTransform>();
+        filterRt.anchorMin = new Vector2(0f, 1f);
+        filterRt.anchorMax = new Vector2(1f, 1f);
+        filterRt.pivot = new Vector2(0.5f, 1f);
+        filterRt.sizeDelta = new Vector2(-16f, FilterHeight);
+        filterRt.anchoredPosition = new Vector2(0f, -6f);
+
+        var filterLayout = filter.AddComponent<HorizontalLayoutGroup>();
+        filterLayout.childControlWidth = true;
+        filterLayout.childForceExpandWidth = true;
+        filterLayout.childControlHeight = true;
+        filterLayout.childForceExpandHeight = true;
+
+        _search = new MapEditorSearchRow(editor, ui, filterRt, ApplyFilter, ClearFilter,
+            "Filter layers...");
+
+        var treeHost = new GameObject("Tree");
+        treeHost.transform.SetParent(contentRt, false);
+        var treeRt = treeHost.AddComponent<RectTransform>();
+        treeRt.anchorMin = Vector2.zero;
+        treeRt.anchorMax = Vector2.one;
+        treeRt.offsetMin = Vector2.zero;
+        treeRt.offsetMax = new Vector2(0f, -(FilterHeight + 12f));
+
+        contentRt = treeRt;
 
         _column = ui.CreateScrollColumn(contentRt, "LayerTree", out var scrollRoot, spacing: RowSpacing);
         _column.gameObject.AddComponent<MapEditorQuietArea>();
@@ -304,17 +306,11 @@ public class MapEditorLayerPanel
         _collapsed = collapsed;
 
         _content.SetActive(!collapsed);
-        if (_collapseLabel != null) _collapseLabel.text = collapsed ? "+" : "-";
 
-        if (!collapsed)
-        {
-            _editor.CollapseShortcuts();
-            Invalidate();
-        }
-        else
-        {
-            _panel.sizeDelta = new Vector2(Width, HeaderHeight);
-        }
+        if (!collapsed) Invalidate();
+
+        // The sidebar header is the visible state; keep it in step whoever asked for the change.
+        _sidebar?.SetLayersOpen(!collapsed);
     }
 
     /// The Level and Dungeon tools take the whole screen, so the tree steps aside for them.
@@ -323,6 +319,37 @@ public class MapEditorLayerPanel
         _hiddenForTool = tool is LevelTool or DungeonBuilderTool;
         _panel.gameObject.SetActive(!_hiddenForTool);
         if (!_hiddenForTool) Invalidate();
+    }
+
+    /// True while a full-screen tool owns the editor and the tree has nothing to say.
+    public bool HiddenForTool => _hiddenForTool;
+
+    /// What the tree would like the sidebar to give it: the filter row plus every row it holds.
+    public float WantedHeight => _collapsed || _column == null
+        ? 0f
+        : _column.rect.height + FilterHeight + 24f;
+
+    /// The count beside the section header. Stale while folded, since nothing is scanned then.
+    public string Summary => _summary;
+
+    private void ApplyFilter(string query)
+    {
+        _filter = query ?? "";
+        RebuildAndShow();
+    }
+
+    private void ClearFilter()
+    {
+        if (_filter.Length == 0) return;
+        _filter = "";
+        RebuildAndShow();
+    }
+
+    private void RebuildAndShow()
+    {
+        RebuildModel();
+        SetContentHeight(_rows.Count);
+        ShowVisibleRows();
     }
 
     public void Tick()
@@ -360,11 +387,6 @@ public class MapEditorLayerPanel
     public void LateUpdate()
     {
         if (_panel == null || !_panel.gameObject.activeSelf || _collapsed) return;
-
-        var canvasHeight = _panel.parent is RectTransform canvas ? canvas.rect.height : 1080f;
-        var max = Mathf.Max(HeaderHeight + 60f, canvasHeight - Top - BottomReserve);
-        var target = Mathf.Min(_column.rect.height + HeaderHeight + 12f, max);
-        if (Mathf.Abs(_panel.sizeDelta.y - target) > 1f) _panel.sizeDelta = new Vector2(Width, target);
 
         if (_scrollToObject != null || _scrollToTrigger != null || _scrollToHeader != null) ScrollToPending();
 
@@ -607,6 +629,17 @@ public class MapEditorLayerPanel
     /// Turns the last scan into the flat list of rows the tree shows, honouring which sections are
     /// folded. No GameObjects are touched here; ShowVisibleRows draws whichever of these are in view.
     /// </summary>
+    private bool Matches(string text) =>
+        _filter.Length == 0 ||
+        (!string.IsNullOrEmpty(text) && text.IndexOf(_filter, StringComparison.OrdinalIgnoreCase) >= 0);
+
+    private List<(GameObject Go, string Label)> Filtered(
+        List<(GameObject Go, string Label)> items, string sectionName)
+    {
+        var all = _filter.Length == 0 || Matches(sectionName);
+        return items.Where(i => i.Go != null && (all || Matches(i.Label))).ToList();
+    }
+
     private void RebuildModel()
     {
         _rows.Clear();
@@ -615,25 +648,61 @@ public class MapEditorLayerPanel
         _indexOfTrigger.Clear();
         _sectionRows.Clear();
 
-        var folders = _lastFolders.Where(f => f.Items.Any(i => i.Go != null)).ToList();
-        var kinds = _lastKinds.Where(k => k.Items.Any(i => i.Go != null)).ToList();
-        var triggers = _lastTriggers.Where(t => t != null).ToList();
+        // A filter narrows the rows rather than the room: sections whose name matches keep all their
+        // items, and a section holding a match is forced open so the match is not hidden in a fold.
+        var filtering = _filter.Length > 0;
+        var shown = 0;
+        var total = 0;
+
+        var folderItems = new Dictionary<string, List<(GameObject Go, string Label)>>();
+        var kindItems = new Dictionary<string, List<(GameObject Go, string Label)>>();
+
+        foreach (var folder in _lastFolders)
+        {
+            total += folder.Items.Count(i => i.Go != null);
+            folderItems[folder.Id] = Filtered(folder.Items, folder.Name);
+        }
+
+        foreach (var kind in _lastKinds)
+        {
+            total += kind.Items.Count(i => i.Go != null);
+            kindItems[kind.Name] = Filtered(kind.Items, kind.Name);
+        }
+
+        var folders = _lastFolders.Where(f => folderItems[f.Id].Count > 0).ToList();
+        var kinds = _lastKinds.Where(k => kindItems[k.Name].Count > 0).ToList();
+
+        total += _lastTriggers.Count(t => t != null);
+        var triggers = _lastTriggers
+            .Where(t => t != null && (!filtering || Matches(t.Id) || Matches(TriggerGroup)))
+            .ToList();
+
+        shown = folders.Sum(f => folderItems[f.Id].Count) + kinds.Sum(k => kindItems[k.Name].Count) +
+                triggers.Count;
+
+        _summary = filtering ? $"{shown} of {total}" : total > 0 ? $"{total} objects" : null;
 
         if (folders.Count == 0 && kinds.Count == 0 && triggers.Count == 0)
-            _rows.Add(new RowModel { Kind = RowKind.Empty, Text = "Nothing placed yet", Idle = new Color(0f, 0f, 0f, 0f) });
+            _rows.Add(new RowModel
+            {
+                Kind = RowKind.Empty,
+                Text = filtering ? "Nothing matches that" : "Nothing placed yet",
+                Idle = new Color(0f, 0f, 0f, 0f)
+            });
 
         if (folders.Count > 0)
         {
-            var sectionOpen = !_closedGroups.Contains(GroupsSection);
+            var sectionOpen = filtering || !_closedGroups.Contains(GroupsSection);
             AddSection(GroupsSection, $"{GroupsSection}  ({folders.Count})", sectionOpen);
 
             if (sectionOpen)
             {
                 foreach (var folder in folders)
                 {
+                    var items = folderItems[folder.Id];
                     var key = "@" + folder.Id;
-                    var open = !_closedGroups.Contains(key);
-                    var members = folder.Items.Where(i => i.Go != null).Select(i => i.Go).ToList();
+                    var open = filtering || !_closedGroups.Contains(key);
+                    var members = items.Select(i => i.Go).ToList();
 
                     _rows.Add(new RowModel
                     {
@@ -647,26 +716,26 @@ public class MapEditorLayerPanel
                     });
                     if (!open) continue;
 
-                    foreach (var (go, label) in folder.Items)
-                        if (go != null) AddItem(go, label, Indent * 2f);
+                    foreach (var (go, label) in items)
+                        AddItem(go, label, Indent * 2f);
                 }
             }
         }
 
         foreach (var kind in kinds)
         {
-            var open = !_closedGroups.Contains(kind.Name);
-            var count = kind.Items.Count(i => i.Go != null);
-            AddSection(kind.Name, $"{kind.Name}  ({count})", open);
+            var items = kindItems[kind.Name];
+            var open = filtering || !_closedGroups.Contains(kind.Name);
+            AddSection(kind.Name, $"{kind.Name}  ({items.Count})", open);
             if (!open) continue;
 
-            foreach (var (go, label) in kind.Items)
-                if (go != null) AddItem(go, label, Indent);
+            foreach (var (go, label) in items)
+                AddItem(go, label, Indent);
         }
 
         if (triggers.Count > 0)
         {
-            var open = !_closedGroups.Contains(TriggerGroup);
+            var open = filtering || !_closedGroups.Contains(TriggerGroup);
             AddSection(TriggerGroup, $"{TriggerGroup}  ({triggers.Count})", open);
             if (open)
             {

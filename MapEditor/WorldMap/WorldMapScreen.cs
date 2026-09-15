@@ -89,7 +89,8 @@ public class WorldMapScreen : MonoBehaviour
 
     internal void StepBack()
     {
-        if (_confirmRoot != null && _confirmRoot.activeSelf) HideConfirm();
+        if (_confirm is { Open: true }) HideConfirm();
+        else if (WorldMapEditor.Instance is { CardOpen: true }) WorldMapEditor.Instance.HideCard();
         else if (EditMode) WorldMapEditor.Instance?.ExitEditMode();
         else RequestClose();
     }
@@ -120,23 +121,36 @@ public class WorldMapScreen : MonoBehaviour
 
     // ---- confirm strip ----------------------------------------------------------------------
 
-    private GameObject _confirmRoot;
-    private TMP_Text _confirmLabel;
-    private Action _confirmAction;
-    private Action _altAction;
-    private GameObject _altButton;
-    private TMP_Text _confirmButtonLabel;
-    private TMP_Text _altButtonLabel;
-    private RectTransform _confirmRect;
-    private RectTransform _cancelRect;
+    private MapEditorConfirm _confirm;
+
+    internal RectTransform ConfirmRect => _confirm?.Root;
 
     private TMP_Text _status;
     private float _statusUntil;
-    private GameObject _playBadge;
 
+    // ---- top bar -----------------------------------------------------------------------------
+
+    private Chrome.EditorTopBar _topBar;
+
+    internal Chrome.EditorTopBar TopBar => _topBar;
+
+    /// What the bar carries when nobody is editing: the map's name and the way out.
+    internal void SetPlayActions()
+    {
+        if (_topBar == null) return;
+
+        _topBar.SetBadge(null);
+        _topBar.SetUnsaved(false);
+        _topBar.RebuildActions(null, [("Esc", "Close", (Action)StepBack)]);
+        UpdatePlayBadge();
+    }
+
+    /// The old floating "play mode" label, now a muted line beside the map name. It only appears once
+    /// the editor has been used, so a player who never opens it never sees a key they do not need.
     private void UpdatePlayBadge()
     {
-        if (_playBadge != null) _playBadge.SetActive(_open && !_editMode && _editorUsed);
+        _topBar?.SetNote(_open && !_editMode && _editorUsed ? "Play view - F6 returns to the editor" : null,
+            new Color(1f, 0.85f, 0.5f));
     }
 
     // ---- unsaved work ------------------------------------------------------------------------
@@ -204,7 +218,7 @@ public class WorldMapScreen : MonoBehaviour
 
         _open = true;
         _editorUsed = false;
-        UpdatePlayBadge();
+        SetPlayActions();
         _canvas.enabled = true;
         CustomMapSkin.Play("event:/dlc/ui/map/ewefall_enter");
 
@@ -269,6 +283,10 @@ public class WorldMapScreen : MonoBehaviour
         }
 
         if (!EditMode) UpdateParallax();
+
+        // The heading font arrives asynchronously and the game's scaler resizes the label after that,
+        // so the title's width is re-read rather than measured once. See EditorTopBar.Tick.
+        _topBar?.Tick();
 
         if (_status != null && _status.gameObject.activeSelf && Time.unscaledTime > _statusUntil)
             _status.gameObject.SetActive(false);
@@ -345,37 +363,18 @@ public class WorldMapScreen : MonoBehaviour
         rect.offsetMax = Vector2.zero;
     }
 
+    /// <summary>
+    /// The map's name and the way out live in the same top bar the editors wear, so the screen looks
+    /// the same whether it is being played or edited - the editor only adds its own two plates below
+    /// and swaps the keys on the right. It is built here rather than by the editor because the screen
+    /// outlives edit mode: closing the editor with F6 leaves the bar standing.
+    /// </summary>
     private void BuildChrome()
     {
-        var title = _ui.CreateLabel(_canvasGO.transform, "", 30);
-        _title = title.GetComponent<TMP_Text>();
+        _topBar = new Chrome.EditorTopBar(_ui, _canvasGO.transform, null);
+        _title = _topBar.TitleText;
         _title.text = Map.ShownName;
-        _title.enableWordWrapping = false;
-        var titleRect = title.GetComponent<RectTransform>();
-        titleRect.anchorMin = titleRect.anchorMax = new Vector2(0f, 1f);
-        titleRect.pivot = new Vector2(0f, 1f);
-        titleRect.sizeDelta = new Vector2(700f, 44f);
-        titleRect.anchoredPosition = new Vector2(24f, -18f);
-
-        var close = _ui.CreateButton(_canvasGO.transform, "X", StepBack, 36f);
-        var closeRect = close.GetComponent<RectTransform>();
-        closeRect.anchorMin = closeRect.anchorMax = new Vector2(1f, 1f);
-        closeRect.pivot = new Vector2(1f, 1f);
-        closeRect.sizeDelta = new Vector2(36f, 36f);
-        closeRect.anchoredPosition = new Vector2(-18f, -18f);
-
-        var badge = _ui.CreateLabel(_canvasGO.transform, "Play mode - F6 to show UI", 18);
-        _playBadge = badge;
-        var badgeText = badge.GetComponent<TMP_Text>();
-        badgeText.color = new Color(1f, 0.85f, 0.5f);
-        badgeText.enableWordWrapping = false;
-        badgeText.raycastTarget = false;
-        var badgeRect = badge.GetComponent<RectTransform>();
-        badgeRect.anchorMin = badgeRect.anchorMax = new Vector2(0f, 0f);
-        badgeRect.pivot = new Vector2(0f, 0f);
-        badgeRect.sizeDelta = new Vector2(600f, 28f);
-        badgeRect.anchoredPosition = new Vector2(24f, 16f);
-        badge.SetActive(false);
+        SetPlayActions();
 
         var status = _ui.CreateLabel(_canvasGO.transform, "", 18);
         _status = status.GetComponent<TMP_Text>();
@@ -388,108 +387,16 @@ public class WorldMapScreen : MonoBehaviour
         statusRect.anchoredPosition = new Vector2(24f, 48f);
         status.SetActive(false);
 
-        BuildConfirmStrip();
+        _confirm = new MapEditorConfirm(_ui, _canvasGO.transform, ConfirmBottom);
     }
 
-    private const float ConfirmBottom = 168f;
-
-    private void BuildConfirmStrip()
-    {
-        _confirmRoot = new GameObject("Confirm");
-        _confirmRoot.transform.SetParent(_canvasGO.transform, false);
-        var rect = _confirmRoot.AddComponent<RectTransform>();
-        rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
-        rect.pivot = new Vector2(0.5f, 0f);
-        rect.sizeDelta = new Vector2(560f, 96f);
-        rect.anchoredPosition = new Vector2(0f, ConfirmBottom);
-
-        var border = _confirmRoot.AddComponent<Image>();
-        border.sprite = MapEditorUI.RoundedPlate;
-        border.type = Image.Type.Sliced;
-        border.pixelsPerUnitMultiplier = 1.6f;
-        border.color = new Color(0f, 0f, 0f, 0.55f);
-
-        var fill = new GameObject("Fill");
-        fill.transform.SetParent(_confirmRoot.transform, false);
-        var fillRect = fill.AddComponent<RectTransform>();
-        Stretch(fillRect);
-        fillRect.offsetMin = new Vector2(3f, 3f);
-        fillRect.offsetMax = new Vector2(-3f, -3f);
-
-        var plate = fill.AddComponent<Image>();
-        plate.sprite = MapEditorUI.RoundedPlate;
-        plate.type = Image.Type.Sliced;
-        plate.pixelsPerUnitMultiplier = 1.6f;
-        plate.color = new Color(0f, 0f, 0f, 0.82f);
-        plate.raycastTarget = false;
-
-        var label = _ui.CreateLabel(_confirmRoot.transform, "", 20, TextAlignmentOptions.Center);
-        _confirmLabel = label.GetComponent<TMP_Text>();
-        var labelRect = label.GetComponent<RectTransform>();
-        labelRect.anchorMin = new Vector2(0f, 0.5f);
-        labelRect.anchorMax = new Vector2(1f, 1f);
-        labelRect.offsetMin = new Vector2(12f, 0f);
-        labelRect.offsetMax = new Vector2(-12f, -6f);
-
-        var confirm = _ui.CreateButton(_confirmRoot.transform, "Enter", () =>
-        {
-            var action = _confirmAction;
-            HideConfirm();
-            action?.Invoke();
-        }, 34f, MapEditorEmphasis.Quiet);
-        _confirmRect = confirm.GetComponent<RectTransform>();
-        _confirmRect.anchorMin = _confirmRect.anchorMax = new Vector2(0.5f, 0f);
-        _confirmRect.pivot = new Vector2(1f, 0f);
-        _confirmRect.sizeDelta = new Vector2(150f, 34f);
-        _confirmButtonLabel = confirm.GetComponentInChildren<TMP_Text>();
-
-        _altButton = _ui.CreateButton(_confirmRoot.transform, "Discard", () =>
-        {
-            var action = _altAction;
-            HideConfirm();
-            action?.Invoke();
-        }, 34f);
-        var altRect = _altButton.GetComponent<RectTransform>();
-        altRect.anchorMin = altRect.anchorMax = new Vector2(0.5f, 0f);
-        altRect.pivot = new Vector2(0.5f, 0f);
-        altRect.sizeDelta = new Vector2(150f, 34f);
-        altRect.anchoredPosition = new Vector2(0f, 10f);
-        _altButtonLabel = _altButton.GetComponentInChildren<TMP_Text>();
-
-        var cancel = _ui.CreateButton(_confirmRoot.transform, "Cancel", HideConfirm, 34f, MapEditorEmphasis.Quiet);
-        _cancelRect = cancel.GetComponent<RectTransform>();
-        _cancelRect.anchorMin = _cancelRect.anchorMax = new Vector2(0.5f, 0f);
-        _cancelRect.pivot = new Vector2(0f, 0f);
-        _cancelRect.sizeDelta = new Vector2(150f, 34f);
-
-        _confirmRoot.SetActive(false);
-    }
+    private const float ConfirmBottom = Chrome.EditorBottomBar.Height + 12f;
 
     private void ShowConfirm(string text, Action onConfirm, string confirmLabel = "Enter",
-        string altLabel = null, Action onAlt = null)
-    {
-        _confirmLabel.text = text;
-        _confirmAction = onConfirm;
-        _altAction = onAlt;
+        string altLabel = null, Action onAlt = null) =>
+        _confirm?.Show(text, onConfirm, confirmLabel, altLabel, onAlt);
 
-        if (_confirmButtonLabel != null) _confirmButtonLabel.text = confirmLabel;
-
-        var threeWay = onAlt != null;
-        if (_altButton != null) _altButton.SetActive(threeWay);
-        if (_altButtonLabel != null && altLabel != null) _altButtonLabel.text = altLabel;
-
-        if (_confirmRect != null) _confirmRect.anchoredPosition = new Vector2(threeWay ? -114f : -8f, 10f);
-        if (_cancelRect != null) _cancelRect.anchoredPosition = new Vector2(threeWay ? 114f : 8f, 10f);
-
-        _confirmRoot.SetActive(true);
-    }
-
-    private void HideConfirm()
-    {
-        _confirmAction = null;
-        _altAction = null;
-        if (_confirmRoot != null) _confirmRoot.SetActive(false);
-    }
+    private void HideConfirm() => _confirm?.Hide();
 
     public void SetStatus(string message)
     {

@@ -15,19 +15,15 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 {
     private Canvas _canvas;
     private GameObject _canvasGO;
-    private RectTransform _toolOptionsPanel;
     private RectTransform _optionsContent;
-    private TMP_Text _optionsTitle;
-    private GameObject _optionsCollapseButton;
-    private bool _optionsCollapsed;
 
     private readonly Dictionary<string, RectTransform> _optionColumns = [];
 
-    private TMP_Text _statusText;
-    private Image _statusPanel;
-    private Image _statusBorder;
+    private Chrome.EditorTopBar _topBar;
+    private Chrome.EditorBottomBar _bottomBar;
+    private Chrome.EditorSidebar _sidebar;
+    private Chrome.ShortcutCard _shortcutCard;
 
-    private RectTransform _shortcutPanel;
     private MapEditorLayerPanel _layers;
 
     private readonly Dictionary<string, Image> _toolRings = [];
@@ -66,6 +62,11 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     /// F6 has hidden the editor's UI and gizmos; overlays that belong to the editor hide with them.
     internal bool ChromeHidden => _chromeHidden;
+
+    /// Screen pixels per canvas unit for the editor's own canvas. Anything outside the editor that
+    /// wants to place itself against the editor's chrome needs this to convert, and reading it from
+    /// the live canvas beats re-deriving it from the scaler's reference size and match value.
+    internal float CanvasScale => _canvas != null && _canvas.scaleFactor > 0f ? _canvas.scaleFactor : 1f;
 
     /// A tool whose shortcut hints depend on its state asks for the panel to be rebuilt.
     internal void RefreshShortcutHints() => RefreshShortcuts();
@@ -126,6 +127,20 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     public void SelectFirstTool() => SelectTool(_tools.FirstOrDefault());
 
+    private IMapEditorTool _toolBeforeScreen;
+
+    /// <summary>
+    /// Puts the mapper back in the tool they were using before a full-screen editor took over. The
+    /// Level and Dungeon screens have no panel of their own to return to, so landing in them after
+    /// closing a level would mean an empty sidebar and a tool nobody chose.
+    /// </summary>
+    public void SelectPreviousTool()
+    {
+        var back = _toolBeforeScreen;
+        _toolBeforeScreen = null;
+        SelectTool(back ?? _tools.FirstOrDefault());
+    }
+
     public static EditorContext Context =>
         ContextOverride ?? (BaseSession.Active ? EditorContext.Base
             : HubSession.Active ? EditorContext.Hub
@@ -143,12 +158,18 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         _ => false
     };
 
+    /// <summary>
+    /// The tools that place something, for this context. The three that take over the whole screen
+    /// the moment they are chosen - Load, Level, Dungeon Builder - are not among them: they sit in
+    /// the top bar instead, which also keeps the wheel from cycling onto a full-screen editor.
+    /// </summary>
     private List<IMapEditorTool> DockTools()
     {
         var context = Context;
-        return context == EditorContext.Dungeon
-            ? _tools
-            : _tools.Where(t => !HiddenIn(context, t)).ToList();
+        return _tools
+            .Where(t => !HiddenIn(context, t) &&
+                        t is not (LoadTool or LevelTool or DungeonBuilderTool or ClearTool))
+            .ToList();
     }
 
     public MapEditorHistory History { get; } = new();
@@ -158,12 +179,20 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
     private int _edits;
     private int _savedEdits;
 
-    public void MarkEdited() => _edits++;
+    public void MarkEdited()
+    {
+        _edits++;
+        _topBar?.SetUnsaved(true);
+    }
 
     /// Bumps on every recorded edit; the layer tree watches it to know when to re-read the room.
     public int EditCount => _edits;
 
-    public void MarkSaved() => _savedEdits = _edits;
+    public void MarkSaved()
+    {
+        _savedEdits = _edits;
+        _topBar?.SetUnsaved(false);
+    }
 
     public bool HasUnsavedEdits => _edits != _savedEdits;
 
@@ -464,6 +493,12 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             return true;
         }
 
+        if (_shortcutCard is { Open: true })
+        {
+            _shortcutCard.Hide();
+            return true;
+        }
+
         if (_activeTool is IMapEditorEscapeHandler handler && handler.HandleEscape()) return true;
 
         ToggleEditor();
@@ -516,15 +551,38 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         _activeTool is IMapEditorScreenTool { OwnsScreen: true } tool ? tool : null;
 
     private readonly List<GameObject> _ownChrome = [];
+    private readonly List<GameObject> _hiddenChrome = [];
     private bool _ownChromeVisible = true;
 
+    /// <summary>
+    /// Puts the editor's own panels away while a full-screen tool owns the screen, and back again
+    /// after. What comes back is only what was on screen before: several pieces of chrome decide
+    /// their own visibility - the confirm strip, the shortcut card, the quick pick bar - and turning
+    /// the whole list back on would raise a dialog nobody asked for.
+    /// </summary>
     public void SetOwnChromeVisible(bool visible)
     {
         if (_ownChromeVisible == visible) return;
         _ownChromeVisible = visible;
 
-        foreach (var go in _ownChrome)
-            if (go != null) go.SetActive(visible);
+        if (!visible)
+        {
+            _hiddenChrome.Clear();
+
+            foreach (var go in _ownChrome)
+                if (go != null && go.activeSelf)
+                {
+                    _hiddenChrome.Add(go);
+                    go.SetActive(false);
+                }
+
+            return;
+        }
+
+        foreach (var go in _hiddenChrome)
+            if (go != null) go.SetActive(true);
+
+        _hiddenChrome.Clear();
     }
 
     public void ToggleChromeHidden()
@@ -596,6 +654,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         EnsureEventSystem();
 
         RefreshDockForContext();
+        RefreshTopBarForContext();
+        UpdateNameLabel();
 
         _editing = true;
         _canvas.enabled = true;
@@ -619,7 +679,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         GetTool<WhiteboardTool>()?.RefreshVisibility();
         Net.EditorNet.LocalEditorChanged(true);
-        if (Net.EditorNet.Enabled) RefreshShortcuts();
+        RefreshCardExtras();
     }
 
     private void ExitEditorMode()
@@ -673,9 +733,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         if (_resetArmed && Time.unscaledTime - _resetArmedAt > ResetArmWindow) DisarmReset();
 
-        // The multiplayer chat box draws where the shortcut hints sit; the hints step aside.
-        if (_shortcutPanel != null && _shortcutPanel.gameObject.activeSelf == Net.EditorNet.ExternalOverlayVisible)
-            _shortcutPanel.gameObject.SetActive(!Net.EditorNet.ExternalOverlayVisible);
+        // The multiplayer chat box draws over the bottom bar; the hint chips step aside for it.
+        _bottomBar?.SetHintsVisible(!Net.EditorNet.ExternalOverlayVisible);
 
         if (_renaming)
         {
@@ -699,6 +758,8 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         }
 
         if (Input.GetKeyDown(KeyCode.Escape) && HandleEscape()) return;
+
+        if (Input.GetKeyDown(KeyCode.F1)) _shortcutCard?.Toggle();
 
         if (CtrlHeld && Input.GetKeyDown(KeyCode.Z)) UndoLast();
 
@@ -801,14 +862,6 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         SelectTool(triggers);
         triggers.SelectTrigger(trigger);
-    }
-
-    /// The layer tree and the shortcut hints share the left edge; opening the tree folds the hints.
-    internal void CollapseShortcuts()
-    {
-        if (_shortcutsCollapsed) return;
-        _shortcutsCollapsed = true;
-        RefreshShortcuts();
     }
 
     private float _nextUpdateErrorAt;
@@ -1085,34 +1138,7 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void ApplyStatus(string message, StatusSeverity severity, bool pulse)
     {
-        if (_statusText == null) return;
-
-        _statusText.text = message;
-        _statusText.color = severity switch
-        {
-            StatusSeverity.Success => new Color(0.55f, 0.9f, 0.55f),
-            StatusSeverity.Warning => new Color(1f, 0.76f, 0.3f),
-            StatusSeverity.Error => new Color(1f, 0.42f, 0.42f),
-            _ => Color.white
-        };
-
-        if (_statusPanel == null) return;
-
-        if (pulse)
-        {
-            var urgent = severity is StatusSeverity.Warning or StatusSeverity.Error;
-            if (_statusBorder != null)
-            {
-                _statusBorder.gameObject.SetActive(urgent);
-                if (urgent)
-                    _statusBorder.color = severity == StatusSeverity.Error
-                        ? MapEditorUI.Accent
-                        : new Color(1f, 0.76f, 0.3f);
-            }
-            _statusPanel.color = VanillaChrome.Ready
-                ? VanillaChrome.Tint
-                : new Color(0f, 0f, 0f, urgent ? 0.78f : 0.62f);
-        }
+        _bottomBar?.SetStatus(message, severity, pulse);
     }
 
     private Coroutine _musicLoopRoutine;
@@ -1169,6 +1195,9 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         ConfirmPrompt();
 
+        if (tool is LevelTool or DungeonBuilderTool && _activeTool is not (LevelTool or DungeonBuilderTool))
+            _toolBeforeScreen = _activeTool;
+
         _activeTool?.OnExit();
         _activeTool = tool;
 
@@ -1180,7 +1209,9 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
         foreach (var pair in _toolRings)
             if (pair.Value != null) pair.Value.gameObject.SetActive(pair.Key == tool.Name);
 
-        if (_optionsTitle != null) _optionsTitle.text = tool.Name;
+        _sidebar?.SetOptionsTitle(tool.Name);
+        _sidebar?.NoteToolChanged();
+        _shortcutCard?.Hide();
 
         RefreshShortcuts();
         _layers?.OnToolChanged(tool);
@@ -1205,18 +1236,32 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
         _ui.Attach(this, _canvasGO.GetComponent<RectTransform>());
 
-        CreateTitle();
-        CreateDock();
-        CreateOptionsPanel();
-        CreateStatusBar();
-        CreateShortcutPanel();
-        QuickPick = new MapEditorQuickPick(this, _ui, _canvas.transform, DockHeight + 76f);
-        _layers = new MapEditorLayerPanel(this, _ui, _canvas.transform);
+        // The hover preview lives in the top-right corner, which is now the top bar and the sidebar.
+        _ui.IconPreviewTopOffset = Chrome.EditorTopBar.Height + 12f;
+        _ui.IconPreviewRightOffset = Chrome.EditorSidebar.Width + 28f;
 
+        _topBar = new Chrome.EditorTopBar(_ui, _canvas.transform, RegisterUiBlocker);
+        _bottomBar = new Chrome.EditorBottomBar(_ui, _canvas.transform, RegisterUiBlocker);
+        _bottomBar.OnHelp = () => _shortcutCard?.Toggle();
+
+        _sidebar = new Chrome.EditorSidebar(_ui, _canvas.transform, RegisterUiBlocker,
+            Chrome.EditorTopBar.Height + 12f, Chrome.EditorBottomBar.Height + 12f);
+        _optionsContent = _sidebar.OptionsContent;
+
+        _shortcutCard = new Chrome.ShortcutCard(_ui, _canvas.transform, RegisterUiBlocker, GlobalShortcuts);
+
+        PopulateDock();
+
+        QuickPick = new MapEditorQuickPick(this, _ui, _canvas.transform, Chrome.EditorBottomBar.Height);
+        _layers = new MapEditorLayerPanel(this, _ui, _sidebar);
+
+        _confirm = new MapEditorConfirm(_ui, _canvas.transform, ConfirmBottom);
+
+        // Captured last: a screen tool hides the editor's chrome by walking these, so anything built
+        // after this line would still be drawn over the screen that replaced it.
         _ownChrome.Clear();
         foreach (Transform child in _canvas.transform) _ownChrome.Add(child.gameObject);
 
-        _confirm = new MapEditorConfirm(_ui, _canvas.transform, ConfirmBottom);
         History.Changed = MarkEdited;
 
         foreach (var tool in _tools)
@@ -1234,182 +1279,193 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private MapEditorConfirm _confirm;
 
-    private const float ConfirmBottom = DockHeight + 20f + 46f + 12f;
+    /// <summary>
+    /// Raises the editor's confirm strip for a tool about to do something it cannot take back. It is
+    /// the same strip that asks about unsaved work on close, on purpose: a question worth asking is
+    /// worth asking in the one place the reader already knows to look for it.
+    /// </summary>
+    public void AskConfirm(string question, string confirmLabel, System.Action onConfirm)
+    {
+        if (_confirm == null)
+        {
+            onConfirm?.Invoke();
+            return;
+        }
 
-    private const float ToolIconSize = 72f;
+        _confirm.Show(question, onConfirm, confirmLabel);
+    }
 
-    private const int DockPadding = 14;
+    private const float ConfirmBottom = Chrome.EditorBottomBar.Height + 12f;
 
-    private const int DockSidePadding = 24;
+    private const float ToolIconSize = 60f;
 
-    private const float DockHeight = ToolIconSize + DockPadding * 2;
-
-    private float _dockWidth = 600f;
-
-    /// The Structure tool's nine-slot recent bar; it sits above the status bar and that tool fills it.
+    /// The Structure tool's nine-slot recent bar; it docks onto the bottom bar and that tool fills it.
     public MapEditorQuickPick QuickPick { get; private set; }
 
-    private RectTransform _dock;
     private EditorContext _dockContext;
+    private bool _dockBuilt;
 
     private void RefreshDockForContext()
     {
-        if (_dock == null || _dockContext == Context) return;
+        if (!_dockBuilt || _dockContext == Context) return;
 
-        var stale = new List<GameObject>();
-        foreach (Transform child in _dock) stale.Add(child.gameObject);
-        foreach (var child in stale)
-        {
-            child.transform.SetParent(null, false);
-            Destroy(child);
-        }
-
+        _bottomBar?.ClearDock();
         _toolRings.Clear();
 
-        PopulateDock(_dock);
-
-        LayoutRebuilder.ForceRebuildLayoutImmediate(_dock);
-        _dockWidth = _dock.rect.width;
-
-        if (_statusPanel != null)
-        {
-            var rect = _statusPanel.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(_dockWidth, rect.sizeDelta.y);
-        }
+        PopulateDock();
+        RefreshTopBarForContext();
     }
 
-    private void CreateDock()
+    /// <summary>
+    /// The dock lists only the tools that place something. Load, Level and Dungeon Builder each take
+    /// the whole screen the moment they are picked, which makes them file and screen actions rather
+    /// than tools; they live in the top bar with Save, and the wheel no longer cycles onto them.
+    /// </summary>
+    private void PopulateDock()
     {
-        var dock = CreatePanel("Dock", new Vector2(0.5f, 0f), new Vector2(0f, DockHeight), new Vector2(0f, 12f));
-        _dock = dock;
+        if (_bottomBar == null) return;
 
-        var layout = dock.gameObject.AddComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(DockSidePadding, DockSidePadding, DockPadding, DockPadding);
-        layout.spacing = 6f;
-        layout.childAlignment = TextAnchor.MiddleLeft;
-        layout.childControlWidth = false;
-        layout.childControlHeight = false;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = false;
-
-        PopulateDock(dock);
-
-        var fitter = dock.gameObject.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        LayoutRebuilder.ForceRebuildLayoutImmediate(dock);
-        _dockWidth = dock.rect.width;
-    }
-
-    private void PopulateDock(RectTransform dock)
-    {
         _dockContext = Context;
+        _dockBuilt = true;
 
         foreach (var tool in DockTools())
         {
             var captured = tool;
-            _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon(tool.Name), tool.Name,
-                () => SelectTool(captured), out var ring, ToolIconSize, hoverText: tool.Name);
+            _bottomBar.AddTool(MapEditorIcons.GetToolIcon(tool.Name), tool.Name,
+                () => SelectTool(captured), out var ring, ToolIconSize, tool.Name);
             _toolRings[tool.Name] = ring;
 
             if (tool is DoorTool || (_dockContext != EditorContext.Dungeon && tool is NpcTool))
-                CreateDockSeparator(dock);
-
-            if (tool is LoadTool)
-                _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
-                    out _, ToolIconSize, hoverText: "Save map");
+                _bottomBar.AddSeparator(ToolIconSize);
         }
 
-        if (_dockContext == EditorContext.Base)
+        _bottomBar.LayoutAfterDock();
+    }
+
+    /// The file actions, and the keys that mean the same thing under every tool.
+    private void RefreshTopBarForContext()
+    {
+        if (_topBar == null) return;
+
+        var context = Context;
+        var actions = new List<Chrome.EditorBarAction>();
+
+        var load = GetTool<LoadTool>();
+        if (load != null && !HiddenIn(context, load))
+            actions.Add(new Chrome.EditorBarAction("Load", MapEditorIcons.GetToolIconOrNull("Load Map"),
+                () => SelectTool(load), "Open a saved map"));
+
+        actions.Add(new Chrome.EditorBarAction("Save", MapEditorIcons.GetToolIconOrNull("Save"),
+            SaveMap, context switch
+            {
+                EditorContext.Base => "Save the base",
+                EditorContext.Hub => "Save the hub",
+                _ => "Save this room"
+            }));
+
+        var clear = GetTool<ClearTool>();
+        if (clear != null && !HiddenIn(context, clear))
         {
-            CreateDockSeparator(dock);
-            _ui.CreateIconButton(dock, MapEditorIcons.GetToolIcon("Save"), "Save", SaveMap,
-                out _, ToolIconSize, hoverText: "Save base");
+            actions.Add(Chrome.EditorBarAction.Divider);
+            actions.Add(new Chrome.EditorBarAction("Clear",
+                MapEditorIcons.GetToolIconOrNull("Clear"),
+                anchor => OpenChooser(anchor, null, clear.ChooserOptions(), clear.ChooseFromMenu),
+                "Remove things from this room"));
         }
+
+        if (context == EditorContext.Dungeon)
+        {
+            actions.Add(Chrome.EditorBarAction.Divider);
+
+            // These two open a screen for one chosen level or dungeon, so the button asks which
+            // straight away rather than opening a panel whose only job is to ask.
+            var level = GetTool<LevelTool>();
+            if (level != null)
+                actions.Add(new Chrome.EditorBarAction("Level",
+                    MapEditorIcons.GetToolIconOrNull("Level"),
+                    anchor => OpenChooser(anchor, level, level.ChooserOptions(), level.ChooseFromMenu),
+                    "Open or make a level"));
+
+            var dungeon = GetTool<DungeonBuilderTool>();
+            if (dungeon != null)
+                actions.Add(new Chrome.EditorBarAction("Dungeon Builder",
+                    MapEditorIcons.GetToolIconOrNull("Dungeon Builder"),
+                    anchor => OpenChooser(anchor, dungeon, dungeon.ChooserOptions(), dungeon.ChooseFromMenu),
+                    "Open or make a dungeon"));
+        }
+
+        // Undo rides with the keys rather than the icons: there is no undo icon to draw, and a key
+        // badge says what it is without one.
+        var keys = new List<(string, string, System.Action)>
+        {
+            ("Ctrl+Z", "Undo", UndoLast),
+            ("F6", "Hide UI", ToggleChromeHidden)
+        };
+
+        if (context != EditorContext.Base) keys.Add(("F5", "Reset", RequestResetRoom));
+        keys.Add(("F4", "Close", ToggleEditor));
+
+        _topBar.RebuildActions(actions, keys);
+        _topBar.SetBadge(context switch
+        {
+            EditorContext.Base => "Base",
+            EditorContext.Hub => "Hub",
+            _ => "Dungeon room"
+        });
     }
 
-    private void CreateDockSeparator(Transform parent)
+    /// <summary>
+    /// Drops a tool's own chooser from the button that asked for it. The tool is only made active
+    /// once something has been chosen: selecting it first would open its panel behind the menu, and
+    /// a cancelled menu would leave the editor sitting in a tool the mapper never asked for.
+    /// </summary>
+    private void OpenChooser(RectTransform anchor, IMapEditorTool tool, List<string> options,
+        System.Action<int> choose)
     {
-        var go = new GameObject("Separator");
-        go.transform.SetParent(parent, false);
-        go.AddComponent<RectTransform>().sizeDelta = new Vector2(2f, ToolIconSize);
+        if (options == null || options.Count == 0)
+        {
+            SetStatus("Nothing to choose from here.");
+            return;
+        }
 
-        var element = go.AddComponent<LayoutElement>();
-        element.preferredWidth = 2f;
-        element.preferredHeight = ToolIconSize;
-        element.minWidth = 2f;
-
-        go.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.18f);
+        _ui.ShowMenu(anchor, options, (index, _) =>
+        {
+            // Clearing is an action rather than a mode, so it passes no tool and the editor stays in
+            // whatever the mapper had in hand.
+            if (tool != null) SelectTool(tool);
+            choose(index);
+        });
     }
 
-    private const float OptionsWidth = 420f;
-    private const float OptionsHeaderHeight = 34f;
-    private const float OptionsMaxHeight = 940f;
-
-    private void CreateOptionsPanel()
-    {
-        _toolOptionsPanel = CreatePanel("ToolOptions", new Vector2(1f, 1f),
-            new Vector2(OptionsWidth, 400f), new Vector2(-12f, -12f));
-
-        var header = new GameObject("Header");
-        header.transform.SetParent(_toolOptionsPanel, false);
-        var headerRt = header.AddComponent<RectTransform>();
-        headerRt.anchorMin = new Vector2(0f, 1f);
-        headerRt.anchorMax = new Vector2(1f, 1f);
-        headerRt.pivot = new Vector2(0.5f, 1f);
-        headerRt.sizeDelta = new Vector2(0f, OptionsHeaderHeight);
-        headerRt.anchoredPosition = Vector2.zero;
-        header.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
-
-        var title = _ui.CreateLabel(header.transform, "", 21, TextAlignmentOptions.Left);
-        var titleRt = title.GetComponent<RectTransform>();
-        titleRt.anchorMin = Vector2.zero;
-        titleRt.anchorMax = Vector2.one;
-        titleRt.offsetMin = new Vector2(12f, 0f);
-        titleRt.offsetMax = new Vector2(-36f, 0f);
-        _optionsTitle = title.GetComponent<TMP_Text>();
-        _optionsTitle.enableWordWrapping = false;
-
-        _optionsCollapseButton = _ui.CreateButton(header.transform, "–", ToggleOptionsCollapsed, 26f);
-        var collapseRt = _optionsCollapseButton.GetComponent<RectTransform>();
-        collapseRt.anchorMin = new Vector2(1f, 0.5f);
-        collapseRt.anchorMax = new Vector2(1f, 0.5f);
-        collapseRt.pivot = new Vector2(1f, 0.5f);
-        collapseRt.sizeDelta = new Vector2(26f, 26f);
-        collapseRt.anchoredPosition = new Vector2(-4f, 0f);
-
-        var content = new GameObject("Content");
-        content.transform.SetParent(_toolOptionsPanel, false);
-        _optionsContent = content.AddComponent<RectTransform>();
-        _optionsContent.anchorMin = Vector2.zero;
-        _optionsContent.anchorMax = Vector2.one;
-        _optionsContent.offsetMin = Vector2.zero;
-        _optionsContent.offsetMax = new Vector2(0f, -OptionsHeaderHeight);
-    }
-
-    private void ToggleOptionsCollapsed()
-    {
-        _optionsCollapsed = !_optionsCollapsed;
-        if (_optionsContent != null) _optionsContent.gameObject.SetActive(!_optionsCollapsed);
-
-        var label = _optionsCollapseButton != null
-            ? _optionsCollapseButton.GetComponentInChildren<TMP_Text>() : null;
-        if (label != null) label.text = _optionsCollapsed ? "+" : "–";
-    }
+    /// Everything the shortcut card lists under "Editor": true under every tool, so no tool repeats it.
+    private static readonly (string Key, string Action)[] GlobalShortcuts =
+    [
+        ("WASD", "Pan camera"),
+        ("Z / X", "Zoom in / out"),
+        ("Wheel", "Switch tool"),
+        ("Ctrl+Z", "Undo last change"),
+        ("Ctrl+S", "Quicksave under this name"),
+        ("F1", "This list"),
+        ("F6", "Hide UI (stays paused)"),
+        ("F5", "Reset room"),
+        ("F4", "Close editor")
+    ];
 
     private int _optionsRebuildFrames;
 
     public void RequestOptionsResize() => _optionsRebuildFrames = 3;
 
+    /// <summary>
+    /// Shares the sidebar between the tool panel and the layer tree, then lets the tree lay its rows
+    /// out. The order matters: the tree only draws the rows its viewport can show, so it has to be
+    /// told how tall it is before it decides.
+    /// </summary>
     private void LateUpdate()
     {
-        if (!_editing || _toolOptionsPanel == null) return;
-
-        _layers?.LateUpdate();
+        if (!_editing || _sidebar == null) return;
 
         RectTransform column = null;
-        if (!_optionsCollapsed && _activeTool != null)
-            _optionColumns.TryGetValue(_activeTool.Name, out column);
+        if (_activeTool != null) _optionColumns.TryGetValue(_activeTool.Name, out column);
 
         if (_optionsRebuildFrames > 0)
         {
@@ -1417,155 +1473,71 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
             if (column != null) LayoutRebuilder.ForceRebuildLayoutImmediate(column);
         }
 
-        var target = OptionsHeaderHeight + 10f;
-        if (column != null)
-            target = Mathf.Min(column.rect.height + OptionsHeaderHeight + 12f, OptionsMaxHeight);
+        var wantedOptions = column != null ? column.rect.height + 12f : 0f;
+        var wantedLayers = _layers?.WantedHeight ?? 0f;
 
-        var size = _toolOptionsPanel.sizeDelta;
-        if (Mathf.Abs(size.y - target) > 1f)
-            _toolOptionsPanel.sizeDelta = new Vector2(size.x, target);
+        _sidebar.Layout(wantedOptions, wantedLayers, _layers?.HiddenForTool ?? false);
+        _sidebar.SetLayersSummary(_layers?.Summary);
+
+        _layers?.LateUpdate();
+        _bottomBar?.Tick();
+        _topBar?.Tick();
     }
 
-    private void CreateStatusBar()
+    private string TitleText
     {
-        var bar = CreatePanel("StatusBar", new Vector2(0.5f, 0f), new Vector2(_dockWidth, 46f),
-            new Vector2(0f, DockHeight + 20f));
-        _statusPanel = bar.GetComponent<Image>();
-
-        _statusBorder = MapEditorUI.AddOutline(bar, MapEditorUI.Accent, inset: 3f);
-        _statusBorder.gameObject.SetActive(false);
-
-        var label = _ui.CreateLabel(bar, "", 22, TextAlignmentOptions.Center);
-        var rt = label.GetComponent<RectTransform>();
-        rt.anchorMin = Vector2.zero;
-        rt.anchorMax = Vector2.one;
-        rt.offsetMin = Vector2.zero;
-        rt.offsetMax = Vector2.zero;
-        _statusText = label.GetComponent<TMP_Text>();
+        get
+        {
+            var name = string.IsNullOrWhiteSpace(Map.MapName) ? "Untitled" : Map.MapName;
+            return Context switch
+            {
+                EditorContext.Base => "Base Editor  ·  " + name,
+                EditorContext.Hub => "Hub Editor  ·  " + name,
+                _ => "Map Editor  ·  " + name
+            };
+        }
     }
 
-    private void CreateTitle()
-    {
-        var go = new GameObject("Title");
-        go.transform.SetParent(_canvas.transform, false);
-
-        var rt = go.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0f, 1f);
-        rt.anchorMax = new Vector2(0f, 1f);
-        rt.pivot = new Vector2(0f, 1f);
-        rt.sizeDelta = new Vector2(620f, 52f);
-        rt.anchoredPosition = new Vector2(16f, -16f);
-
-        var label = _ui.CreateHeadingLabel(go.transform, TitleText, 34);
-        var labelRt = label.GetComponent<RectTransform>();
-        labelRt.anchorMin = Vector2.zero;
-        labelRt.anchorMax = Vector2.one;
-        labelRt.offsetMin = Vector2.zero;
-        labelRt.offsetMax = Vector2.zero;
-
-        _titleText = label.GetComponent<TMP_Text>();
-        _titleText.alignment = TextAlignmentOptions.Left;
-        _titleText.enableWordWrapping = false;
-        _titleText.raycastTarget = false;
-    }
-
-    private TMP_Text _titleText;
-
-    private string TitleText =>
-        $"CultTweaker Map Editor  -  {(string.IsNullOrWhiteSpace(Map.MapName) ? "Untitled" : Map.MapName)}";
-
-    private void CreateShortcutPanel()
-    {
-        var go = new GameObject("Shortcuts");
-        go.transform.SetParent(_canvas.transform, false);
-
-        _shortcutPanel = go.AddComponent<RectTransform>();
-        _shortcutPanel.anchorMin = Vector2.zero;
-        _shortcutPanel.anchorMax = Vector2.zero;
-        _shortcutPanel.pivot = Vector2.zero;
-        _shortcutPanel.sizeDelta = new Vector2(252f, 0f);
-        _shortcutPanel.anchoredPosition = new Vector2(16f, 16f);
-
-        var layout = go.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 4f;
-        layout.childControlWidth = true;
-        layout.childForceExpandWidth = true;
-        layout.childControlHeight = false;
-        layout.childForceExpandHeight = false;
-
-        var fitter = go.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        RegisterUiBlocker(_shortcutPanel);
-    }
-
-    private bool _shortcutsCollapsed;
-
-    private void ToggleShortcutsCollapsed()
-    {
-        _shortcutsCollapsed = !_shortcutsCollapsed;
-        if (!_shortcutsCollapsed) _layers?.SetCollapsed(true);
-        RefreshShortcuts();
-    }
-
+    /// The active tool's own keys go to the bottom bar; the card gets them too, under the globals.
     private void RefreshShortcuts()
     {
-        if (_shortcutPanel == null) return;
+        var hints = _activeTool is IMapEditorShortcuts source
+            ? new List<(string Key, string Action)>(source.Shortcuts)
+            : [];
 
-        foreach (Transform child in _shortcutPanel)
-            Destroy(child.gameObject);
+        _bottomBar?.SetHints(hints);
+        _shortcutCard?.SetTool(_activeTool?.Name, hints, ToolNote());
 
-        if (!_shortcutsCollapsed)
-        {
-            if (_activeTool is IMapEditorShortcuts source)
-            {
-                foreach (var (key, action) in source.Shortcuts)
-                    _ui.CreateKeyHint(_shortcutPanel, key, action);
-            }
+        RefreshCardExtras();
+    }
 
-            _ui.CreateKeyHint(_shortcutPanel, "WASD", "Pan camera");
-            _ui.CreateKeyHint(_shortcutPanel, "Z / X", "Zoom in / out");
-            _ui.CreateKeyHint(_shortcutPanel, "Wheel", "Switch tool");
-            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last placement");
-            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+S", "Quicksave under this name");
-            _ui.CreateKeyHint(_shortcutPanel, "F6", "Hide UI (stays paused)");
-            _ui.CreateKeyHint(_shortcutPanel, "F5", "Reset room");
-            _ui.CreateKeyHint(_shortcutPanel, "F4", "Close editor");
-        }
+    /// Prose for what a key badge cannot carry: the Select tool's handles are told apart by colour.
+    private string ToolNote() =>
+        _activeTool is SelectTool
+            ? "Handles: yellow moves, blue resizes, purple changes depth."
+            : null;
+
+    private void RefreshCardExtras()
+    {
+        if (_shortcutCard == null) return;
+
+        var extras = new List<(string Label, System.Action Do)>();
 
         if (Net.EditorNet.Enabled)
-            _ui.CreateButton(_shortcutPanel, $"Resync with {Net.EditorNet.PeerName}", () =>
+            extras.Add(($"Resync with {Net.EditorNet.PeerName}", () =>
             {
                 Net.EditorSnapshot.RequestResync();
                 SetStatus(Net.EditorNet.IsHost
                     ? $"Sent the room to {Net.EditorNet.PeerName} again."
                     : $"Asked {Net.EditorNet.PeerName} for the room again.");
-            }, 30f);
+                _shortcutCard.Hide();
+            }));
 
         // Debug: with NetVerbose on, the room can be run through the peer-snapshot path on one machine.
         if (Plugin.EditorNetVerbose.Value)
-            _ui.CreateButton(_shortcutPanel, "Sync self-test", () => Net.EditorApply.SelfTest(this), 30f);
+            extras.Add(("Sync self-test", () => Net.EditorApply.SelfTest(this)));
 
-        _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   -",
-            ToggleShortcutsCollapsed, 30f);
-    }
-
-    private RectTransform CreatePanel(string name, Vector2 anchor, Vector2 size, Vector2 offset)
-    {
-        var go = new GameObject(name);
-        go.transform.SetParent(_canvas.transform, false);
-
-        var rt = go.AddComponent<RectTransform>();
-        rt.anchorMin = anchor;
-        rt.anchorMax = anchor;
-        rt.pivot = anchor;
-        rt.sizeDelta = size;
-        rt.anchoredPosition = offset;
-
-        VanillaChrome.Dress(go.AddComponent<Image>());
-
-        RegisterUiBlocker(rt);
-        return rt;
+        _shortcutCard.SetExtras(extras);
     }
 
     private static void ClearUiSelection()
@@ -1697,10 +1669,13 @@ public class RuntimeMapEditor : MonoBehaviour, IMapEditorHost
 
     private void UpdateNameLabel()
     {
-        if (_titleText == null) return;
-        _titleText.text = _renaming && _promptInTitle
+        if (_topBar == null) return;
+
+        _topBar.SetTitle(_renaming && _promptInTitle
             ? _promptLabel + ": " + _nameBuffer + "_"
-            : TitleText;
+            : TitleText);
+
+        _topBar.SetUnsaved(HasUnsavedEdits);
     }
 
     private bool _quickSaveArmed;

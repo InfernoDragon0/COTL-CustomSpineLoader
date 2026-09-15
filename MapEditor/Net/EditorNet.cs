@@ -36,7 +36,9 @@ public interface IEditorNetLink
 public static class EditorNet
 {
     /// 1: the link, receive, pause and gate members. 2: adds ObjectId.
-    public const int ContractVersion = 2;
+    /// 3 adds ChromeInsetBottom, which the link reads to keep its own overlays off the editor's bar;
+    /// 4 adds ChromeInsetBottomPixels, so a link drawing in raw pixels need not copy our scaler maths.
+    public const int ContractVersion = 4;
 
     public static IEditorNetLink Link;
 
@@ -61,8 +63,39 @@ public static class EditorNet
     /// The peer's chat box has the keyboard; editor hotkeys and camera keys stand down.
     public static bool ExternalTyping;
 
-    /// Something is drawn over the bottom-left corner; the shortcut panel hides while it is.
+    /// Something is drawn over the bottom-left corner; the editor's hint chips hide while it is.
     public static bool ExternalOverlayVisible;
+
+    /// <summary>
+    /// How many canvas units at the bottom of the screen the editor's own chrome is using, or 0 when
+    /// nothing of it is drawn there. The editor's tool bar spans the full width, so an overlay that
+    /// draws in the bottom-left corner - the link's chat box - can read this each frame and sit above
+    /// the bar instead of under it, rather than carrying a copy of the editor's measurements.
+    ///
+    /// Canvas units against a 1920x1080 reference matched half on width and half on height, which is
+    /// what the editor's own canvas scaler uses. It answers 0 while the editor is closed and while F6
+    /// has the chrome hidden, so an overlay that follows it gets the whole corner back both times.
+    /// </summary>
+    public static float ChromeInsetBottom =>
+        RuntimeMapEditor.Active != null && RuntimeMapEditor.Active.IsEditing &&
+        !RuntimeMapEditor.Active.ChromeHidden
+            ? Chrome.EditorBottomBar.Height + 16f
+            : 0f;
+
+    /// <summary>
+    /// The same inset in screen pixels, for an overlay that draws outside a scaled canvas - the
+    /// link's chat box is IMGUI and works in raw pixels. It is converted from the editor canvas's
+    /// own scale factor rather than from the scaler's reference size and match value, so a caller
+    /// never has to keep a copy of numbers that live here.
+    /// </summary>
+    public static float ChromeInsetBottomPixels
+    {
+        get
+        {
+            var inset = ChromeInsetBottom;
+            return inset <= 0f ? 0f : inset * RuntimeMapEditor.Active.CanvasScale;
+        }
+    }
 
     /// A reason the local player may not change scene or room right now, or null. The link sets it.
     public static Func<string> WhyNotChangeWorld;

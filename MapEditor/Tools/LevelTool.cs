@@ -11,9 +11,7 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
     public string Name => "Level";
 
     private readonly RuntimeMapEditor _editor;
-    private readonly List<GameObject> _dynamic = [];
 
-    private RectTransform _panel;
     private MapEditorUI _ui;
 
     private CTLevelBlueprint _level;
@@ -26,19 +24,22 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         _editor = editor;
     }
 
-    public void BuildPanel(RectTransform panel, MapEditorUI ui)
+    /// No panel of its own: the chooser this tool used to draw is the menu the Level button drops,
+    /// and once a level is open its canvas owns the screen. Only the widget kit is kept.
+    public void BuildPanel(RectTransform panel, MapEditorUI ui) => _ui = ui;
+
+    public void OnEnter() { }
+
+    public void OnExit()
     {
-        _panel = panel;
-        _ui = ui;
+        _switchingAway = true;
+        CloseOverlay();
+        _switchingAway = false;
     }
 
-    public void OnEnter()
-    {
-        Rebuild();
-        _editor.SetStatus("Level: create a new blueprint or open an existing one.");
-    }
-
-    public void OnExit() => CloseOverlay();
+    /// True while the editor is moving to another tool, which calls OnExit and so closes the canvas
+    /// itself; the tool must not then try to choose a tool of its own.
+    private bool _switchingAway;
 
     // ---- screen tool -----------------------------------------------------------------------------
 
@@ -59,51 +60,53 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Select room / drag"),
-        ("Ctrl+LMB", "Add a room here"),
-        ("RMB", "Toggle node doors"),
-        ("Del", "Delete selected room")
+        ("LMB", "Select / drag"),
+        ("Ctrl+LMB", "Add room"),
+        ("RMB", "Toggle doors"),
+        ("Del", "Delete room")
     ];
 
     public bool HandleEscape() => false;
 
-    // ---- dock panel: the list of levels ------------------------------------------------------------
+    // ---- the chooser as a menu ---------------------------------------------------------------------
 
-    private void Rebuild()
+    private List<CTLevelBlueprint> _menuLevels;
+
+    /// <summary>
+    /// The same choice the panel offers, flattened into one list a bar button can drop. Making a new
+    /// blueprint is the first entry rather than a separate button: "new" and "open" are one decision,
+    /// and putting them in one list means the button answers a click with the answer instead of with
+    /// another panel to read.
+    /// </summary>
+    public List<string> ChooserOptions()
     {
-        foreach (var go in _dynamic)
-            if (go != null) UnityEngine.Object.Destroy(go);
-        _dynamic.Clear();
+        _menuLevels = CTLevelSerialization.LoadAll();
+        _menuLevels.RemoveAll(level => level is { IsHub: true });
 
-        if (_panel == null || _ui == null) return;
+        var options = new List<string> { "New level blueprint" };
 
-        _dynamic.Add(_ui.CreateButton(_panel, "New Level Blueprint", CreateNew));
-
-        var levels = CTLevelSerialization.LoadAll();
-        levels.RemoveAll(level => level is { IsHub: true });
-
-        if (levels.Count == 0)
-        {
-            _dynamic.Add(_ui.CreateLabel(_panel, "No level blueprints yet.", 14,
-                TextAlignmentOptions.Center));
-            return;
-        }
-
-        var labels = new List<string>(levels.Count);
-        foreach (var level in levels)
-            labels.Add(level.AuthoredLayout
+        foreach (var level in _menuLevels)
+            options.Add(level.AuthoredLayout
                 ? $"{level.LevelName} ({level.Rooms.Count} rooms, custom walk)"
                 : $"{level.LevelName} ({level.Rooms.Count} rooms, random walk)");
 
-        var dropdown = _ui.CreateDropdown(_panel, "Open Existing Level", labels, (index, _) =>
-        {
-            if (index < 0 || index >= levels.Count) return;
+        return options;
+    }
 
-            _level = levels[index];
-            _selected = null;
-            OpenOverlay();
-        });
-        _dynamic.Add(dropdown.Root);
+    public void ChooseFromMenu(int index)
+    {
+        if (index <= 0)
+        {
+            CreateNew();
+            return;
+        }
+
+        var pick = index - 1;
+        if (_menuLevels == null || pick >= _menuLevels.Count) return;
+
+        _level = _menuLevels[pick];
+        _selected = null;
+        OpenOverlay();
     }
 
     private void CreateNew()
@@ -165,9 +168,9 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         _canvas = new LevelLayoutCanvas(_editor, _ui) { CloseRequested = () => RequestClose() };
         _canvas.Open(_level,
         [
-            new LevelLayoutCanvas.DockItem("Save", "Save", "Save - write this level's blueprint",
-                SaveFromScreen),
-            new LevelLayoutCanvas.DockItem("Play", "Play Level",
+            new Chrome.EditorDockItem("Save", MapEditorIcons.GetToolIconOrNull("Save"),
+                "Save - write this level's blueprint", SaveFromScreen),
+            new Chrome.EditorDockItem("Play", MapEditorIcons.GetToolIconOrNull("Play Level"),
                 "Play - enter the level from its way in", PlayLevel)
         ], Shortcuts);
 
@@ -232,7 +235,6 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
         _level = null;
         _selected = null;
         _savedJson = null;
-        Rebuild();
 
         if (open == null || !wasOpen) return;
 
@@ -240,6 +242,9 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
                 ? $"Closed '{open.LevelName}' with changes that were never saved."
                 : $"Closed '{open.LevelName}'.",
             unsaved ? StatusSeverity.Warning : StatusSeverity.Info);
+
+        // Back to whatever was in hand before the level screen, rather than an empty panel.
+        if (!_switchingAway) _editor.SelectPreviousTool();
     }
 
     private void SaveFromScreen()
@@ -974,6 +979,10 @@ public class LevelTool : IMapEditorTool, IMapEditorShortcuts, IMapEditorScreenTo
     public void OnUpdate()
     {
         if (_canvas == null || !_canvas.IsOpen || !_canvas.Visible || _level == null) return;
+
+        // The bars re-fit their chips and the sidebar shares its height from here; the editor's own
+        // LateUpdate only drives the room editor's chrome, which is hidden behind this screen.
+        _canvas.LateUpdate();
 
         if (_dragging && !Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0)) DropDrag();
 

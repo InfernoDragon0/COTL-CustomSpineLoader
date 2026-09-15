@@ -19,7 +19,7 @@ public class QuickPickEntry
     public string Path = "";
 }
 
-/// A nine-slot bar above the status bar holding the last things placed this session.
+/// A nine-slot bar docked onto the bottom bar, holding the last things placed this session.
 public class MapEditorQuickPick
 {
     public const int Slots = 9;
@@ -74,10 +74,12 @@ public class MapEditorQuickPick
         // what the tool's toggle shows and hides. One object could not answer to both.
         _chrome = new GameObject("QuickPick");
         _chrome.transform.SetParent(canvas, false);
+        // Flush with the bottom bar's left edge and sitting straight on it, so the two plates read as
+        // one control rather than a strip floating over the room.
         var chromeRt = _chrome.AddComponent<RectTransform>();
-        chromeRt.anchorMin = chromeRt.anchorMax = chromeRt.pivot = new Vector2(0.5f, 0f);
+        chromeRt.anchorMin = chromeRt.anchorMax = chromeRt.pivot = new Vector2(0f, 0f);
         chromeRt.sizeDelta = new Vector2(Width, Height);
-        chromeRt.anchoredPosition = new Vector2(0f, bottom);
+        chromeRt.anchoredPosition = new Vector2(16f, bottom);
 
         var bar = new GameObject("Bar");
         bar.transform.SetParent(_chrome.transform, false);
@@ -154,7 +156,7 @@ public class MapEditorQuickPick
 
         // The label a slot falls back to when its icon has not loaded or the thing has none, the way
         // a browser cell does. Under the icon in the hierarchy so an icon that arrives covers it.
-        var name = _ui.CreateLabel(go.transform, "", 11, TextAlignmentOptions.Center);
+        var name = _ui.CreateLabel(go.transform, "", 20, TextAlignmentOptions.Center);
         var nameRt = name.GetComponent<RectTransform>();
         nameRt.anchorMin = Vector2.zero;
         nameRt.anchorMax = Vector2.one;
@@ -163,8 +165,8 @@ public class MapEditorQuickPick
 
         var nameText = name.GetComponent<TMP_Text>();
         nameText.raycastTarget = false;
-        nameText.enableWordWrapping = true;
-        nameText.overflowMode = TextOverflowModes.Ellipsis;
+        nameText.enableWordWrapping = false;
+        nameText.overflowMode = TextOverflowModes.Overflow;
         nameText.color = new Color(1f, 0.95f, 0.85f, 0.9f);
         name.SetActive(false);
 
@@ -343,8 +345,12 @@ public class MapEditorQuickPick
             view.Icon.sprite = sprite;
             view.Icon.enabled = sprite != null;
 
+            // Two letters, not the name: a 56px slot cannot hold "DECORATION_2" and the browser cell
+            // it was picked from answers the same way while its icon is still loading.
             var named = entry != null && sprite == null;
-            if (named) view.Name.text = string.IsNullOrEmpty(entry.Label) ? entry.Key : entry.Label;
+            if (named)
+                view.Name.text = MapEditorUI.Initials(
+                    string.IsNullOrEmpty(entry.Label) ? entry.Key : entry.Label);
             if (view.Name.gameObject.activeSelf != named) view.Name.gameObject.SetActive(named);
 
             var armed = entry != null && IsArmed != null && IsArmed(entry);

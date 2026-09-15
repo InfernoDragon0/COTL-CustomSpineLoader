@@ -20,6 +20,9 @@ public class MapEditorConfirm
 
     public bool Open => _root != null && _root.activeSelf;
 
+    /// So a host that keeps its own list of pointer blockers can register the strip.
+    public RectTransform Root => _root != null ? (RectTransform)_root.transform : null;
+
     public MapEditorConfirm(MapEditorUI ui, Transform parent, float bottom)
     {
         _root = new GameObject("Confirm");

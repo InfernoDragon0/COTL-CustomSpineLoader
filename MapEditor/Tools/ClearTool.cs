@@ -15,81 +15,95 @@ public class ClearTool : IMapEditorTool
         _editor = editor;
     }
 
-    public void BuildPanel(RectTransform panel, MapEditorUI ui)
+    /// No panel of its own: clearing is a handful of one-off actions, not a mode to be in, so the
+    /// Clear button in the top bar drops them as a menu and each one asks the editor to confirm.
+    public void BuildPanel(RectTransform panel, MapEditorUI ui) { }
+
+    public void OnEnter() { }
+
+    public void OnExit() { }
+
+    public void OnUpdate() { }
+
+    // ---- the menu -------------------------------------------------------------------------------
+
+    private readonly List<ClearAction> _actions = [];
+
+    private sealed class ClearAction
     {
-        Arm(ui, panel, "Clear Scenery", ClearScenery);
-        Arm(ui, panel, "Clear Terrain", ClearTerrain);
-        Arm(ui, panel, "Clear Placed Objects", () => ClearPlaced());
-
-        Arm(ui, panel, "Clear All Triggers", ClearTriggers, CountTriggers);
-    }
-
-    public void OnEnter() => _editor.SetStatus("Scenery removes props; terrain also removes shapes.");
-
-    // ---- arming ---------------------------------------------------------------------------------
-
-    private const float ArmWindow = 4f;
-
-    private class ArmedButton
-    {
-        public TMPro.TMP_Text Label;
-        public string Text;
+        public string Label;
+        public string Question;
+        public string Confirm;
         public System.Action Run;
 
+        /// How many things this would remove, or -1 when the tool cannot know before it runs.
         public System.Func<int> Count;
-
-        public float ArmedUntil;
     }
 
-    private readonly List<ArmedButton> _armed = [];
-
-    private void Arm(MapEditorUI ui, RectTransform panel, string text, System.Action run,
-        System.Func<int> count = null)
+    /// <summary>
+    /// The four clears as one list a bar button can drop. Each carries the question the confirm
+    /// strip will ask, because the strip is the safeguard now: the buttons used to arm themselves on
+    /// a first click and run on a second within four seconds, which asked the reader to notice that a
+    /// label had changed and to hurry. The strip asks in words and waits.
+    /// </summary>
+    public List<string> ChooserOptions()
     {
-        var entry = new ArmedButton { Text = text, Run = run, Count = count };
+        _actions.Clear();
 
-        var button = ui.CreateButton(panel, text, () => Pressed(entry));
-        entry.Label = button != null ? button.GetComponentInChildren<TMPro.TMP_Text>() : null;
-
-        _armed.Add(entry);
-    }
-
-    private void Pressed(ArmedButton entry)
-    {
-        var live = entry.Count != null ? entry.Count() : -1;
-        if (live == 0)
+        _actions.Add(new ClearAction
         {
-            DisarmAll();
+            Label = "Clear scenery",
+            Question = "Remove every prop and scenery piece in this room?",
+            Confirm = "Clear scenery",
+            Run = ClearScenery
+        });
+
+        _actions.Add(new ClearAction
+        {
+            Label = "Clear terrain",
+            Question = "Remove the terrain and the scenery on it? Doors are kept.",
+            Confirm = "Clear terrain",
+            Run = ClearTerrain
+        });
+
+        _actions.Add(new ClearAction
+        {
+            Label = "Clear placed objects",
+            Question = "Remove everything placed in this room, and empty the undo history?",
+            Confirm = "Clear placed",
+            Run = () => ClearPlaced()
+        });
+
+        var triggers = CountTriggers();
+        _actions.Add(new ClearAction
+        {
+            Label = triggers > 0 ? $"Clear all triggers ({triggers})" : "Clear all triggers",
+            Question = triggers > 0
+                ? $"Remove all {triggers} trigger(s) in this room?"
+                : "Remove all triggers in this room?",
+            Confirm = "Clear triggers",
+            Run = ClearTriggers,
+            Count = CountTriggers
+        });
+
+        var options = new List<string>(_actions.Count);
+        foreach (var action in _actions) options.Add(action.Label);
+        return options;
+    }
+
+    public void ChooseFromMenu(int index)
+    {
+        if (index < 0 || index >= _actions.Count) return;
+
+        var action = _actions[index];
+
+        if (action.Count != null && action.Count() == 0)
+        {
             _editor.SetStatus("Nothing to remove.");
             return;
         }
 
-        if (entry.ArmedUntil > 0f && Time.unscaledTime <= entry.ArmedUntil)
-        {
-            Disarm(entry);
-            entry.Run();
-            return;
-        }
-
-        DisarmAll();
-        entry.ArmedUntil = Time.unscaledTime + ArmWindow;
-
-        if (entry.Label != null)
-            entry.Label.text = live > 0 ? $"Remove {live}? Click again" : "Sure? Click again";
-
-        _editor.SetStatus($"Click again within {ArmWindow:0}s - this cannot be undone.",
-            StatusSeverity.Warning);
-    }
-
-    private void Disarm(ArmedButton entry)
-    {
-        entry.ArmedUntil = 0f;
-        if (entry.Label != null) entry.Label.text = entry.Text;
-    }
-
-    private void DisarmAll()
-    {
-        foreach (var entry in _armed) Disarm(entry);
+        _editor.AskConfirm(action.Question + " This cannot be undone.", action.Confirm, action.Run);
     }
 
     private int CountTriggers() => _editor.GetTool<TriggerTool>()?.LiveCount() ?? 0;
@@ -119,19 +133,6 @@ public class ClearTool : IMapEditorTool
         _editor.SetStatus($"Removed {removed} placed object(s).");
         return removed;
     }
-    public void OnExit() => DisarmAll();
-
-    public void OnUpdate()
-    {
-        foreach (var entry in _armed)
-        {
-            if (entry.ArmedUntil <= 0f || Time.unscaledTime <= entry.ArmedUntil) continue;
-
-            Disarm(entry);
-            _editor.SetStatus($"{entry.Text} cancelled.");
-        }
-    }
-
     public void ClearScenery()
     {
         var room = SceneRefs.Room;

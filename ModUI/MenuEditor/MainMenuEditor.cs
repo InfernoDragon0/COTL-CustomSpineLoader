@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using CustomSpineLoader.MapEditor;
 using src.UINavigator;
+using Chrome = CustomSpineLoader.MapEditor.Chrome;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -29,17 +30,11 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
     private IMapEditorTool _activeTool;
 
     private GameObject _canvasGO;
-    private GameObject _dockGO;
-    private GameObject _optionsGO;
-    private GameObject _statusGO;
-    private RectTransform _optionsRect;
-    private RectTransform _optionsContent;
-    private RectTransform _shortcutPanel;
-    private TMP_Text _optionsTitle;
-    private TMP_Text _statusText;
-    private GameObject _optionsCollapseButton;
-    private bool _optionsCollapsed;
-    private bool _shortcutsCollapsed;
+
+    private Chrome.EditorTopBar _topBar;
+    private Chrome.EditorBottomBar _bottomBar;
+    private Chrome.EditorSidebar _sidebar;
+    private Chrome.ShortcutCard _card;
     private MapEditorConfirm _confirm;
 
     private string _statusMessage = "";
@@ -52,13 +47,8 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
     private CursorLockMode _cursorLock;
     private bool _driftWasBlocked;
 
-    private const float ToolIconSize = 72f;
-    private const int DockPadding = 8;
-    private const float DockHeight = ToolIconSize + DockPadding * 2;
-    private const float OptionsWidth = 380f;
-    private const float OptionsHeight = 900f;
-    private const float OptionsHeaderHeight = 34f;
-    private const float ConfirmBottom = 168f;
+    private const float DockIconSize = 60f;
+    private const float ConfirmBottom = Chrome.EditorBottomBar.Height + 12f;
 
     private void Awake() => Instance = this;
 
@@ -154,16 +144,10 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
         if (_canvasGO != null) Destroy(_canvasGO);
         _canvasGO = null;
-        _dockGO = null;
-        _optionsGO = null;
-        _optionsRect = null;
-        _optionsContent = null;
-        _optionsTitle = null;
-        _optionsCollapseButton = null;
-        _optionsCollapsed = false;
-        _statusGO = null;
-        _statusText = null;
-        _shortcutPanel = null;
+        _topBar = null;
+        _bottomBar = null;
+        _sidebar = null;
+        _card = null;
         _hoverMessage = null;
         _confirm = null;
         _panels.Clear();
@@ -262,21 +246,21 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
         _statusMessage = message;
         _statusSeverity = severity;
-        if (_hoverMessage == null) Paint(message, severity);
+        if (_hoverMessage == null) Paint(message, severity, pulse: true);
     }
 
     public void ShowHoverStatus(string message)
     {
         if (!_open || string.IsNullOrEmpty(message)) return;
         _hoverMessage = message;
-        Paint(message, StatusSeverity.Info);
+        Paint(message, StatusSeverity.Info, pulse: false);
     }
 
     public void ClearHoverStatus()
     {
         if (!_open) return;
         _hoverMessage = null;
-        Paint(_statusMessage, _statusSeverity);
+        Paint(_statusMessage, _statusSeverity, pulse: false);
     }
 
     public void RegisterUiBlocker(RectTransform rect) { }
@@ -285,19 +269,10 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
 
     public void RequestOptionsResize() => _optionsRebuildFrames = 3;
 
-    private void Paint(string message, StatusSeverity severity)
-    {
-        if (_statusText == null) return;
-
-        _statusText.text = message ?? "";
-        _statusText.color = severity switch
-        {
-            StatusSeverity.Success => new Color(0.6f, 1f, 0.6f),
-            StatusSeverity.Warning => new Color(1f, 0.85f, 0.4f),
-            StatusSeverity.Error => new Color(1f, 0.5f, 0.5f),
-            _ => Color.white
-        };
-    }
+    /// A hover message only repaints the words; a real one may also ring the region, which is how
+    /// the editor says "this one needs you", and a hover must not clear that.
+    private void Paint(string message, StatusSeverity severity, bool pulse) =>
+        _bottomBar?.SetStatus(message, severity, pulse);
 
     // ---- saving ---------------------------------------------------------------------------------
 
@@ -348,12 +323,20 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         }
 
         SettleOptions();
+        PollUnsaved();
 
         if (ModalOpen) return;
+
+        if (Input.GetKeyDown(KeyCode.F1))
+        {
+            _card?.Toggle();
+            return;
+        }
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             if (_ui.TransientUiOpen) _ui.CloseTransientUi();
+            else if (_card is { Open: true }) _card.Hide();
             else if (_confirm is { Open: true }) _confirm.Hide();
             else RequestClose();
             return;
@@ -423,116 +406,65 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
         var canvasRoot = _canvasGO.GetComponent<RectTransform>();
         _ui.Attach(this, canvasRoot);
 
-        BuildDock(canvasRoot);
-        BuildOptions(canvasRoot);
-        BuildShortcutPanel(canvasRoot);
-        BuildStatusBar(canvasRoot);
+        BuildChrome(canvasRoot);
 
         _confirm = new MapEditorConfirm(_ui, canvasRoot, ConfirmBottom);
     }
 
-    private void BuildDock(RectTransform canvasRoot)
+    /// <summary>
+    /// The same three plates every other editor wears, from the same classes. This screen used to
+    /// draw its own dock, options panel, status strip and shortcut column, all four a near-copy of
+    /// the room editor's - which is how they drifted apart in padding, width and behaviour.
+    /// </summary>
+    private void BuildChrome(RectTransform canvasRoot)
     {
-        _dockGO = new GameObject("MenuEditor_Dock");
-        _dockGO.transform.SetParent(canvasRoot, false);
+        _topBar = new Chrome.EditorTopBar(_ui, canvasRoot, null);
+        _topBar.SetTitle(Preset != null ? Preset.ShownName : "Menu");
+        _topBar.SetBadge("menu preset");
+        _topBar.RebuildActions(
+        [
+            new Chrome.EditorBarAction("Save", MapEditorIcons.GetToolIconOrNull("Save"), Save,
+                "Save this preset and make it the menu's")
+        ],
+        [
+            ("Esc", "Close", (Action)RequestClose)
+        ]);
 
-        var dockRect = _dockGO.AddComponent<RectTransform>();
-        dockRect.anchorMin = dockRect.anchorMax = new Vector2(0.5f, 0f);
-        dockRect.pivot = new Vector2(0.5f, 0f);
-        dockRect.sizeDelta = new Vector2(0f, DockHeight);
-        dockRect.anchoredPosition = new Vector2(0f, 12f);
+        _bottomBar = new Chrome.EditorBottomBar(_ui, canvasRoot, null)
+        {
+            OnHelp = () => _card?.Toggle()
+        };
 
-        VanillaChrome.Dress(_dockGO.AddComponent<Image>());
+        _sidebar = new Chrome.EditorSidebar(_ui, canvasRoot, null,
+            Chrome.EditorTopBar.Height + 12f, Chrome.EditorBottomBar.Height + 12f,
+            optionsTitle: "Tool", withLayers: false);
 
-        var layout = _dockGO.AddComponent<HorizontalLayoutGroup>();
-        layout.childAlignment = TextAnchor.MiddleLeft;
-        layout.spacing = 6f;
-        layout.padding = new RectOffset(DockPadding, DockPadding, DockPadding, DockPadding);
-        layout.childControlWidth = false;
-        layout.childControlHeight = false;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = false;
+        _card = new Chrome.ShortcutCard(_ui, canvasRoot, null, Globals);
 
-        var fitter = _dockGO.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        _ui.IconPreviewRightOffset = Chrome.EditorSidebar.Width + 28f;
+        _ui.IconPreviewTopOffset = Chrome.EditorTopBar.Height + 12f;
     }
 
-    private void BuildOptions(RectTransform canvasRoot)
-    {
-        _optionsGO = new GameObject("MenuEditor_Options");
-        _optionsGO.transform.SetParent(canvasRoot, false);
-
-        _optionsRect = _optionsGO.AddComponent<RectTransform>();
-        _optionsRect.anchorMin = _optionsRect.anchorMax = new Vector2(1f, 1f);
-        _optionsRect.pivot = new Vector2(1f, 1f);
-        _optionsRect.sizeDelta = new Vector2(OptionsWidth, OptionsHeight);
-        _optionsRect.anchoredPosition = new Vector2(-14f, -70f);
-
-        VanillaChrome.Dress(_optionsGO.AddComponent<Image>());
-
-        var header = new GameObject("Header");
-        header.transform.SetParent(_optionsRect, false);
-
-        var headerRect = header.AddComponent<RectTransform>();
-        headerRect.anchorMin = new Vector2(0f, 1f);
-        headerRect.anchorMax = new Vector2(1f, 1f);
-        headerRect.pivot = new Vector2(0.5f, 1f);
-        headerRect.sizeDelta = new Vector2(0f, OptionsHeaderHeight);
-        headerRect.anchoredPosition = Vector2.zero;
-        header.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
-
-        var title = _ui.CreateLabel(header.transform, "", 20, TextAlignmentOptions.Left);
-        var titleRect = title.GetComponent<RectTransform>();
-        titleRect.anchorMin = Vector2.zero;
-        titleRect.anchorMax = Vector2.one;
-        titleRect.offsetMin = new Vector2(12f, 0f);
-        titleRect.offsetMax = new Vector2(-36f, 0f);
-        _optionsTitle = title.GetComponent<TMP_Text>();
-        _optionsTitle.enableWordWrapping = false;
-        _optionsTitle.raycastTarget = false;
-
-        _optionsCollapseButton = _ui.CreateButton(header.transform, "-", ToggleOptionsCollapsed, 26f);
-        var collapseRect = _optionsCollapseButton.GetComponent<RectTransform>();
-        collapseRect.anchorMin = collapseRect.anchorMax = new Vector2(1f, 0.5f);
-        collapseRect.pivot = new Vector2(1f, 0.5f);
-        collapseRect.sizeDelta = new Vector2(26f, 26f);
-        collapseRect.anchoredPosition = new Vector2(-4f, 0f);
-
-        var content = new GameObject("Content");
-        content.transform.SetParent(_optionsRect, false);
-        _optionsContent = content.AddComponent<RectTransform>();
-        _optionsContent.anchorMin = Vector2.zero;
-        _optionsContent.anchorMax = Vector2.one;
-        _optionsContent.offsetMin = Vector2.zero;
-        _optionsContent.offsetMax = new Vector2(0f, -OptionsHeaderHeight);
-    }
-
-    private void ToggleOptionsCollapsed()
-    {
-        _optionsCollapsed = !_optionsCollapsed;
-
-        if (_optionsContent != null) _optionsContent.gameObject.SetActive(!_optionsCollapsed);
-        if (_optionsRect != null)
-            _optionsRect.sizeDelta = new Vector2(OptionsWidth,
-                _optionsCollapsed ? OptionsHeaderHeight : OptionsHeight);
-
-        var label = _optionsCollapseButton != null
-            ? _optionsCollapseButton.GetComponentInChildren<TMP_Text>()
-            : null;
-        if (label != null) label.text = _optionsCollapsed ? "+" : "-";
-    }
+    /// True under every tool here, so they sit on the card rather than in the tool's chip row.
+    private static readonly (string Key, string Action)[] Globals =
+    [
+        ("Ctrl+S", "Save the preset"),
+        ("F1", "This list"),
+        ("Esc", "Close the editor")
+    ];
 
     private void BuildTools()
     {
         foreach (var tool in _tools)
         {
             var localTool = tool;
-            var button = _ui.CreateIconButton(_dockGO.transform, MapEditorIcons.GetToolIconOrNull(tool.Name),
-                ShortLabel(tool.Name), () => SelectTool(localTool), out var ring, ToolIconSize,
+            var button = _bottomBar.AddTool(MapEditorIcons.GetToolIconOrNull(tool.Name),
+                ShortLabel(tool.Name), () => SelectTool(localTool), out var ring, DockIconSize,
                 DockHint(tool.Name));
             button.name = "Dock_" + tool.Name;
 
-            var content = _ui.CreateScrollColumn(_optionsContent, "Options_" + tool.Name, out var columnRoot);
+            var content = _ui.CreateScrollColumn(_sidebar.OptionsContent, "Options_" + tool.Name,
+                out var columnRoot);
             columnRoot.SetActive(false);
             _panels.Add((tool, columnRoot, content, ring));
 
@@ -545,6 +477,8 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
                 Plugin.Log.LogError($"MenuEditor: tool '{tool.Name}' could not build its panel: {e}");
             }
         }
+
+        _bottomBar.LayoutAfterDock();
     }
 
     public void RebuildPanels() => _rebuildQueued = true;
@@ -601,84 +535,53 @@ public class MainMenuEditor : MonoBehaviour, IMapEditorHost
             if (panel.ring != null) panel.ring.gameObject.SetActive(active);
         }
 
-        if (_optionsTitle != null) _optionsTitle.text = tool.Name;
+        if (_sidebar != null)
+        {
+            _sidebar.SetOptionsTitle(tool.Name);
+            _sidebar.NoteToolChanged();
+        }
+
         RefreshShortcuts();
         tool.OnEnter();
     }
 
-    private void BuildShortcutPanel(RectTransform canvasRoot)
-    {
-        var go = new GameObject("MenuEditor_Shortcuts");
-        go.transform.SetParent(canvasRoot, false);
-
-        _shortcutPanel = go.AddComponent<RectTransform>();
-        _shortcutPanel.anchorMin = Vector2.zero;
-        _shortcutPanel.anchorMax = Vector2.zero;
-        _shortcutPanel.pivot = Vector2.zero;
-        _shortcutPanel.sizeDelta = new Vector2(252f, 0f);
-        _shortcutPanel.anchoredPosition = new Vector2(16f, 16f);
-
-        var layout = go.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 4f;
-        layout.childControlWidth = true;
-        layout.childForceExpandWidth = true;
-        layout.childControlHeight = false;
-        layout.childForceExpandHeight = false;
-
-        var fitter = go.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        RefreshShortcuts();
-    }
-
     private void RefreshShortcuts()
     {
-        if (_shortcutPanel == null) return;
+        var hints = _activeTool is IMapEditorShortcuts source ? source.Shortcuts : null;
 
-        foreach (Transform child in _shortcutPanel) Destroy(child.gameObject);
-
-        if (!_shortcutsCollapsed)
-        {
-            if (_activeTool is IMapEditorShortcuts source)
-                foreach (var (key, action) in source.Shortcuts)
-                    _ui.CreateKeyHint(_shortcutPanel, key, action);
-
-            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+S", "Save preset");
-            _ui.CreateKeyHint(_shortcutPanel, "Esc", "Close editor");
-        }
-
-        _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   -",
-            () =>
-            {
-                _shortcutsCollapsed = !_shortcutsCollapsed;
-                RefreshShortcuts();
-            }, 30f);
+        _bottomBar?.SetHints(hints);
+        _card?.SetTool(_activeTool?.Name ?? "", hints);
     }
 
-    private void BuildStatusBar(RectTransform canvasRoot)
+    private void LateUpdate()
     {
-        _statusGO = new GameObject("MenuEditor_Status");
-        _statusGO.transform.SetParent(canvasRoot, false);
+        if (!_open) return;
 
-        var rect = _statusGO.AddComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0f, 0f);
-        rect.anchorMax = new Vector2(1f, 0f);
-        rect.pivot = new Vector2(0.5f, 0f);
+        _bottomBar?.Tick();
+        _topBar?.Tick();
+        _sidebar?.Layout(WantedOptionsHeight(), 0f, true);
+    }
 
-        rect.offsetMin = new Vector2(284f, 12f + DockHeight + 8f);
-        rect.offsetMax = new Vector2(-408f, 12f + DockHeight + 8f);
-        rect.sizeDelta = new Vector2(rect.sizeDelta.x, 40f);
+    private float WantedOptionsHeight()
+    {
+        foreach (var panel in _panels)
+            if (panel.tool == _activeTool && panel.content != null)
+                return panel.content.rect.height + 12f;
 
-        VanillaChrome.Dress(_statusGO.AddComponent<Image>());
+        return 0f;
+    }
 
-        var label = _ui.CreateLabel(_statusGO.transform, "", 18, TextAlignmentOptions.Left);
-        _statusText = label.GetComponent<TMP_Text>();
-        _statusText.raycastTarget = false;
-        var labelRect = label.GetComponent<RectTransform>();
-        labelRect.anchorMin = Vector2.zero;
-        labelRect.anchorMax = Vector2.one;
-        labelRect.offsetMin = new Vector2(14f, 0f);
-        labelRect.offsetMax = new Vector2(-14f, 0f);
-        Paint(_statusMessage, _statusSeverity);
+    private float _nextUnsavedCheck;
+
+    /// The dot beside the preset's name. Asking means serialising the preset, so it is asked twice a
+    /// second rather than every frame.
+    private void PollUnsaved()
+    {
+        if (Time.unscaledTime < _nextUnsavedCheck) return;
+        _nextUnsavedCheck = Time.unscaledTime + 0.5f;
+
+        _topBar?.SetUnsaved(HasUnsavedEdits);
+        _topBar?.SetTitle(Preset != null ? Preset.ShownName : "Menu");
     }
 
     private static string ShortLabel(string toolName) =>

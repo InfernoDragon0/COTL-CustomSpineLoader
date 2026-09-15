@@ -349,7 +349,11 @@ public static class DungeonMapBuilder
             {
                 Hidden = false,
                 CanBeHidden = false,
-                position = new Vector2(point.x, point.y)
+
+                // Where the editor drew it, in overlay units. The game's own generator fills this
+                // field in too and its map screen ignores it; DungeonMapViewPatches reads it back
+                // so a custom map is drawn where it was authored rather than on the derived grid.
+                position = new Vector2(authored.PosX, authored.PosY) * ViewScale
             };
 
             built[authored] = node;
@@ -368,8 +372,26 @@ public static class DungeonMapBuilder
             }
         }
 
-        return new global::Map.Map(config.name, nodes, []);
+        var result = new global::Map.Map(config.name, nodes, []);
+        Authored.Add(result, Marker);
+        return result;
     }
+
+    // ---- authored positions ------------------------------------------------------------------
+
+    /// Editor units to overlay units. The editor clones the game's node prefab at NodeScale, so a
+    /// node drawn there is half the size it is on the map screen; scaling positions by the
+    /// reciprocal reproduces the editor's picture at the map's own node size.
+    public const float ViewScale = 1f / Tools.DungeonMapCanvas.NodeScale;
+
+    private static readonly object Marker = new();
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<global::Map.Map, object>
+        Authored = new();
+
+    /// True for a map this builder made, which is the only kind whose node positions were authored
+    /// rather than derived. Weakly held, so a map the game drops is collected with its entry.
+    public static bool IsAuthored(global::Map.Map map) => map != null && Authored.TryGetValue(map, out _);
 
     public static void InstallMap(global::Map.MapManager manager, global::Map.Map built)
     {

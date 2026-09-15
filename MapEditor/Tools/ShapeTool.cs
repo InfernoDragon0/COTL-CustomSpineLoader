@@ -181,9 +181,9 @@ public class ShapeTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcut
     [
         ("LMB", "Drag node"),
         ("RMB", "Delete node"),
-        ("Ctrl + LMB", "Add node"),
-        ("Drag", "Yellow = move, Purple = depth"),
-        ("Del", "Delete selected shape")
+        ("Ctrl+LMB", "Add node"),
+        ("Drag", "Move / depth"),
+        ("Del", "Delete shape")
     ];
 
     public void OnExit()

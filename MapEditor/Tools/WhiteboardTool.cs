@@ -78,8 +78,8 @@ public class WhiteboardTool : IMapEditorTool, IMapDataContributor, IMapEditorSho
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", _mode == Mode.Erase ? "Erase" : "Draw a stroke"),
-        ("Ctrl+Z", "Undo the last stroke or erase")
+        ("LMB", _mode == Mode.Erase ? "Erase" : "Draw"),
+        ("Ctrl+Z", "Undo stroke")
     ];
 
     // ---- panel -----------------------------------------------------------------------------------

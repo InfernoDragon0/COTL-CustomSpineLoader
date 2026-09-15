@@ -1958,12 +1958,12 @@ public class TriggerTool : IMapEditorTool, IMapDataContributor, IMapEditorShortc
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Place or select trigger"),
-        ("Drag", "Centre moves, corner resizes"),
-        ("Ctrl + Drag", "Copy trigger and its actions"),
-        ("Del", "Delete selected"),
-        ("V", "Set camera offset while framing"),
-        ("Esc", "Cancel target pick")
+        ("LMB", "Place / select"),
+        ("Drag", "Move / resize"),
+        ("Ctrl+Drag", "Copy"),
+        ("Del", "Delete"),
+        ("V", "Camera offset"),
+        ("Esc", "Cancel pick")
     ];
 
     public void OnExit()

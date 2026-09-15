@@ -44,30 +44,32 @@ public class LightingTool : IMapEditorTool, IMapDataContributor
             _editor.SetStatus("Lighting reset to biome.");
         });
 
-        ui.CreateHeader(panel, "- Profiles -", HeaderSize);
-        _profileDropdown = ui.CreateDropdown(panel, "Apply saved profile", LightingProfiles.Names(),
+        // Four groups of sliders in one column ran to well over a screen; each folds now, so the one
+        // being tuned can be open on its own.
+        var profiles = ui.CreateSection(panel, "Profiles", open: false).Content;
+        _profileDropdown = ui.CreateDropdown(profiles, "Apply saved profile", LightingProfiles.Names(),
             (_, name) => ApplyProfile(name));
-        ui.CreateButton(panel, "Save As Profile", SaveProfile);
-        ui.CreateButton(panel, "Delete Selected Profile", DeleteProfile, emphasis: MapEditorEmphasis.Quiet);
+        ui.CreateButton(profiles, "Save As Profile", SaveProfile);
+        ui.CreateButton(profiles, "Delete Selected Profile", DeleteProfile, emphasis: MapEditorEmphasis.Quiet);
 
-        ui.CreateHeader(panel, "- Ambient -", HeaderSize);
-        ColourSliders(ui, panel, "Ambient", () => Data.Ambient);
+        var ambient = ui.CreateSection(panel, "Ambient").Content;
+        ColourSliders(ui, ambient, "Ambient", () => Data.Ambient);
 
-        ui.CreateHeader(panel, "- Sun -", HeaderSize);
-        ColourSliders(ui, panel, "Sun", () => Data.DirectionalLight);
-        TrackedSlider(ui, panel, "Sun Intensity", 0f, 4f,
+        var sun = ui.CreateSection(panel, "Sun").Content;
+        ColourSliders(ui, sun, "Sun", () => Data.DirectionalLight);
+        TrackedSlider(ui, sun, "Sun Intensity", 0f, 4f,
             () => Data.DirectionalIntensity, v => Data.DirectionalIntensity = v);
-        TrackedSlider(ui, panel, "Shadow Strength", 0f, 1f,
+        TrackedSlider(ui, sun, "Shadow Strength", 0f, 1f,
             () => Data.ShadowStrength, v => Data.ShadowStrength = v);
-        TrackedSlider(ui, panel, "Exposure", 0f, 3f,
+        TrackedSlider(ui, sun, "Exposure", 0f, 3f,
             () => Data.Exposure, v => Data.Exposure = v);
 
-        ui.CreateHeader(panel, "- Fog -", HeaderSize);
-        ColourSliders(ui, panel, "Fog", () => Data.Fog);
-        TrackedSlider(ui, panel, "Fog Near", 0f, 60f, () => Data.FogNear, v => Data.FogNear = v);
-        TrackedSlider(ui, panel, "Fog Far", 0f, 120f, () => Data.FogFar, v => Data.FogFar = v);
-        TrackedSlider(ui, panel, "Fog Height", 0f, 10f, () => Data.FogHeight, v => Data.FogHeight = v);
-        TrackedSlider(ui, panel, "Fog Spread", 0f, 10f, () => Data.FogSpread, v => Data.FogSpread = v);
+        var fog = ui.CreateSection(panel, "Fog", open: false).Content;
+        ColourSliders(ui, fog, "Fog", () => Data.Fog);
+        TrackedSlider(ui, fog, "Fog Near", 0f, 60f, () => Data.FogNear, v => Data.FogNear = v);
+        TrackedSlider(ui, fog, "Fog Far", 0f, 120f, () => Data.FogFar, v => Data.FogFar = v);
+        TrackedSlider(ui, fog, "Fog Height", 0f, 10f, () => Data.FogHeight, v => Data.FogHeight = v);
+        TrackedSlider(ui, fog, "Fog Spread", 0f, 10f, () => Data.FogSpread, v => Data.FogSpread = v);
 
         BuildWeather(ui, panel);
 

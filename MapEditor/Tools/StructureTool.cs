@@ -95,9 +95,14 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         _grid.OnRightClick = RightClickCell;
         _grid.IsFavourite = id => MapEditorFavourites.IsFavourite(EntryForCell(id, null)?.Key);
 
-        ui.CreateToggle(panel, "Multi-select randomised placement", false, SetScatterMode);
+        // The browser is what this panel is for; everything that decides how the next thing lands
+        // goes under one header so the grid keeps the height.
+        var placement = ui.CreateSection(panel, "Placement");
+        var rows = placement.Content;
 
-        ui.CreateToggle(panel, "Break apart randomised sets", true, on =>
+        ui.CreateToggle(rows, "Multi-select randomised placement", false, SetScatterMode);
+
+        ui.CreateToggle(rows, "Break apart randomised sets", true, on =>
         {
             _breakApart = on;
             _editor.SetStatus(on
@@ -107,7 +112,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
         WireQuickPick();
 
-        ui.CreateToggle(panel, "Structure quick pick dock", true, on =>
+        ui.CreateToggle(rows, "Structure quick pick dock", true, on =>
         {
             var bar = _editor.QuickPick;
             if (bar != null) bar.Visible = on;
@@ -118,7 +123,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 : "Quick pick hidden; the wheel goes back to cycling tools.");
         });
 
-        _seeThroughToggle = ui.CreateToggle(panel, "Place see-through", false, on =>
+        _seeThroughToggle = ui.CreateToggle(rows, "Place see-through", false, on =>
         {
             _placeSeeThrough = on;
             _editor.SetStatus(on
@@ -126,7 +131,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 : "New objects will hide the player.");
         }).GetComponent<MapEditorToggle>();
 
-        ui.CreateToggle(panel, "Place fog pass-through", false, on =>
+        ui.CreateToggle(rows, "Place fog pass-through", false, on =>
         {
             _placeFogThrough = on;
             _editor.SetStatus(on
@@ -134,7 +139,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 : "New objects will ignore the fog.");
         });
 
-        _windToggle = ui.CreateToggle(panel, "Place affected by wind", false, on =>
+        _windToggle = ui.CreateToggle(rows, "Place affected by wind", false, on =>
         {
             _placeWind = on;
             _editor.SetStatus(on
@@ -142,7 +147,7 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
                 : "New objects will stand still.");
         }).GetComponent<MapEditorToggle>();
 
-        ui.CreateButton(panel, "Clear Selection", () =>
+        ui.CreateButton(rows, "Clear Selection", () =>
         {
             _pending = StructureBrain.TYPES.NONE;
             _propPath = null;
@@ -1173,15 +1178,34 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
         else SelectStructure(entry.Type, entry.Label);
     }
 
+    private readonly Dictionary<string, Sprite> _quickPickIcons = [];
+    private readonly HashSet<string> _quickPickAsked = [];
+
+    /// <summary>
+    /// A prop icon is loaded from its prefab through a throttled queue, so it is never ready on the
+    /// frame it is asked for. The bar used to throw the callback away and show the entry's name
+    /// instead, forever. The answer is cached here as it arrives, and the bar picks it up on its
+    /// next refresh, the same way a browser cell fills in.
+    /// </summary>
     private Sprite QuickPickIcon(QuickPickEntry entry)
     {
         if (entry == null) return null;
 
         if (!entry.IsProp) return MapEditorIcons.GetStructureIcon(entry.Type);
 
-        Sprite found = null;
-        MapEditorIcons.GetPropIcon(_editor, entry.Path, sprite => found = sprite);
-        return found;
+        var path = entry.Path;
+        if (string.IsNullOrEmpty(path)) return null;
+
+        if (_quickPickIcons.TryGetValue(path, out var cached)) return cached;
+
+        if (_quickPickAsked.Add(path))
+            MapEditorIcons.GetPropIcon(_editor, path, sprite =>
+            {
+                _quickPickIcons[path] = sprite;
+                if (sprite != null) _editor.QuickPick?.Refresh();
+            });
+
+        return null;
     }
 
     private void NoteQuickPick(QuickPickEntry entry)
@@ -1284,10 +1308,10 @@ public class StructureTool : IMapEditorTool, IMapDataContributor, IMapEditorShor
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Place selected item"),
-        ("RMB", "Pin or unpin a browser cell"),
-        ("1-9", "Arm a quick pick slot"),
-        ("Wheel", "Step the quick pick, else cycle tools")
+        ("LMB", "Place"),
+        ("RMB", "Pin / unpin"),
+        ("1-9", "Arm slot"),
+        ("Wheel", "Step slot")
     ];
 
     public void OnExit()

@@ -572,8 +572,7 @@ public class DoorTool : IMapEditorTool, IMapDataContributor, IMapEditorShortcuts
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Drag a door"),
-        ("LMB", "Click to select")
+        ("LMB", "Select / drag")
     ];
 
     public void OnExit()

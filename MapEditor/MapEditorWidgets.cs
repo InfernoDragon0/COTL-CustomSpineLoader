@@ -26,10 +26,19 @@ public class MapEditorDropdown
     /// label does not squeeze the list down to half width and clip the option text.
     internal RectTransform ListFrom;
 
+    /// A menu built for one click owns nothing else; it takes its holder with it when it closes.
+    internal bool DestroyRootOnClose;
+
     private RectTransform Anchor => ListFrom != null ? ListFrom : _row;
 
-    private const float OptionHeight = 34f;
+    private const float OptionHeight = 32f;
+    private const float OptionSpacing = 2f;
     private const float MaxListHeight = 460f;
+
+    private static readonly Color OptionIdle = new(1f, 1f, 1f, 0.04f);
+    private static readonly Color OptionHover = new(1f, 1f, 1f, 0.12f);
+    private static readonly Color OptionCurrent = new(0.83f, 0.24f, 0.20f, 0.22f);
+    private static readonly Color OptionText = new(0.9f, 0.87f, 0.8f);
 
     internal MapEditorDropdown(MapEditorUI ui, GameObject root, RectTransform row, TMP_Text caption,
         string captionBase, Action<int, string> onSelected)
@@ -101,7 +110,7 @@ public class MapEditorDropdown
 
     private void BuildList(RectTransform canvas)
     {
-        var height = Mathf.Min(_options.Count * (OptionHeight + 4f) + 16f, MaxListHeight);
+        var height = Mathf.Min(_options.Count * (OptionHeight + OptionSpacing) + 16f, MaxListHeight);
         var width = Mathf.Max(Anchor.rect.width, 220f);
 
         var panel = new GameObject("Options");
@@ -112,18 +121,74 @@ public class MapEditorDropdown
         rt.sizeDelta = new Vector2(width, height);
 
         var img = panel.AddComponent<Image>();
-        img.color = new Color(0f, 0f, 0f, 0.8f);
+        VanillaChrome.Dress(img);
+        MapEditorUI.AddOutline(rt, new Color(1f, 1f, 1f, 0.12f));
 
         PositionList(canvas, rt, height);
 
-        var content = _ui.CreateScrollColumn(panel.transform, "OptionList", out _, spacing: 4f);
-        content.gameObject.AddComponent<MapEditorQuietArea>();
+        var content = _ui.CreateScrollColumn(panel.transform, "OptionList", out var root, spacing: OptionSpacing);
         for (var i = 0; i < _options.Count; i++)
+            BuildOption(content, i);
+
+        // A long list opens on the current value rather than at the top.
+        if (SelectedIndex > 0 && _options.Count > 1 && root != null)
         {
-            var index = i;
-            var option = _options[i];
-            _ui.CreateButton(content, option, () => Choose(index), OptionHeight);
+            LayoutRebuilder.ForceRebuildLayoutImmediate(content);
+            var scroll = root.GetComponent<ScrollRect>();
+            if (scroll != null)
+                scroll.verticalNormalizedPosition = 1f - SelectedIndex / (float)(_options.Count - 1);
         }
+    }
+
+    /// One flat row: a tint that lights on hover, a left bar and white text on the current value.
+    private void BuildOption(RectTransform content, int index)
+    {
+        var option = _options[index];
+        var current = index == SelectedIndex;
+
+        var row = new GameObject("Option_" + option);
+        row.transform.SetParent(content, false);
+        var rt = row.AddComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(200f, OptionHeight);
+
+        var element = row.AddComponent<LayoutElement>();
+        element.minHeight = OptionHeight;
+        element.preferredHeight = OptionHeight;
+        element.flexibleWidth = 1f;
+
+        var plate = row.AddComponent<Image>();
+        var idle = current ? OptionCurrent : OptionIdle;
+        plate.color = idle;
+
+        if (current)
+        {
+            var bar = new GameObject("Current");
+            bar.transform.SetParent(row.transform, false);
+            var barRt = bar.AddComponent<RectTransform>();
+            barRt.anchorMin = new Vector2(0f, 0f);
+            barRt.anchorMax = new Vector2(0f, 1f);
+            barRt.pivot = new Vector2(0f, 0.5f);
+            barRt.sizeDelta = new Vector2(3f, 0f);
+            barRt.anchoredPosition = Vector2.zero;
+            var barImage = bar.AddComponent<Image>();
+            barImage.color = MapEditorUI.Accent;
+            barImage.raycastTarget = false;
+        }
+
+        var label = _ui.CreateLabel(row.transform, option, 17);
+        var labelRt = label.GetComponent<RectTransform>();
+        labelRt.anchorMin = Vector2.zero;
+        labelRt.anchorMax = Vector2.one;
+        labelRt.offsetMin = new Vector2(14f, 0f);
+        labelRt.offsetMax = new Vector2(-8f, 0f);
+        var text = label.GetComponent<TMP_Text>();
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.color = current ? Color.white : OptionText;
+        text.raycastTarget = false;
+
+        MapEditorUI.AttachButton(row, plate, () => Choose(index));
+        MapEditorUI.AddHover(row, plate, idle, current ? OptionCurrent : OptionHover, null);
     }
 
     private void PositionList(RectTransform canvas, RectTransform panel, float height)
@@ -166,7 +231,83 @@ public class MapEditorDropdown
             UnityEngine.Object.Destroy(_floating);
             _floating = null;
         }
+
         _ui.NotifyDropdownClosed(this);
+
+        if (!DestroyRootOnClose || Root == null) return;
+
+        DestroyRootOnClose = false;
+        UnityEngine.Object.Destroy(Root);
+    }
+}
+
+/// <summary>
+/// A foldable group built by <see cref="MapEditorUI.CreateSection"/>. Owns the header; owns the
+/// content column too when built with one, otherwise the caller listens to <see cref="OnToggled"/>
+/// and shows or hides its own body.
+/// </summary>
+public class MapEditorSection
+{
+    private readonly MapEditorUI _ui;
+    private readonly TMP_Text _title;
+    private readonly TMP_Text _summary;
+    private readonly Image _chevronImage;
+    private readonly TMP_Text _chevronText;
+
+    public RectTransform Header { get; }
+    public RectTransform Content { get; }
+    public bool Open { get; private set; }
+
+    public Action<bool> OnToggled;
+
+    internal MapEditorSection(MapEditorUI ui, RectTransform header, RectTransform content, TMP_Text title,
+        TMP_Text summary, Image chevronImage, TMP_Text chevronText, bool open)
+    {
+        _ui = ui;
+        Header = header;
+        Content = content;
+        _title = title;
+        _summary = summary;
+        _chevronImage = chevronImage;
+        _chevronText = chevronText;
+        Open = !open;
+        SetOpen(open, notify: false);
+    }
+
+    public void Toggle() => SetOpen(!Open);
+
+    public void SetOpen(bool open, bool notify = true)
+    {
+        if (Open == open) return;
+        Open = open;
+
+        if (Content != null) Content.gameObject.SetActive(open);
+
+        if (_chevronImage != null)
+            _chevronImage.rectTransform.localEulerAngles = new Vector3(0f, 0f, open ? 0f : 90f);
+        if (_chevronText != null) _chevronText.text = open ? "-" : "+";
+
+        if (Content != null) _ui.Editor?.RequestOptionsResize();
+        if (notify) OnToggled?.Invoke(open);
+    }
+
+    public void SetTitle(string text)
+    {
+        if (_title != null) _title.text = text ?? "";
+    }
+
+    public void SetSummary(string text)
+    {
+        if (_summary == null) return;
+        var show = !string.IsNullOrEmpty(text);
+        _summary.text = show ? text : "";
+        if (_summary.gameObject.activeSelf != show) _summary.gameObject.SetActive(show);
+    }
+
+    public void SetVisible(bool visible)
+    {
+        if (Header != null && Header.gameObject.activeSelf != visible) Header.gameObject.SetActive(visible);
+        if (Content != null) Content.gameObject.SetActive(visible && Open);
     }
 }
 

@@ -11,9 +11,7 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
     public string Name => "Dungeon Builder";
 
     private readonly RuntimeMapEditor _editor;
-    private readonly List<GameObject> _dynamic = [];
 
-    private RectTransform _panel;
     private MapEditorUI _ui;
 
     private CTDungeonMap _map;
@@ -39,68 +37,62 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
         else _canvas?.SetHint(message);
     }
 
-    public void BuildPanel(RectTransform panel, MapEditorUI ui)
+    /// No panel of its own: the chooser this tool used to draw is the menu the Dungeon button drops,
+    /// and once a dungeon is open its canvas owns the screen. Only the widget kit is kept.
+    public void BuildPanel(RectTransform panel, MapEditorUI ui) => _ui = ui;
+
+    public void OnEnter() { }
+
+    public void OnExit()
     {
-        _panel = panel;
-        _ui = ui;
+        _switchingAway = true;
+        CloseOverlay();
+        _switchingAway = false;
     }
 
-    public void OnEnter()
-    {
-        Rebuild();
-        _editor.SetStatus(_map == null
-            ? "Dungeon: create one, or open a saved dungeon."
-            : $"Editing dungeon '{_map.MapName}'.");
-    }
-
-    public void OnExit() => CloseOverlay();
+    /// True while the editor is moving to another tool, which calls OnExit and so closes the canvas
+    /// itself; the tool must not then try to choose a tool of its own.
+    private bool _switchingAway;
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("Left click", "Select node / drag"),
-        ("Ctrl+Left", "Add node here"),
-        ("Right click", "Link selection to node"),
-        ("Right click", "On a link: remove it"),
-        ("Del", "Delete selected node")
+        ("LMB", "Select / drag"),
+        ("Ctrl+LMB", "Add node"),
+        ("RMB", "Link / unlink"),
+        ("Del", "Delete node")
     ];
 
-    // ---- side panel ---------------------------------------------------------------------------
+    // ---- the chooser as a menu -----------------------------------------------------------------
 
-    private void Rebuild()
+    private List<CTDungeonMap> _menuMaps;
+
+    /// The same choice the panel offers, flattened into one list a bar button can drop; see the
+    /// Level tool for why making a new one is the first entry rather than a button beside it.
+    public List<string> ChooserOptions()
     {
-        foreach (var go in _dynamic)
-            if (go != null) UnityEngine.Object.Destroy(go);
-        _dynamic.Clear();
+        _menuMaps = CTDungeonMapSerialization.LoadAll();
 
-        if (_panel == null || _ui == null) return;
+        var options = new List<string> { "New dungeon" };
+        foreach (var map in _menuMaps) options.Add($"{map.MapName} ({map.Nodes.Count} nodes)");
 
-        BuildChooser();
+        return options;
     }
 
-    private void BuildChooser()
+    public void ChooseFromMenu(int index)
     {
-        _dynamic.Add(_ui.CreateButton(_panel, "New Dungeon", CreateNew));
-
-        var maps = CTDungeonMapSerialization.LoadAll();
-        if (maps.Count == 0)
+        if (index <= 0)
         {
-            _dynamic.Add(_ui.CreateLabel(_panel, "No dungeons yet.", 14, TextAlignmentOptions.Center));
+            CreateNew();
             return;
         }
 
-        var labels = new List<string>(maps.Count);
-        foreach (var map in maps) labels.Add($"{map.MapName} ({map.Nodes.Count} nodes)");
+        var pick = index - 1;
+        if (_menuMaps == null || pick >= _menuMaps.Count) return;
 
-        var dropdown = _ui.CreateDropdown(_panel, "Open Existing Dungeon", labels, (index, _) =>
-        {
-            if (index < 0 || index >= maps.Count) return;
-
-            _map = maps[index];
-            _selected = null;
-            OpenOverlay();
-            Hint($"Editing '{_map.MapName}'. " + DefaultHint);
-        });
-        _dynamic.Add(dropdown.Root);
+        _map = _menuMaps[pick];
+        _selected = null;
+        OpenOverlay();
+        Hint($"Editing '{_map.MapName}'. " + DefaultHint);
     }
 
     private string Summary()
@@ -178,7 +170,6 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
 
         CTMapDungeon.RegisterAll();
         _savedJson = CTDungeonMapSerialization.ToJson(_map);
-        Rebuild();
         RefreshChrome();
 
         var advisory = DungeonMapBuilder.Advisory(_map);
@@ -251,12 +242,12 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
 
         _canvas.Open(_map,
         [
-            new DungeonMapCanvas.DockItem("Preview", "Preview", "Preview - the map as the game draws it",
-                PreviewMap),
-            new DungeonMapCanvas.DockItem("Save", "Save", "Save - write this dungeon and register it",
-                SaveMap),
-            new DungeonMapCanvas.DockItem("Enter", "Play Level", "Enter - play the dungeon from its first floor",
-                EnterDungeon)
+            new Chrome.EditorDockItem("Preview", MapEditorIcons.GetToolIconOrNull("Preview"),
+                "Preview - the map as the game draws it", PreviewMap),
+            new Chrome.EditorDockItem("Save", MapEditorIcons.GetToolIconOrNull("Save"),
+                "Save - write this dungeon and register it", SaveMap),
+            new Chrome.EditorDockItem("Enter", MapEditorIcons.GetToolIconOrNull("Play Level"),
+                "Enter - play the dungeon from its first floor", EnterDungeon)
         ], Shortcuts);
 
         BuildOptionsColumn();
@@ -316,7 +307,6 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
         _map = null;
         _selected = null;
         _savedJson = null;
-        Rebuild();
 
         if (open == null) return;
 
@@ -324,6 +314,9 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
                 ? $"Closed '{open.MapName}' with changes that were never saved."
                 : $"Closed '{open.MapName}'.",
             unsaved ? StatusSeverity.Warning : StatusSeverity.Info);
+
+        // Back to whatever was in hand before the dungeon screen, rather than an empty panel.
+        if (!_switchingAway) _editor.SelectPreviousTool();
     }
 
     private string _savedJson;
@@ -437,7 +430,6 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
         _canvas?.HighlightNode(_selected);
         _canvas?.RebuildVisuals();
         BuildOptionsColumn();
-        Rebuild();
         RefreshChrome();
     }
 
@@ -489,6 +481,10 @@ public class DungeonBuilderTool : IMapEditorTool, IMapEditorShortcuts, IMapEdito
         if (_preview != null) return;
 
         if (_canvas == null || !_canvas.IsOpen || !_canvas.Visible || _map == null) return;
+
+        // The bars re-fit their chips and the sidebar shares its height from here; the editor's own
+        // LateUpdate only drives the room editor's chrome, which is hidden behind this screen.
+        _canvas.LateUpdate();
 
         if (_dragging && !Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0))
         {

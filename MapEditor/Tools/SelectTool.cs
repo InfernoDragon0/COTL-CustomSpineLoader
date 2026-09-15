@@ -268,14 +268,14 @@ public class SelectTool : IMapEditorTool, IMapEditorShortcuts, IMapDataContribut
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Select Object"),
-        ("Shift + LMB", "Add to / remove from selection"),
+        ("LMB", "Select"),
+        ("Shift+LMB", "Add / remove"),
         ("RMB", "Deselect"),
-        ("Ctrl + Drag", "Clone"),
-        ("Drag", "Yellow = move, Blue = resize, Purple = depth"),
-        ("Shift + Blue", "Stretch one axis"),
-        ("Ctrl + G", "Group / ungroup selection"),
-        ("Del", "Delete selected")
+        ("Ctrl+Drag", "Clone"),
+        ("Drag", "Move / resize / depth"),
+        ("Shift+Blue", "One axis"),
+        ("Ctrl+G", "Group"),
+        ("Del", "Delete")
     ];
 
     public void OnExit() => Select(null);

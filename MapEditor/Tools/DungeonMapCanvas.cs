@@ -27,34 +27,15 @@ public class DungeonMapCanvas
 
     public Action CloseRequested;
 
-    public readonly struct DockItem
-    {
-        public readonly string Label;
-        public readonly string Icon;
-        public readonly string Hint;
-        public readonly Action Do;
-
-        public DockItem(string label, string icon, string hint, Action act)
-        {
-            Label = label;
-            Icon = icon;
-            Hint = hint;
-            Do = act;
-        }
-    }
-
     // ---- metrics -----------------------------------------------------------------------------
 
-    private const float OptionsWidth = 360f;
-    private const float OptionsHeight = 940f;
-    private const float OptionsHeaderHeight = 34f;
-    private const float ToolIconSize = 72f;
-    private const int DockPadding = 8;
-    private const float DockHeight = ToolIconSize + DockPadding * 2;
-    private const float StatusLine = 26f;
-    private const float StatusHeight = StatusLine * 2f + 8f;
+    private const float OptionsWidth = Chrome.EditorSidebar.Width;
+    private const float BarHeight = Chrome.EditorBottomBar.Height;
+    private const float DockIconSize = 60f;
 
-    private const float NodeScale = 0.5f;
+    /// The editor draws the game's own node prefab at half size, so DungeonMapBuilder.ViewScale
+    /// is its reciprocal: editor units times that land on the overlay at the same relative spacing.
+    internal const float NodeScale = 0.5f;
     private const float BigNodeScale = 1.5f;
 
     private const float NodeRadius = 52f;
@@ -69,21 +50,11 @@ public class DungeonMapCanvas
     private RectTransform _nodeLayer;
     private RectTransform _markLayer;
 
-    private RectTransform _optionsRect;
-    private RectTransform _optionsContent;
-    private RectTransform _statusRect;
-    private RectTransform _dockRect;
-    private RectTransform _shortcutPanel;
-    private RectTransform _titleRect;
-    private RectTransform _closeRect;
-
-    private GameObject _collapseButton;
-    private bool _optionsCollapsed;
-    private bool _shortcutsCollapsed;
-
-    private TMP_Text _titleText;
-    private TMP_Text _badgeText;
-    private TMP_Text _hintText;
+    private Chrome.EditorTopBar _topBar;
+    private Chrome.EditorBottomBar _bottomBar;
+    private Chrome.EditorSidebar _sidebar;
+    private Chrome.ShortcutCard _card;
+    private MapEditorConfirm _confirm;
 
     private readonly List<RectTransform> _blockers = [];
     private readonly List<(string Key, string Action)> _shortcuts = [];
@@ -109,7 +80,7 @@ public class DungeonMapCanvas
 
     // ---- open / close ------------------------------------------------------------------------
 
-    public void Open(CTDungeonMap map, List<DockItem> dock,
+    public void Open(CTDungeonMap map, List<Chrome.EditorDockItem> dock,
         IEnumerable<(string Key, string Action)> shortcuts)
     {
         Close();
@@ -138,12 +109,10 @@ public class DungeonMapCanvas
         _nodeLayer = MakeLayer("Nodes");
         _markLayer = MakeLayer("Marks");
 
-        BuildTitle();
-        BuildOptions();
-        BuildDock(dock);
-        BuildShortcutPanel();
-        BuildStatus();
-        BuildConfirmStrip();
+        BuildBars(dock);
+
+        _ui.IconPreviewRightOffset = OptionsWidth + 28f;
+        _ui.IconPreviewTopOffset = Chrome.EditorTopBar.Height + 12f;
 
         _editor.SetOwnChromeVisible(false);
 
@@ -166,20 +135,18 @@ public class DungeonMapCanvas
             _editor.SetOwnChromeVisible(true);
         }
 
+        _ui.HideIconPreview();
+        _ui.IconPreviewRightOffset = MapEditorUI.DefaultIconPreviewRightOffset;
+        _ui.IconPreviewTopOffset = MapEditorUI.DefaultIconPreviewTopOffset;
+
         _root = null;
         _contentRoot = _linkLayer = _nodeLayer = _markLayer = null;
-        _optionsRect = _optionsContent = _statusRect = _dockRect = null;
-        _shortcutPanel = _titleRect = _closeRect = null;
-        _collapseButton = null;
-        _optionsCollapsed = false;
-        _shortcutsCollapsed = false;
 
-        _confirmRoot = null;
-        _confirmLabel = _confirmButtonLabel = _altButtonLabel = null;
-        _altButton = null;
-        _confirmButtonRect = _cancelRect = null;
-        _confirmAction = _altAction = null;
-        _titleText = _badgeText = _hintText = null;
+        _topBar = null;
+        _bottomBar = null;
+        _sidebar = null;
+        _card = null;
+        _confirm = null;
         OptionsContent = null;
 
         _blockers.Clear();
@@ -220,336 +187,70 @@ public class DungeonMapCanvas
         return rt;
     }
 
-    private void BuildTitle()
+    /// The same three plates as the room editor, from the same classes. The skin clone is already
+    /// in place by the time this runs, so the bars sit over it rather than under it.
+    private void BuildBars(List<Chrome.EditorDockItem> dock)
     {
-        var title = _ui.CreateLabel(_root.transform, "", 30);
-        _titleText = title.GetComponent<TMP_Text>();
-        _titleText.enableWordWrapping = false;
-        _titleText.raycastTarget = false;
+        var parent = _root.transform;
 
-        _titleRect = title.GetComponent<RectTransform>();
-        _titleRect.anchorMin = _titleRect.anchorMax = new Vector2(0f, 1f);
-        _titleRect.pivot = new Vector2(0f, 1f);
-        _titleRect.sizeDelta = new Vector2(700f, 44f);
-        _titleRect.anchoredPosition = new Vector2(24f, -18f);
+        _topBar = new Chrome.EditorTopBar(_ui, parent, _blockers.Add);
+        _topBar.RebuildActions(null,
+        [
+            ("Esc", "Close", () => CloseRequested?.Invoke())
+        ]);
 
-        var close = _ui.CreateButton(_root.transform, "X", () => CloseRequested?.Invoke(), 36f);
-        _closeRect = close.GetComponent<RectTransform>();
-        _closeRect.anchorMin = _closeRect.anchorMax = new Vector2(1f, 1f);
-        _closeRect.pivot = new Vector2(1f, 1f);
-        _closeRect.sizeDelta = new Vector2(36f, 36f);
-        _closeRect.anchoredPosition = new Vector2(-18f, -18f);
-        _blockers.Add(_closeRect);
-    }
+        _bottomBar = new Chrome.EditorBottomBar(_ui, parent, _blockers.Add);
+        _bottomBar.OnHelp = () => _card?.Toggle();
+        _bottomBar.SetHints(_shortcuts);
 
-    private void BuildOptions()
-    {
-        _optionsRect = MakeRect(_root.transform, "Options");
-        _optionsRect.anchorMin = _optionsRect.anchorMax = new Vector2(1f, 1f);
-        _optionsRect.pivot = new Vector2(1f, 1f);
-        _optionsRect.sizeDelta = new Vector2(OptionsWidth, OptionsHeight);
-        _optionsRect.anchoredPosition = new Vector2(-14f, -70f);
-
-        Plate(_optionsRect);
-        _blockers.Add(_optionsRect);
-
-        var header = MakeRect(_optionsRect, "Header");
-        header.anchorMin = new Vector2(0f, 1f);
-        header.anchorMax = new Vector2(1f, 1f);
-        header.pivot = new Vector2(0.5f, 1f);
-        header.sizeDelta = new Vector2(0f, OptionsHeaderHeight);
-        header.anchoredPosition = Vector2.zero;
-        header.gameObject.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
-
-        var title = _ui.CreateLabel(header, "Dungeon Nodes", 20, TextAlignmentOptions.Left);
-        var titleRect = title.GetComponent<RectTransform>();
-        titleRect.anchorMin = Vector2.zero;
-        titleRect.anchorMax = Vector2.one;
-        titleRect.offsetMin = new Vector2(12f, 0f);
-        titleRect.offsetMax = new Vector2(-36f, 0f);
-        var titleText = title.GetComponent<TMP_Text>();
-        titleText.enableWordWrapping = false;
-        titleText.raycastTarget = false;
-
-        _collapseButton = _ui.CreateButton(header, "-", ToggleCollapsed, 26f);
-        var collapseRect = _collapseButton.GetComponent<RectTransform>();
-        collapseRect.anchorMin = collapseRect.anchorMax = new Vector2(1f, 0.5f);
-        collapseRect.pivot = new Vector2(1f, 0.5f);
-        collapseRect.sizeDelta = new Vector2(26f, 26f);
-        collapseRect.anchoredPosition = new Vector2(-4f, 0f);
-
-        var content = MakeRect(_optionsRect, "Content");
-        content.anchorMin = Vector2.zero;
-        content.anchorMax = Vector2.one;
-        content.offsetMin = Vector2.zero;
-        content.offsetMax = new Vector2(0f, -OptionsHeaderHeight);
-        _optionsContent = content;
-
-        OptionsContent = _ui.CreateScrollColumn(content, "OptionsColumn", out _);
-    }
-
-    private void ToggleCollapsed()
-    {
-        _editor.BlockWorldClicks();
-        _optionsCollapsed = !_optionsCollapsed;
-
-        if (_optionsContent != null) _optionsContent.gameObject.SetActive(!_optionsCollapsed);
-        if (_optionsRect != null)
-            _optionsRect.sizeDelta = new Vector2(OptionsWidth,
-                _optionsCollapsed ? OptionsHeaderHeight : OptionsHeight);
-
-        var label = _collapseButton != null ? _collapseButton.GetComponentInChildren<TMP_Text>() : null;
-        if (label != null) label.text = _optionsCollapsed ? "+" : "-";
-    }
-
-    private void BuildDock(List<DockItem> items)
-    {
-        if (items == null || items.Count == 0) return;
-
-        var dock = new GameObject("Dock");
-        dock.transform.SetParent(_root.transform, false);
-
-        _dockRect = dock.AddComponent<RectTransform>();
-        _dockRect.anchorMin = _dockRect.anchorMax = new Vector2(0.5f, 0f);
-        _dockRect.pivot = new Vector2(0.5f, 0f);
-        _dockRect.sizeDelta = new Vector2(0f, DockHeight);
-        _dockRect.anchoredPosition = new Vector2(0f, 12f);
-
-        Plate(_dockRect);
-
-        var layout = dock.AddComponent<HorizontalLayoutGroup>();
-        layout.childAlignment = TextAnchor.MiddleLeft;
-        layout.spacing = 6f;
-        layout.padding = new RectOffset(DockPadding, DockPadding, DockPadding, DockPadding);
-        layout.childControlWidth = false;
-        layout.childControlHeight = false;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = false;
-
-        var fitter = dock.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        foreach (var item in items)
-        {
-            var act = item.Do;
-            _ui.CreateIconButton(dock.transform, MapEditorIcons.GetToolIconOrNull(item.Icon),
-                item.Label, () => act?.Invoke(), out _, ToolIconSize, item.Hint);
-        }
-
-        _blockers.Add(_dockRect);
-    }
-
-    private void BuildShortcutPanel()
-    {
-        var go = new GameObject("Shortcuts");
-        go.transform.SetParent(_root.transform, false);
-
-        _shortcutPanel = go.AddComponent<RectTransform>();
-        _shortcutPanel.anchorMin = Vector2.zero;
-        _shortcutPanel.anchorMax = Vector2.zero;
-        _shortcutPanel.pivot = Vector2.zero;
-        _shortcutPanel.sizeDelta = new Vector2(252f, 0f);
-        _shortcutPanel.anchoredPosition = new Vector2(16f, 16f);
-
-        var layout = go.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 4f;
-        layout.childControlWidth = true;
-        layout.childForceExpandWidth = true;
-        layout.childControlHeight = false;
-        layout.childForceExpandHeight = false;
-
-        var fitter = go.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        _blockers.Add(_shortcutPanel);
-        RefreshShortcuts();
-    }
-
-    private void RefreshShortcuts()
-    {
-        if (_shortcutPanel == null) return;
-
-        ClearLayer(_shortcutPanel);
-
-        if (!_shortcutsCollapsed)
-        {
-            foreach (var (key, action) in _shortcuts)
-                _ui.CreateKeyHint(_shortcutPanel, key, action);
-
-            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+Z", "Undo last change");
-            _ui.CreateKeyHint(_shortcutPanel, "Ctrl+S", "Quicksave this dungeon");
-            _ui.CreateKeyHint(_shortcutPanel, "Esc", "Close the map");
-        }
-
-        _ui.CreateButton(_shortcutPanel, _shortcutsCollapsed ? "Shortcuts   +" : "Shortcuts   -",
-            () =>
+        if (dock != null)
+            foreach (var item in dock)
             {
-                _editor.BlockWorldClicks();
-                _shortcutsCollapsed = !_shortcutsCollapsed;
-                RefreshShortcuts();
-            }, 30f);
+                var act = item.Do;
+                _bottomBar.AddTool(item.Icon, item.Label, () => act?.Invoke(), out _, DockIconSize,
+                    item.Hint);
+            }
+
+        _bottomBar.LayoutAfterDock();
+
+        _sidebar = new Chrome.EditorSidebar(_ui, parent, _blockers.Add,
+            Chrome.EditorTopBar.Height + 12f, BarHeight + 12f, optionsTitle: "Dungeon nodes",
+            withLayers: false);
+
+        OptionsContent = _ui.CreateScrollColumn(_sidebar.OptionsContent, "OptionsColumn", out _);
+
+        _card = new Chrome.ShortcutCard(_ui, parent, _blockers.Add, Globals);
+        _card.SetTool("Dungeon builder", _shortcuts);
+
+        _confirm = new MapEditorConfirm(_ui, parent, BarHeight + 12f);
     }
 
-    private void BuildStatus()
+    /// True under everything on this screen, so they live on the card rather than in the chip row.
+    private static readonly (string Key, string Action)[] Globals =
+    [
+        ("Ctrl+Z", "Undo last change"),
+        ("Ctrl+S", "Quicksave this dungeon"),
+        ("Esc", "Close the map")
+    ];
+
+    public void LateUpdate()
     {
-        _statusRect = MakeRect(_root.transform, "Status");
-        _statusRect.anchorMin = new Vector2(0f, 0f);
-        _statusRect.anchorMax = new Vector2(1f, 0f);
-        _statusRect.pivot = new Vector2(0.5f, 0f);
-
-        _statusRect.offsetMin = new Vector2(284f, 12f + DockHeight + 8f);
-        _statusRect.offsetMax = new Vector2(-388f, 12f + DockHeight + 8f);
-        _statusRect.sizeDelta = new Vector2(_statusRect.sizeDelta.x, StatusHeight);
-
-        Plate(_statusRect);
-        _blockers.Add(_statusRect);
-
-        var badge = _ui.CreateLabel(_statusRect, "", 17, TextAlignmentOptions.Left);
-        var badgeRect = badge.GetComponent<RectTransform>();
-        badgeRect.anchorMin = new Vector2(0f, 1f);
-        badgeRect.anchorMax = new Vector2(1f, 1f);
-        badgeRect.pivot = new Vector2(0.5f, 1f);
-        badgeRect.offsetMin = new Vector2(14f, 0f);
-        badgeRect.offsetMax = new Vector2(-14f, 0f);
-        badgeRect.sizeDelta = new Vector2(badgeRect.sizeDelta.x, StatusLine);
-        badgeRect.anchoredPosition = new Vector2(0f, -4f);
-        _badgeText = badge.GetComponent<TMP_Text>();
-        _badgeText.raycastTarget = false;
-        _badgeText.enableWordWrapping = false;
-        _badgeText.overflowMode = TextOverflowModes.Ellipsis;
-
-        var hint = _ui.CreateLabel(_statusRect, "", 17, TextAlignmentOptions.Left);
-        var hintRect = hint.GetComponent<RectTransform>();
-        hintRect.anchorMin = new Vector2(0f, 0f);
-        hintRect.anchorMax = new Vector2(1f, 0f);
-        hintRect.pivot = new Vector2(0.5f, 0f);
-        hintRect.offsetMin = new Vector2(14f, 0f);
-        hintRect.offsetMax = new Vector2(-14f, 0f);
-        hintRect.sizeDelta = new Vector2(hintRect.sizeDelta.x, StatusLine);
-        hintRect.anchoredPosition = new Vector2(0f, 4f);
-        _hintText = hint.GetComponent<TMP_Text>();
-        _hintText.raycastTarget = false;
-        _hintText.enableWordWrapping = false;
-        _hintText.overflowMode = TextOverflowModes.Ellipsis;
+        _bottomBar?.Tick();
+        _topBar?.Tick();
+        _sidebar?.Layout(OptionsContent != null ? OptionsContent.rect.height + 12f : 0f, 0f, true);
     }
 
-    // ---- confirm strip -------------------------------------------------------------------------
+    // ---- confirm strip ---------------------------------------------------------------------------
 
-    private const float ConfirmBottom = 12f + DockHeight + 8f + StatusHeight + 8f;
-
-    private GameObject _confirmRoot;
-    private TMP_Text _confirmLabel;
-    private TMP_Text _confirmButtonLabel;
-    private TMP_Text _altButtonLabel;
-    private GameObject _altButton;
-    private RectTransform _confirmButtonRect;
-    private RectTransform _cancelRect;
-    private Action _confirmAction;
-    private Action _altAction;
-
-    public bool ConfirmOpen => _confirmRoot != null && _confirmRoot.activeSelf;
-
-    private void BuildConfirmStrip()
-    {
-        _confirmRoot = new GameObject("Confirm");
-        _confirmRoot.transform.SetParent(_root.transform, false);
-
-        var rect = _confirmRoot.AddComponent<RectTransform>();
-        rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
-        rect.pivot = new Vector2(0.5f, 0f);
-        rect.sizeDelta = new Vector2(560f, 96f);
-        rect.anchoredPosition = new Vector2(0f, ConfirmBottom);
-
-        var border = _confirmRoot.AddComponent<Image>();
-        border.sprite = MapEditorUI.RoundedPlate;
-        border.type = Image.Type.Sliced;
-        border.pixelsPerUnitMultiplier = 1.6f;
-        border.color = new Color(0f, 0f, 0f, 0.55f);
-
-        var fill = MakeRect(rect, "Fill");
-        Stretch(fill);
-        fill.offsetMin = new Vector2(3f, 3f);
-        fill.offsetMax = new Vector2(-3f, -3f);
-
-        var plate = fill.gameObject.AddComponent<Image>();
-        plate.sprite = MapEditorUI.RoundedPlate;
-        plate.type = Image.Type.Sliced;
-        plate.pixelsPerUnitMultiplier = 1.6f;
-        plate.color = new Color(0f, 0f, 0f, 0.82f);
-        plate.raycastTarget = false;
-
-        var label = _ui.CreateLabel(rect, "", 20, TextAlignmentOptions.Center);
-        _confirmLabel = label.GetComponent<TMP_Text>();
-        _confirmLabel.raycastTarget = false;
-        var labelRect = label.GetComponent<RectTransform>();
-        labelRect.anchorMin = new Vector2(0f, 0.5f);
-        labelRect.anchorMax = new Vector2(1f, 1f);
-        labelRect.offsetMin = new Vector2(12f, 0f);
-        labelRect.offsetMax = new Vector2(-12f, -6f);
-
-        var confirm = _ui.CreateButton(rect, "Enter", () =>
-        {
-            var action = _confirmAction;
-            HideConfirm();
-            action?.Invoke();
-        }, 34f);
-        _confirmButtonRect = confirm.GetComponent<RectTransform>();
-        _confirmButtonRect.anchorMin = _confirmButtonRect.anchorMax = new Vector2(0.5f, 0f);
-        _confirmButtonRect.pivot = new Vector2(1f, 0f);
-        _confirmButtonRect.sizeDelta = new Vector2(150f, 34f);
-        _confirmButtonLabel = confirm.GetComponentInChildren<TMP_Text>();
-
-        _altButton = _ui.CreateButton(rect, "Discard", () =>
-        {
-            var action = _altAction;
-            HideConfirm();
-            action?.Invoke();
-        }, 34f, MapEditorEmphasis.Quiet);
-        var altRect = _altButton.GetComponent<RectTransform>();
-        altRect.anchorMin = altRect.anchorMax = new Vector2(0.5f, 0f);
-        altRect.pivot = new Vector2(0.5f, 0f);
-        altRect.sizeDelta = new Vector2(150f, 34f);
-        altRect.anchoredPosition = new Vector2(0f, 10f);
-        _altButtonLabel = _altButton.GetComponentInChildren<TMP_Text>();
-
-        var cancel = _ui.CreateButton(rect, "Cancel", HideConfirm, 34f, MapEditorEmphasis.Quiet);
-        _cancelRect = cancel.GetComponent<RectTransform>();
-        _cancelRect.anchorMin = _cancelRect.anchorMax = new Vector2(0.5f, 0f);
-        _cancelRect.pivot = new Vector2(0f, 0f);
-        _cancelRect.sizeDelta = new Vector2(150f, 34f);
-
-        _blockers.Add(rect);
-        _confirmRoot.SetActive(false);
-    }
+    public bool ConfirmOpen => _confirm is { Open: true };
 
     public void ShowConfirm(string text, Action onConfirm, string confirmLabel = "Enter",
         string altLabel = null, Action onAlt = null)
     {
-        if (_confirmRoot == null) return;
-
-        _confirmLabel.text = text;
-        _confirmAction = onConfirm;
-        _altAction = onAlt;
-
-        if (_confirmButtonLabel != null) _confirmButtonLabel.text = confirmLabel;
-
-        var threeWay = onAlt != null;
-        if (_altButton != null) _altButton.SetActive(threeWay);
-        if (_altButtonLabel != null && altLabel != null) _altButtonLabel.text = altLabel;
-
-        if (_confirmButtonRect != null)
-            _confirmButtonRect.anchoredPosition = new Vector2(threeWay ? -114f : -8f, 10f);
-        if (_cancelRect != null) _cancelRect.anchoredPosition = new Vector2(threeWay ? 114f : 8f, 10f);
-
-        _confirmRoot.SetActive(true);
+        _confirm?.Show(text, onConfirm, confirmLabel, altLabel, onAlt);
     }
 
-    public void HideConfirm()
-    {
-        _confirmAction = null;
-        _altAction = null;
-        if (_confirmRoot != null) _confirmRoot.SetActive(false);
-    }
+    public void HideConfirm() => _confirm?.Hide();
 
     private static void Plate(RectTransform rect)
     {
@@ -558,32 +259,12 @@ public class DungeonMapCanvas
 
     // ---- what the tool sets --------------------------------------------------------------------
 
-    public void SetTitle(string text)
-    {
-        if (_titleText != null) _titleText.text = text;
-    }
+    public void SetTitle(string text) => _topBar?.SetTitle(text);
 
-    public void SetBadge(string text, Color colour)
-    {
-        if (_badgeText == null) return;
+    public void SetBadge(string text, Color colour) => _topBar?.SetNote(text, colour);
 
-        _badgeText.text = text;
-        _badgeText.color = colour;
-    }
-
-    public void SetHint(string text, StatusSeverity severity = StatusSeverity.Info)
-    {
-        if (_hintText == null) return;
-
-        _hintText.text = text ?? "";
-        _hintText.color = severity switch
-        {
-            StatusSeverity.Success => new Color(0.55f, 0.9f, 0.55f),
-            StatusSeverity.Warning => new Color(1f, 0.76f, 0.3f),
-            StatusSeverity.Error => new Color(1f, 0.42f, 0.42f),
-            _ => Color.white
-        };
-    }
+    public void SetHint(string text, StatusSeverity severity = StatusSeverity.Info) =>
+        _bottomBar?.SetStatus(text, severity, pulse: true);
 
     public void SetIssues(List<DungeonMapBuilder.MapIssue> issues)
     {

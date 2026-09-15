@@ -51,8 +51,8 @@ public class LoadTool : IMapEditorTool, IMapEditorScreenTool, IMapEditorShortcut
 
     public IEnumerable<(string Key, string Action)> Shortcuts =>
     [
-        ("LMB", "Show that map"),
-        ("Esc", "Close the browser")
+        ("LMB", "Open"),
+        ("Esc", "Close")
     ];
 
     private bool OpenScreen()

@@ -26,6 +26,24 @@ public class MapEditorUI
 
     public static readonly Color TrackColour = new(0.05f, 0.05f, 0.04f, 0.95f);
 
+    /// Header plate for foldable sections. Nearly opaque on purpose: a light tint over the dressed
+    /// panel let the room show through and the header stopped reading as a separate bar.
+    public static readonly Color SectionIdle = new(0.09f, 0.08f, 0.07f, 0.92f);
+    public static readonly Color SectionHover = new(0.24f, 0.21f, 0.18f, 0.96f);
+
+    public static readonly Color MutedText = new(1f, 1f, 1f, 0.5f);
+    public static readonly Color AmberAccent = new(0.94f, 0.70f, 0.23f, 1f);
+
+    public const float SectionHeaderHeight = 36f;
+
+    public static Color StatusColour(StatusSeverity severity) => severity switch
+    {
+        StatusSeverity.Success => new Color(0.55f, 0.9f, 0.55f),
+        StatusSeverity.Warning => new Color(1f, 0.76f, 0.3f),
+        StatusSeverity.Error => new Color(1f, 0.42f, 0.42f),
+        _ => Color.white
+    };
+
     private IMapEditorHost _editor;
     private RectTransform _canvasRoot;
 
@@ -610,6 +628,133 @@ public class MapEditorUI
         return go;
     }
 
+    // ---- foldable section -------------------------------------------------------------------
+
+    /// <summary>
+    /// A foldable group under one header. The header is a flat tint the whole of which toggles the
+    /// fold; the title sits in the heading font with an optional muted summary on the right. With
+    /// <paramref name="withContent"/> the section also owns a content column right after the header
+    /// (for rows inside a tool panel); without it the caller owns the body and only listens to
+    /// <see cref="MapEditorSection.OnToggled"/> (the sidebar's slots).
+    /// </summary>
+    public MapEditorSection CreateSection(Transform parent, string title, bool open = true, bool withContent = true)
+    {
+        var header = new GameObject("Section_" + title);
+        header.transform.SetParent(parent, false);
+        var headerRt = header.AddComponent<RectTransform>();
+        headerRt.sizeDelta = new Vector2(360f, SectionHeaderHeight);
+        ApplyRowLayout(header, SectionHeaderHeight);
+
+        var plate = header.AddComponent<Image>();
+        plate.color = SectionIdle;
+
+        var row = header.AddComponent<HorizontalLayoutGroup>();
+        row.padding = new RectOffset(10, 12, 0, 0);
+        row.spacing = 8;
+        row.childAlignment = TextAnchor.MiddleLeft;
+        row.childControlWidth = true;
+        row.childControlHeight = true;
+        row.childForceExpandWidth = false;
+        row.childForceExpandHeight = true;
+
+        var chevron = CreateChevron(header.transform, out var chevronImage, out var chevronText);
+
+        var titleGo = CreateHeadingLabel(header.transform, title, 20);
+        var titleText = titleGo.GetComponent<TMP_Text>();
+        titleText.alignment = TextAlignmentOptions.Left;
+        titleText.enableWordWrapping = false;
+        titleText.overflowMode = TextOverflowModes.Ellipsis;
+        titleText.raycastTarget = false;
+        var titleElement = titleGo.GetComponent<LayoutElement>();
+        titleElement.flexibleWidth = 1f;
+        titleElement.minWidth = 40f;
+
+        var summaryGo = CreateLabel(header.transform, "", 17, TextAlignmentOptions.Right);
+        var summaryText = summaryGo.GetComponent<TMP_Text>();
+        summaryText.color = MutedText;
+        summaryText.enableWordWrapping = false;
+        summaryText.raycastTarget = false;
+        var summaryElement = summaryGo.GetComponent<LayoutElement>();
+        summaryElement.flexibleWidth = 0f;
+        summaryGo.SetActive(false);
+
+        RectTransform content = null;
+        if (withContent)
+        {
+            var body = new GameObject("SectionContent_" + title);
+            body.transform.SetParent(parent, false);
+            content = body.AddComponent<RectTransform>();
+
+            var column = body.AddComponent<VerticalLayoutGroup>();
+            column.spacing = 5f;
+            column.padding = new RectOffset(0, 0, 4, 4);
+            column.childControlWidth = true;
+            column.childForceExpandWidth = true;
+            column.childControlHeight = false;
+            column.childForceExpandHeight = false;
+
+            var fitter = body.AddComponent<ContentSizeFitter>();
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            var element = body.AddComponent<LayoutElement>();
+            element.flexibleWidth = 1f;
+        }
+
+        var section = new MapEditorSection(this, headerRt, content, titleText, summaryText, chevronImage,
+            chevronText, open);
+
+        AttachButton(header, plate, section.Toggle);
+        AddHover(header, plate, SectionIdle, SectionHover, null);
+        return section;
+    }
+
+    /// The fold marker: the game's own dropdown arrow when it can be borrowed, turned to point right
+    /// while folded; a plain "+"/"-" label otherwise.
+    private GameObject CreateChevron(Transform parent, out Image image, out TMP_Text text)
+    {
+        var go = new GameObject("Chevron");
+        go.transform.SetParent(parent, false);
+        var rt = go.AddComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(16f, 16f);
+
+        var element = go.AddComponent<LayoutElement>();
+        element.preferredWidth = 16f;
+        element.minWidth = 16f;
+        element.flexibleWidth = 0f;
+
+        image = null;
+        text = null;
+
+        var sprite = VanillaWidgets.DropdownArrow;
+        if (sprite != null)
+        {
+            var glyph = new GameObject("Glyph");
+            glyph.transform.SetParent(go.transform, false);
+            var glyphRt = glyph.AddComponent<RectTransform>();
+            glyphRt.anchorMin = new Vector2(0.5f, 0.5f);
+            glyphRt.anchorMax = new Vector2(0.5f, 0.5f);
+            glyphRt.sizeDelta = new Vector2(14f, 14f);
+
+            image = glyph.AddComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+            image.color = new Color(1f, 1f, 1f, 0.7f);
+            image.raycastTarget = false;
+            return go;
+        }
+
+        var label = CreateLabel(go.transform, "-", 17, TextAlignmentOptions.Center);
+        var labelRt = label.GetComponent<RectTransform>();
+        labelRt.anchorMin = Vector2.zero;
+        labelRt.anchorMax = Vector2.one;
+        labelRt.offsetMin = Vector2.zero;
+        labelRt.offsetMax = Vector2.zero;
+        text = label.GetComponent<TMP_Text>();
+        text.color = new Color(1f, 1f, 1f, 0.7f);
+        text.raycastTarget = false;
+        return go;
+    }
+
     // ---- buttons ----------------------------------------------------------------------------
 
     public GameObject CreateButton(Transform parent, string text, Action onClick, float height = 36f,
@@ -792,7 +937,14 @@ public class MapEditorUI
 
     public float IconPreviewRightOffset { get; set; } = PreviewRightOffset;
 
+    /// Distance from the top of the canvas; a screen with a top bar pushes the preview under it.
+    public float IconPreviewTopOffset { get; set; } = PreviewTopOffset;
+
+    private const float PreviewTopOffset = 12f;
+
     public static float DefaultIconPreviewRightOffset => PreviewRightOffset;
+
+    public static float DefaultIconPreviewTopOffset => PreviewTopOffset;
 
     public void ShowIconPreview(Sprite sprite, string caption)
     {
@@ -806,7 +958,7 @@ public class MapEditorUI
         if (_previewGO == null) return;
 
         var rect = (RectTransform)_previewGO.transform;
-        rect.anchoredPosition = new Vector2(-IconPreviewRightOffset, -12f);
+        rect.anchoredPosition = new Vector2(-IconPreviewRightOffset, -IconPreviewTopOffset);
 
         rect.SetAsLastSibling();
 
@@ -831,7 +983,7 @@ public class MapEditorUI
         rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
         rect.pivot = new Vector2(1f, 1f);
         rect.sizeDelta = new Vector2(PreviewSize, PreviewSize + 34f);
-        rect.anchoredPosition = new Vector2(-PreviewRightOffset, -12f);
+        rect.anchoredPosition = new Vector2(-IconPreviewRightOffset, -IconPreviewTopOffset);
 
         var plate = _previewGO.AddComponent<Image>();
         plate.sprite = RoundedPlate;
@@ -1057,31 +1209,33 @@ public class MapEditorUI
 
     // ---- dropdown ---------------------------------------------------------------------------
 
+    public const float DropdownHeight = 38f;
+
+    private static readonly Color DropdownOutline = new(1f, 1f, 1f, 0.14f);
+
     public MapEditorDropdown CreateDropdown(Transform parent, string caption, IList<string> options,
         Action<int, string> onSelected)
     {
-        const float dropdownHeight = 44f;
-
         var row = new GameObject("Dropdown_" + caption);
         row.transform.SetParent(parent, false);
         var rowRt = row.AddComponent<RectTransform>();
-        rowRt.sizeDelta = new Vector2(360, dropdownHeight);
-        ApplyRowLayout(row, dropdownHeight);
+        rowRt.sizeDelta = new Vector2(360, DropdownHeight);
+        ApplyRowLayout(row, DropdownHeight);
 
         var field = AddPlate(row, FieldIdle);
 
-        AddOutline(rowRt, new Color(0.75f, 0.65f, 0.45f, 0.9f));
+        AddOutline(rowRt, DropdownOutline);
 
-        var label = CreateLabel(row.transform, caption, 19);
+        var label = CreateLabel(row.transform, caption, 18);
         var labelRt = label.GetComponent<RectTransform>();
         labelRt.anchorMin = Vector2.zero;
         labelRt.anchorMax = Vector2.one;
         labelRt.offsetMin = new Vector2(12f, 0f);
-        labelRt.offsetMax = new Vector2(-54f, 0f);
+        labelRt.offsetMax = new Vector2(-40f, 0f);
         var labelText = label.GetComponent<TMP_Text>();
         labelText.enableWordWrapping = false;
         labelText.overflowMode = TextOverflowModes.Ellipsis;
-        labelText.color = new Color(0.98f, 0.94f, 0.85f);
+        labelText.color = Color.white;
 
         var arrowPanel = new GameObject("Arrow");
         arrowPanel.transform.SetParent(row.transform, false);
@@ -1089,7 +1243,7 @@ public class MapEditorUI
         arrowRt.anchorMin = new Vector2(1f, 0f);
         arrowRt.anchorMax = new Vector2(1f, 1f);
         arrowRt.pivot = new Vector2(1f, 0.5f);
-        arrowRt.sizeDelta = new Vector2(44f, -8f);
+        arrowRt.sizeDelta = new Vector2(34f, -8f);
         arrowRt.anchoredPosition = new Vector2(-4f, 0f);
 
         var caret = VanillaWidgets.DropdownArrow;
@@ -1102,18 +1256,26 @@ public class MapEditorUI
             caretRt.anchorMin = new Vector2(0.5f, 0.5f);
             caretRt.anchorMax = new Vector2(0.5f, 0.5f);
             caretRt.pivot = new Vector2(0.5f, 0.5f);
-            caretRt.sizeDelta = new Vector2(22f, 22f);
+            caretRt.sizeDelta = new Vector2(18f, 18f);
             caretRt.anchoredPosition = Vector2.zero;
 
             var caretImage = glyph.AddComponent<Image>();
             caretImage.sprite = caret;
             caretImage.preserveAspect = true;
-            caretImage.color = new Color(0.98f, 0.94f, 0.85f);
+            caretImage.color = new Color(1f, 1f, 1f, 0.75f);
             caretImage.raycastTarget = false;
         }
         else
         {
-            AddPlate(arrowPanel, Accent).raycastTarget = false;
+            var fallback = CreateLabel(arrowPanel.transform, "v", 17, TextAlignmentOptions.Center);
+            var fallbackRt = fallback.GetComponent<RectTransform>();
+            fallbackRt.anchorMin = Vector2.zero;
+            fallbackRt.anchorMax = Vector2.one;
+            fallbackRt.offsetMin = Vector2.zero;
+            fallbackRt.offsetMax = Vector2.zero;
+            var fallbackText = fallback.GetComponent<TMP_Text>();
+            fallbackText.color = MutedText;
+            fallbackText.raycastTarget = false;
         }
 
         var dropdown = new MapEditorDropdown(this, row, rowRt, labelText, caption, onSelected);
@@ -1130,15 +1292,13 @@ public class MapEditorUI
     /// spans the whole row, so long option text stays readable.
     /// </summary>
     public MapEditorDropdown CreateLabelledDropdown(Transform parent, string label, string caption,
-        IList<string> options, Action<int, string> onSelected, float split = 0.4f)
+        IList<string> options, Action<int, string> onSelected, float split = 0.35f)
     {
-        const float rowHeight = 44f;
-
         var row = new GameObject("LabelledDropdown_" + label);
         row.transform.SetParent(parent, false);
         var rowRt = row.AddComponent<RectTransform>();
-        rowRt.sizeDelta = new Vector2(360f, rowHeight);
-        ApplyRowLayout(row, rowHeight);
+        rowRt.sizeDelta = new Vector2(360f, DropdownHeight);
+        ApplyRowLayout(row, DropdownHeight);
 
         var title = CreateLabel(row.transform, label, 17);
         var titleRt = title.GetComponent<RectTransform>();
@@ -1150,6 +1310,7 @@ public class MapEditorUI
         titleText.enableWordWrapping = false;
         titleText.overflowMode = TextOverflowModes.Ellipsis;
         titleText.raycastTarget = false;
+        titleText.color = MutedText;
 
         var dropdown = CreateDropdown(row.transform, caption, options, onSelected);
 
@@ -1164,6 +1325,30 @@ public class MapEditorUI
 
         dropdown.ListFrom = rowRt;
         return dropdown;
+    }
+
+    /// <summary>
+    /// A dropdown with no field of its own: the list drops from whatever rect is handed in. It lets
+    /// a button answer a click with its own menu, instead of sending the reader to a panel to find
+    /// the same list. Returns null when there is nothing to choose from.
+    /// </summary>
+    public MapEditorDropdown ShowMenu(RectTransform anchor, IList<string> options,
+        Action<int, string> onSelected)
+    {
+        if (anchor == null || _canvasRoot == null || options == null || options.Count == 0) return null;
+
+        var holder = new GameObject("Menu");
+        holder.transform.SetParent(_canvasRoot, false);
+        var rt = holder.AddComponent<RectTransform>();
+        rt.sizeDelta = Vector2.zero;
+
+        var menu = new MapEditorDropdown(this, holder, rt, null, "", onSelected) { ListFrom = anchor };
+        menu.SetOptions(options);
+
+        // Set after the options, because setting them closes the menu first.
+        menu.DestroyRootOnClose = true;
+        menu.Open();
+        return menu;
     }
 
     private MapEditorDropdown _openDropdown;
@@ -1380,6 +1565,96 @@ public class MapEditorUI
         return row;
     }
 
+    /// <summary>
+    /// The key hint's sideways twin for a horizontal row: the same cream cap, the action beside it, no
+    /// plate of its own, and a width measured from the text so a layout group can pack chips left to
+    /// right. <see cref="MapEditorKeyChip.Remeasure"/> re-reads the width once the text scaler has had
+    /// its say.
+    /// </summary>
+    public GameObject CreateKeyChip(Transform parent, string key, string action, Action onClick = null,
+        Color? textColour = null)
+    {
+        const float height = 28f;
+
+        var row = new GameObject("Chip_" + action);
+        row.transform.SetParent(parent, false);
+        var rowRt = row.AddComponent<RectTransform>();
+        rowRt.sizeDelta = new Vector2(120f, height);
+
+        var element = row.AddComponent<LayoutElement>();
+        element.minHeight = height;
+        element.preferredHeight = height;
+        element.flexibleWidth = 0f;
+
+        // A chip is normally just painted text, but the ones that stand for a button (the editor keys
+        // in the top bar, the "all shortcuts" chip) need something for the raycast to land on.
+        Image hit = null;
+        if (onClick != null)
+        {
+            hit = row.AddComponent<Image>();
+            hit.color = new Color(1f, 1f, 1f, 0f);
+        }
+
+        var capWidth = Mathf.Clamp(22f + (key?.Length ?? 1) * 9f, 30f, 96f);
+
+        var cap = new GameObject("Cap");
+        cap.transform.SetParent(row.transform, false);
+        var capRt = cap.AddComponent<RectTransform>();
+        capRt.anchorMin = new Vector2(0f, 0.5f);
+        capRt.anchorMax = new Vector2(0f, 0.5f);
+        capRt.pivot = new Vector2(0f, 0.5f);
+        capRt.sizeDelta = new Vector2(capWidth, 24f);
+        capRt.anchoredPosition = Vector2.zero;
+
+        var capImage = cap.AddComponent<Image>();
+        capImage.sprite = RoundedPlate;
+        capImage.type = Image.Type.Sliced;
+        capImage.pixelsPerUnitMultiplier = 3.5f;
+        capImage.color = new Color(0.95f, 0.93f, 0.86f, 1f);
+        capImage.raycastTarget = false;
+
+        var capLabel = CreateLabel(cap.transform, key, 17, TextAlignmentOptions.Center);
+        var capLabelRt = capLabel.GetComponent<RectTransform>();
+        capLabelRt.anchorMin = Vector2.zero;
+        capLabelRt.anchorMax = Vector2.one;
+        capLabelRt.offsetMin = Vector2.zero;
+        capLabelRt.offsetMax = Vector2.zero;
+
+        var capText = capLabel.GetComponent<TMP_Text>();
+        capText.color = new Color(0.11f, 0.10f, 0.09f);
+        capText.enableWordWrapping = false;
+        capText.raycastTarget = false;
+
+        var label = CreateLabel(row.transform, action, 17);
+        var labelRt = label.GetComponent<RectTransform>();
+        labelRt.anchorMin = new Vector2(0f, 0f);
+        labelRt.anchorMax = new Vector2(0f, 1f);
+        labelRt.pivot = new Vector2(0f, 0.5f);
+        labelRt.offsetMin = new Vector2(capWidth + 8f, 0f);
+        labelRt.offsetMax = new Vector2(capWidth + 8f, 0f);
+
+        var labelText = label.GetComponent<TMP_Text>();
+        labelText.enableWordWrapping = false;
+        labelText.overflowMode = TextOverflowModes.Overflow;
+        labelText.color = textColour ?? new Color(0.87f, 0.83f, 0.76f);
+        labelText.raycastTarget = false;
+
+        var chip = row.AddComponent<MapEditorKeyChip>();
+        chip.Element = element;
+        chip.Label = labelText;
+        chip.LabelRect = labelRt;
+        chip.CapWidth = capWidth;
+        chip.Remeasure();
+
+        if (onClick != null)
+        {
+            AttachButton(row, hit, onClick);
+            AddHover(row, hit, new Color(1f, 1f, 1f, 0f), new Color(1f, 1f, 1f, 0.10f), null);
+        }
+
+        return row;
+    }
+
     public static string Initials(string label)
     {
         if (string.IsNullOrEmpty(label)) return "?";
@@ -1465,6 +1740,31 @@ public class MapEditorHover : MonoBehaviour, IPointerEnterHandler, IPointerExitH
 
         if (hovered) host.ShowHoverStatus(text);
         else host.ClearHoverStatus();
+    }
+}
+
+/// A key chip's width is the cap plus the action text; the text scaler can change the font size
+/// after the chip is built, so the bar asks for a re-measure for a couple of frames after a rebuild.
+public class MapEditorKeyChip : MonoBehaviour
+{
+    public LayoutElement Element;
+    public TMP_Text Label;
+    public RectTransform LabelRect;
+    public float CapWidth;
+
+    public float Width { get; private set; }
+
+    public void Remeasure()
+    {
+        if (Label == null || Element == null) return;
+
+        var text = Label.GetPreferredValues(Label.text ?? "").x + 2f;
+        Width = CapWidth + 8f + text + 6f;
+
+        Element.preferredWidth = Width;
+        Element.minWidth = Width;
+
+        if (LabelRect != null) LabelRect.sizeDelta = new Vector2(text, LabelRect.sizeDelta.y);
     }
 }
 
