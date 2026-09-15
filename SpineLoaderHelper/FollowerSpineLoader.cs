@@ -186,7 +186,7 @@ public class FollowerSpineLoader
         return skinVariantName;
     }
 
-    private static SpineAtlasAsset AtlasFor(string skinVariantName, string partName, Texture2D texture,
+    private static SpineAtlasAsset AtlasFor(string skinVariantName, int slotIndex, string partName, Texture2D texture,
         Dictionary<string, SpineAtlasAsset> cache, Material template)
     {
         var key = texture.GetInstanceID() + ":" + partName;
@@ -195,16 +195,22 @@ public class FollowerSpineLoader
             cached.materials[0] != null && cached.materials[0].mainTexture == texture)
             return cached;
 
+        // spine-unity matches an atlas page to a material by the page's file name WITHOUT its directory,
+        // so a part name with a slash (Face/MOUTH_SAD) must not reach the texture or page name. The slot
+        // index is in it because COTL_API caches converted textures by name and the same attachment
+        // name lives in several slots (EYE in EYE_LEFT and EYE_RIGHT).
+        var pageName = PageName(skinVariantName, slotIndex, partName);
+        texture.name = pageName;
         var mat = template != null ? new Material(template) : new Material(SpineFolderLoader.SpineShader());
         mat.mainTexture = texture;
-        mat.name = skinVariantName + "_" + partName;
+        mat.name = pageName;
         SpineFolderLoader.Keep(mat);
         SpineFolderLoader.Keep(texture);
 
         Material[] mats = [mat];
         var atlasAsset = SpineAtlasAsset.CreateRuntimeInstance(
             GenerateAtlasText(
-                skinVariantName + "_" + partName,
+                pageName,
                 partName,
                 texture.width.ToString(),
                 texture.height.ToString()),
@@ -213,6 +219,9 @@ public class FollowerSpineLoader
         if (cache != null) cache[key] = atlasAsset;
         return atlasAsset;
     }
+
+    private static string PageName(string skinVariantName, int slotIndex, string partName) =>
+        (skinVariantName + "_" + slotIndex + "_" + partName).Replace('/', '_').Replace('\\', '_');
 
     public static Skin ComposeSkin(string skinVariantName, string baseSkinName,
         List<Tuple<int, string, Texture2D, FollowerSkinPartConfig>> skinData,
@@ -247,8 +256,7 @@ public class FollowerSpineLoader
 
             try
             {
-                skinOverride.Item3.name = skinVariantName + "_" + skinOverride.Item2;
-                var atlasAsset = AtlasFor(skinVariantName, skinOverride.Item2, skinOverride.Item3, atlasCache, materialTemplate);
+                var atlasAsset = AtlasFor(skinVariantName, skinOverride.Item1, skinOverride.Item2, skinOverride.Item3, atlasCache, materialTemplate);
 
                 var baseAttachment = baseSkin.GetAttachment(skinOverride.Item1, skinOverride.Item2);
 
@@ -301,6 +309,7 @@ public class FollowerSpineLoader
                             regionAttachment.Height = diffY;
                             regionAttachment.UpdateOffset();
                             finalSkin.SetAttachment(skinOverride.Item1, skinOverride.Item2, regionAttachment);
+                            LogPart(skinVariantName, skinOverride.Item1, skinOverride.Item2, regionAttachment, "mesh");
                             break;
 
                         }
@@ -319,6 +328,7 @@ public class FollowerSpineLoader
                         regionAttachment.UpdateOffset();
 
                         finalSkin.SetAttachment(skinOverride.Item1, skinOverride.Item2, regionAttachment);
+                        LogPart(skinVariantName, skinOverride.Item1, skinOverride.Item2, regionAttachment, "region");
                     break;
                 default:
                     Plugin.Log.LogWarning(
@@ -334,6 +344,16 @@ public class FollowerSpineLoader
         }
 
         return finalSkin;
+    }
+
+    // One line per placed part, in skeleton units, so an author can compare the game's placement with
+    // the numbers they expected. Only with DebugDumpFollowerSpineAtlas on, like the slot dump.
+    private static void LogPart(string skinVariantName, int slotIndex, string partName, RegionAttachment a, string from)
+    {
+        if (Plugin.DebugDumpFollowerSpineAtlas?.Value != true) return;
+        Plugin.Log.LogInfo($"PART {skinVariantName} slot {slotIndex} {partName} ({from}): x={a.X:F3} y={a.Y:F3} " +
+                           $"rot={a.Rotation:F1} scale=({a.ScaleX:F3},{a.ScaleY:F3}) box=({a.Width:F3}x{a.Height:F3}) " +
+                           $"png={a.RegionWidth}x{a.RegionHeight}");
     }
 
     public static void ApplyColours(Skeleton skeleton, FollowerSkinConfig config, int colourSet)

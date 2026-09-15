@@ -1,0 +1,9 @@
+{
+    "name": "CotLSpineLoader",
+    "version_number": "2.0.6",
+    "website_url": "https://github.com/InfernoDragon0/COTL-CustomSpineLoader",
+    "description": "[PRE-RELEASE 7] CultTweaker 2.0 experimental build: follower hats and clothes, broom transmog, structure favourites and hotbar, trigger methods, world map API. For Cult of the Lamb 1.5.26. Back up your saves!",
+    "dependencies": [
+        "xhayper-COTL_API-0.3.4"
+    ]
+}

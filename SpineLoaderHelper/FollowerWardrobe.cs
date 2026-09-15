@@ -49,37 +49,59 @@ public static class FollowerWardrobe
     {
         var root = Path.Combine(Plugin.PluginPath, FolderName);
         if (!Directory.Exists(root)) Directory.CreateDirectory(root);
+        Scan();
 
+        if (Packs.Count > 0)
+            Plugin.Log.LogInfo($"{Packs.Count} follower wardrobe pack(s): {HatKeys().Count} hat(s), " +
+                               $"{ClothesKeys().Count} clothes; each loads when a follower first wears it.");
+    }
+
+    /// Picks up packs that arrived after boot (a multiplayer guest receiving the host's), and
+    /// gives a pack that failed to load another chance.
+    public static void Reload()
+    {
+        Scan();
+        foreach (var pack in Packs.Values) pack.Failed = false;
+        Plugin.Log.LogInfo($"Follower wardrobe rescanned: {Packs.Count} pack(s).");
+    }
+
+    private static void Scan()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var folder in APIHelper.ModContentPaths.DirectoriesIn(FolderName))
         {
-            var pack = new Pack { Name = Path.GetFileName(folder), Folder = folder };
+            var name = Path.GetFileName(folder);
+            string[] hats = [], clothes = [];
             var configPath = Path.Combine(folder, "config.json");
             if (File.Exists(configPath))
             {
                 try
                 {
                     var config = JsonConvert.DeserializeObject<FollowerSpineConfig>(File.ReadAllText(configPath));
-                    pack.Hats = config?.Hats ?? [];
-                    pack.Clothes = config?.Clothes ?? [];
+                    hats = config?.Hats ?? [];
+                    clothes = config?.Clothes ?? [];
                 }
                 catch (Exception e)
                 {
-                    Plugin.Log.LogWarning($"{FolderName}/{pack.Name}: config.json unreadable ({e.Message}).");
+                    Plugin.Log.LogWarning($"{FolderName}/{name}: config.json unreadable ({e.Message}).");
                 }
             }
 
-            if (pack.Hats.Length == 0 && pack.Clothes.Length == 0)
+            if (hats.Length == 0 && clothes.Length == 0)
             {
-                Plugin.Log.LogWarning($"{FolderName}/{pack.Name}: config.json names no hats or clothes; skipped.");
+                Plugin.Log.LogWarning($"{FolderName}/{name}: config.json names no hats or clothes; skipped.");
                 continue;
             }
 
-            Packs[pack.Name] = pack;
+            // A pack already loaded keeps its asset; only the lists it offers are refreshed.
+            if (!Packs.TryGetValue(name, out var pack)) Packs[name] = pack = new Pack { Name = name };
+            pack.Folder = folder;
+            pack.Hats = hats;
+            pack.Clothes = clothes;
+            seen.Add(name);
         }
 
-        if (Packs.Count > 0)
-            Plugin.Log.LogInfo($"{Packs.Count} follower wardrobe pack(s): {HatKeys().Count} hat(s), " +
-                               $"{ClothesKeys().Count} clothes; each loads when a follower first wears it.");
+        foreach (var gone in Packs.Keys.Where(k => !seen.Contains(k)).ToList()) Packs.Remove(gone);
     }
 
     public static List<string> HatKeys() => Keys(p => p.Hats);

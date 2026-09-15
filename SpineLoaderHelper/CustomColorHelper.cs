@@ -11,8 +11,15 @@ public class CustomColorHelper
 {
     //TODO: maybe, each part of the body can be a different color in the future
     public static Dictionary<int, CustomFollowerColor> CustomColors { get; private set; } = [];
+
+    /// A multiplayer guest mirroring the host's followers: this machine's own records are set aside
+    /// and nothing is written to disk until mirroring ends.
+    public static bool Mirroring { get; private set; }
+    private static Dictionary<int, CustomFollowerColor> _own;
+
     public static void LoadCustomColors(int saveSlot)
     {
+        if (Mirroring) return;
         if (!File.Exists(Path.Combine(Plugin.PluginPath, $"CustomColors{saveSlot}.json")))
         {
             Plugin.Log.LogInfo("Creating new CustomColors.json file for save slot " + saveSlot + ".");
@@ -25,8 +32,40 @@ public class CustomColorHelper
 
     }
 
+    public static void SetMirroring(bool on)
+    {
+        if (on == Mirroring) return;
+        Mirroring = on;
+        if (on)
+        {
+            _own = CustomColors;
+            CustomColors = [];
+        }
+        else
+        {
+            CustomColors = _own ?? [];
+            _own = null;
+        }
+    }
+
+    public static string Serialize(int id) =>
+        CustomColors.TryGetValue(id, out var record) ? JsonConvert.SerializeObject(record) : null;
+
+    /// Replaces a follower's record with one another machine serialised; null or empty removes it.
+    public static bool Apply(int id, string json)
+    {
+        if (string.IsNullOrEmpty(json)) return CustomColors.Remove(id);
+
+        var record = JsonConvert.DeserializeObject<CustomFollowerColor>(json);
+        if (record == null) return false;
+        record.FollowerId = id;
+        CustomColors[id] = record;
+        return true;
+    }
+
     public static void SaveCustomColors()
     {
+        if (Mirroring) return;
         var json = JsonConvert.SerializeObject(CustomColors, Formatting.Indented);
         File.WriteAllText(Path.Combine(Plugin.PluginPath, $"CustomColors{SaveAndLoad.SAVE_SLOT}.json"), json);
         Plugin.Log.LogInfo("Saved custom colors");

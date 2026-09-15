@@ -15,7 +15,8 @@ public static class CultTweakerApi
     /// Raised by one on every addition. A caller written against 1 keeps working on 2.
     /// 2 added the quest kind and the quest members at the end of this class.
     /// 3 added the world map progress members at the end of this class.
-    public const int ContractVersion = 3;
+    /// 4 added the follower look members, for carrying a follower's CultTweaker look to another machine.
+    public const int ContractVersion = 4;
 
     public const string PluginGuid = Plugin.PluginGuid;
 
@@ -590,6 +591,68 @@ public static class CultTweakerApi
             Plugin.Log.LogError($"Api: world map, {what} failed: {e}");
             return false;
         }
+    }
+
+    // ---- follower looks (contract version 4) -------------------------------------------------------
+
+    /// <summary>
+    /// Every follower, by the game's follower id, that has a CultTweaker look in the save the player
+    /// has open: a custom colour, scale, costume override, hat or clothes from the Customize Follower
+    /// command. Followers wearing nothing custom are not listed.
+    /// </summary>
+    public static IReadOnlyList<int> FollowerLookIds() => [.. CustomColorHelper.CustomColors.Keys];
+
+    /// <summary>
+    /// A follower's look as one opaque string, or null when it has none. Carry it as it is and hand
+    /// it to <see cref="ApplyFollowerLook"/> on the other machine; everything inside is named, not
+    /// numbered, so it is safe to send. Cheap enough to read every second.
+    /// </summary>
+    public static string FollowerLook(int followerId) => CustomColorHelper.Serialize(followerId);
+
+    /// <summary>
+    /// Gives a follower the look another machine read with <see cref="FollowerLook"/>, or takes it
+    /// away with null, and redresses the follower if it is in the world. A hat or clothes from a
+    /// wardrobe pack this machine lacks is skipped with one log line; the rest of the look applies.
+    /// </summary>
+    public static bool ApplyFollowerLook(int followerId, string look)
+    {
+        return Guarded($"applying look to follower {followerId}", () =>
+        {
+            var changed = CustomColorHelper.Apply(followerId, look);
+            Redress(followerId);
+            return changed;
+        });
+    }
+
+    /// <summary>
+    /// For a multiplayer guest showing the host's followers. On, this machine's own looks are set
+    /// aside so they cannot land on the host's followers, and nothing is written to disk; off puts
+    /// them back. Followers in the world are redressed either way.
+    /// </summary>
+    public static void MirrorFollowerLooks(bool on)
+    {
+        Guarded($"mirroring follower looks {(on ? "on" : "off")}", () =>
+        {
+            var before = new List<int>(CustomColorHelper.CustomColors.Keys);
+            CustomColorHelper.SetMirroring(on);
+            foreach (var id in before) Redress(id);
+            foreach (var id in CustomColorHelper.CustomColors.Keys) Redress(id);
+            return true;
+        });
+    }
+
+    /// Reads the FollowerSpines folders again, for a wardrobe pack that arrived after boot.
+    public static void ReloadFollowerWardrobe()
+    {
+        Guarded("reloading the follower wardrobe", () => { FollowerWardrobe.Reload(); return true; });
+    }
+
+    private static void Redress(int followerId)
+    {
+        var follower = FollowerManager.FindFollowerByID(followerId);
+        var info = follower != null && follower.Brain != null ? follower.Brain._directInfoAccess : null;
+        if (info == null || follower.Spine == null || follower.Spine.skeleton == null) return;
+        FollowerBrain.SetFollowerCostume(follower.Spine.skeleton, info, false, true);
     }
 
     // ---- where content lives ---------------------------------------------------------------------

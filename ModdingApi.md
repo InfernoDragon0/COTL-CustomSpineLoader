@@ -11,6 +11,7 @@ assembly and call a small contract. Most mods want the first.
 - [Actions](#actions)
 - [Quests (contract version 2)](#quests-contract-version-2)
 - [World map progress (contract version 3)](#world-map-progress-contract-version-3)
+- [Follower looks (contract version 4)](#follower-looks-contract-version-4)
 - [Where content lives](#where-content-lives)
 - [Ids and why you must not save them](#ids-and-why-you-must-not-save-them)
 - [Load order](#load-order)
@@ -221,6 +222,36 @@ Two asymmetries worth knowing before you rely on them:
 Progress is CultTweaker's own per-save-slot file, not the game's save, and is keyed by name
 throughout, so none of this carries the id warning below.
 
+## Follower looks (contract version 4)
+
+```csharp
+IReadOnlyList<int> FollowerLookIds();
+string             FollowerLook(int followerId);
+bool               ApplyFollowerLook(int followerId, string look);
+void               MirrorFollowerLooks(bool on);
+void               ReloadFollowerWardrobe();
+```
+
+A follower's **look** is everything the Customize Follower command gives it: a custom colour and
+scale, a costume override, and a hat and clothes from a wardrobe pack. The game's save does not
+carry it; CultTweaker keeps it in its own per-save-slot file, keyed by the game's follower id. These
+members exist so a multiplayer mod can carry that record to the other machine.
+
+`FollowerLook` returns one opaque string per follower and `ApplyFollowerLook` takes it back on the
+other side, redressing the follower at once if it is in the world. Treat the string as bytes: do not
+parse it, and do not build one. Everything inside is a name, so the id warning below does not
+apply, and the follower id itself is the game's own, which the two machines share once the guest
+has the host's save.
+
+`MirrorFollowerLooks(true)` is for the guest: it sets that machine's own records aside, so looks
+from the guest's save cannot land on the host's followers, and stops the file being written until
+`MirrorFollowerLooks(false)` puts them back. Call it before the first `ApplyFollowerLook` and again
+when the session ends.
+
+A hat or clothes names a wardrobe pack by folder name. If the other machine lacks that pack, that
+part of the look is skipped with a single log line and the rest applies. `ReloadFollowerWardrobe`
+reads the `FollowerSpines` folders again, for a pack that was copied over after boot.
+
 ## Where content lives
 
 ```csharp
@@ -273,6 +304,7 @@ if (CultTweakerApi.ContractVersion >= 2) { /* the quest members */ }
 | 1 | The kinds, the queries, the actions, the content paths, `OnReady`. |
 | 2 | `Kind.Quests` and the quest members. |
 | 3 | The world map progress members. |
+| 4 | The follower look members. |
 
 If you need something the contract does not expose, ask rather than reflecting into the assembly:
 anything reached by reflection will break the next time those internals move.

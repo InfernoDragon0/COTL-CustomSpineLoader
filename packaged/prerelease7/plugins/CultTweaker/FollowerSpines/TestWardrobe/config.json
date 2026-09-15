@@ -1,0 +1,8 @@
+{
+    "hats": [
+        "Hats/CustomHat"
+    ],
+    "clothes": [
+        "Clothes/CustomClothes"
+    ]
+}

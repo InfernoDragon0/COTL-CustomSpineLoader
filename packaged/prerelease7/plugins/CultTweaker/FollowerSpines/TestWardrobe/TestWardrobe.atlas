@@ -1,0 +1,69 @@
+
+TestWardrobe.png
+size: 256,232
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+TestWardrobe/hat
+  rotate: false
+  xy: 0, 0
+  size: 120, 89
+  orig: 120, 89
+  offset: 0, 0
+  index: -1
+TestWardrobe/Body_Custom_Btm
+  rotate: false
+  xy: 122, 0
+  size: 79, 72
+  orig: 79, 72
+  offset: 0, 0
+  index: -1
+TestWardrobe/Body_Custom_Top
+  rotate: false
+  xy: 0, 91
+  size: 79, 72
+  orig: 79, 72
+  offset: 0, 0
+  index: -1
+TestWardrobe/Body_Custom_Up_Btm
+  rotate: false
+  xy: 81, 91
+  size: 79, 72
+  orig: 79, 72
+  offset: 0, 0
+  index: -1
+TestWardrobe/Body_Custom_Up_Top
+  rotate: false
+  xy: 162, 91
+  size: 79, 72
+  orig: 79, 72
+  offset: 0, 0
+  index: -1
+TestWardrobe/SleeveLeft_Custom_Btm
+  rotate: false
+  xy: 0, 165
+  size: 38, 65
+  orig: 38, 65
+  offset: 0, 0
+  index: -1
+TestWardrobe/SleeveLeft_Custom_Top
+  rotate: false
+  xy: 40, 165
+  size: 38, 65
+  orig: 38, 65
+  offset: 0, 0
+  index: -1
+TestWardrobe/SleeveRight_Custom_Btm
+  rotate: false
+  xy: 80, 165
+  size: 36, 63
+  orig: 36, 63
+  offset: 0, 0
+  index: -1
+TestWardrobe/SleeveRight_Custom_Top
+  rotate: false
+  xy: 118, 165
+  size: 36, 63
+  orig: 36, 63
+  offset: 0, 0
+  index: -1

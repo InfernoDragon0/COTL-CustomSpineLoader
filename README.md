@@ -177,6 +177,10 @@ needs to be, which only shows as a longer first wear.
 The pack is only loaded when a follower first wears something from it, so unused packs cost
 nothing at startup.
 
+In multiplayer, a follower's hat, clothes, colour and costume override reach the other player only
+with a COTL MP Steam build that carries follower looks; the pack itself must be installed on both
+machines, or that follower shows its ordinary look there.
+
 ### Custom NPC Quests
 
 A custom NPC can hand out quests. They appear in the objectives panel on the right of the screen

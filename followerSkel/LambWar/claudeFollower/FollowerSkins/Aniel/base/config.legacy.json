@@ -1,0 +1,606 @@
+{
+    "overrideBaseSkin": "Cat",
+    "partConfigs": {
+        "face": {
+            "SlotIndex": 89,
+            "PartName": "HEAD_SKIN_BTM",
+            "scaleX": 0.7437,
+            "scaleY": 0.573,
+            "rotation": -90,
+            "offsetX": 0.0679,
+            "offsetY": 0.0178,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "face_back": {
+            "SlotIndex": 89,
+            "PartName": "HEAD_SKIN_BTM_BACK",
+            "scaleX": 0.7551,
+            "scaleY": 0.5849,
+            "rotation": -90,
+            "offsetX": 0.0679,
+            "offsetY": 0.0178,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "ears": {
+            "SlotIndex": 91,
+            "PartName": "HEAD_SKIN_TOP",
+            "scaleX": 1.0581,
+            "scaleY": 0.2487,
+            "rotation": -90,
+            "offsetX": 0.0756,
+            "offsetY": 0.0562,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "ears_back": {
+            "SlotIndex": 91,
+            "PartName": "HEAD_SKIN_TOP_BACK",
+            "scaleX": 1.0581,
+            "scaleY": 0.2487,
+            "rotation": -90,
+            "offsetX": 0.0756,
+            "offsetY": 0.0562,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "hair": {
+            "SlotIndex": 88,
+            "PartName": "EXTRA_BTM",
+            "scaleX": 3.5333,
+            "scaleY": 2.8746,
+            "rotation": -90,
+            "offsetX": 0.1775,
+            "offsetY": -0.2572,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "horns": {
+            "SlotIndex": 92,
+            "PartName": "MARKINGS",
+            "scaleX": 1.5067,
+            "scaleY": 0.5153,
+            "rotation": -90,
+            "offsetX": 0.3132,
+            "offsetY": -0.2674,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "hair_back": {
+            "SlotIndex": 94,
+            "PartName": "EXTRA_TOP_BACK",
+            "scaleX": 3.5333,
+            "scaleY": 2.8746,
+            "rotation": -90,
+            "offsetX": 0.1775,
+            "offsetY": -0.2572,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "glasses": {
+            "SlotIndex": 94,
+            "PartName": "EXTRA_TOP",
+            "scaleX": 1.72,
+            "scaleY": 0.8407,
+            "rotation": -90,
+            "offsetX": 0.0213,
+            "offsetY": -0.2469,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE": {
+            "SlotIndex": 102,
+            "PartName": "EYE",
+            "scaleX": 0.5552,
+            "scaleY": 0.2657,
+            "rotation": 0,
+            "offsetX": 0.1184,
+            "offsetY": -0.0178,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_UP": {
+            "SlotIndex": 102,
+            "PartName": "EYE_UP",
+            "scaleX": 0.5646,
+            "scaleY": 0.2613,
+            "rotation": 0,
+            "offsetX": 0.1209,
+            "offsetY": -0.0203,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE": {
+            "SlotIndex": 101,
+            "PartName": "EYE",
+            "scaleX": -0.5552,
+            "scaleY": 0.2657,
+            "rotation": 0,
+            "offsetX": 0.0581,
+            "offsetY": -0.0285,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_UP": {
+            "SlotIndex": 101,
+            "PartName": "EYE_UP",
+            "scaleX": -0.5646,
+            "scaleY": 0.2613,
+            "rotation": 0,
+            "offsetX": 0.0606,
+            "offsetY": -0.031,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_CLOSED": {
+            "SlotIndex": 102,
+            "PartName": "EYE_CLOSED",
+            "scaleX": 0.4988,
+            "scaleY": 0.3919,
+            "rotation": 0,
+            "offsetX": 0.1258,
+            "offsetY": -0.0203,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SLEEPING": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SLEEPING",
+            "scaleX": 0.5176,
+            "scaleY": 0.3499,
+            "rotation": 0,
+            "offsetX": 0.1041,
+            "offsetY": -0.0178,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SLEEPING_TIRED": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SLEEPING_TIRED",
+            "scaleX": 0.508,
+            "scaleY": 0.2648,
+            "rotation": 0,
+            "offsetX": 0.1041,
+            "offsetY": -0.0178,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_CLOSED": {
+            "SlotIndex": 101,
+            "PartName": "EYE_CLOSED",
+            "scaleX": -0.4988,
+            "scaleY": 0.3919,
+            "rotation": 0,
+            "offsetX": 0.0532,
+            "offsetY": -0.031,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SLEEPING": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SLEEPING",
+            "scaleX": -0.5176,
+            "scaleY": 0.3499,
+            "rotation": 0,
+            "offsetX": 0.0532,
+            "offsetY": -0.0285,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SLEEPING_TIRED": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SLEEPING_TIRED",
+            "scaleX": -0.508,
+            "scaleY": 0.2648,
+            "rotation": 0,
+            "offsetX": 0.0532,
+            "offsetY": -0.0285,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_ANGRY_LEFT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_ANGRY_LEFT",
+            "scaleX": 0.4161,
+            "scaleY": 0.3266,
+            "rotation": 0,
+            "offsetX": 0.1186,
+            "offsetY": -0.0305,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_ANGRY_UP_LEFT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_ANGRY_UP_LEFT",
+            "scaleX": 0.4161,
+            "scaleY": 0.3266,
+            "rotation": 0,
+            "offsetX": 0.115,
+            "offsetY": -0.0226,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_VERY_ANGRY": {
+            "SlotIndex": 102,
+            "PartName": "EYE_VERY_ANGRY",
+            "scaleX": 0.4339,
+            "scaleY": 0.211,
+            "rotation": 0,
+            "offsetX": 0.1195,
+            "offsetY": -0.0439,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_DISSENTER_ANGRY": {
+            "SlotIndex": 102,
+            "PartName": "EYE_DISSENTER_ANGRY",
+            "scaleX": 0.4339,
+            "scaleY": 0.1988,
+            "rotation": 0,
+            "offsetX": 0.1233,
+            "offsetY": -0.0361,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_HALF_CLOSED_ANGRY_LEFT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_HALF_CLOSED_ANGRY_LEFT",
+            "scaleX": 0.4339,
+            "scaleY": 0.4286,
+            "rotation": 0,
+            "offsetX": 0.1328,
+            "offsetY": -0.0333,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_ANGRY": {
+            "SlotIndex": 101,
+            "PartName": "EYE_ANGRY",
+            "scaleX": 0.4161,
+            "scaleY": 0.3266,
+            "rotation": 0,
+            "offsetX": 0.0434,
+            "offsetY": -0.0311,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_ANGRY_UP": {
+            "SlotIndex": 101,
+            "PartName": "EYE_ANGRY_UP",
+            "scaleX": 0.4161,
+            "scaleY": 0.3266,
+            "rotation": 0,
+            "offsetX": 0.0434,
+            "offsetY": -0.0286,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_VERY_ANGRY": {
+            "SlotIndex": 101,
+            "PartName": "EYE_VERY_ANGRY",
+            "scaleX": -0.4339,
+            "scaleY": 0.211,
+            "rotation": 0,
+            "offsetX": 0.0476,
+            "offsetY": -0.0369,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_DISSENTER_ANGRY": {
+            "SlotIndex": 101,
+            "PartName": "EYE_DISSENTER_ANGRY",
+            "scaleX": -0.4339,
+            "scaleY": 0.1988,
+            "rotation": 0,
+            "offsetX": 0.0617,
+            "offsetY": -0.0469,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_HALF_CLOSED_ANGRY": {
+            "SlotIndex": 101,
+            "PartName": "EYE_HALF_CLOSED_ANGRY",
+            "scaleX": 0.4278,
+            "scaleY": 0.4572,
+            "rotation": 0,
+            "offsetX": 0.0466,
+            "offsetY": -0.0382,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SMILE": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SMILE",
+            "scaleX": 0.4392,
+            "scaleY": 0.271,
+            "rotation": 0,
+            "offsetX": 0.1307,
+            "offsetY": -0.0468,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SMILE_UP": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SMILE_UP",
+            "scaleX": 0.4392,
+            "scaleY": 0.2653,
+            "rotation": 0,
+            "offsetX": 0.1387,
+            "offsetY": -0.0444,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SMILE_DOWN": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SMILE_DOWN",
+            "scaleX": 0.4392,
+            "scaleY": 0.2653,
+            "rotation": 0,
+            "offsetX": 0.1387,
+            "offsetY": -0.0444,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_ENLIGHTENED": {
+            "SlotIndex": 102,
+            "PartName": "EYE_ENLIGHTENED",
+            "scaleX": 0.3308,
+            "scaleY": 0.1959,
+            "rotation": 0,
+            "offsetX": 0.1307,
+            "offsetY": -0.0468,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SMILE": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SMILE",
+            "scaleX": -0.4392,
+            "scaleY": 0.271,
+            "rotation": 0,
+            "offsetX": 0.0383,
+            "offsetY": -0.0582,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SMILE_UP": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SMILE_UP",
+            "scaleX": -0.4392,
+            "scaleY": 0.2653,
+            "rotation": 0,
+            "offsetX": 0.0383,
+            "offsetY": -0.0582,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SMILE_DOWN": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SMILE_DOWN",
+            "scaleX": -0.4392,
+            "scaleY": 0.2653,
+            "rotation": 0,
+            "offsetX": 0.0383,
+            "offsetY": -0.0582,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_ENLIGHTENED": {
+            "SlotIndex": 101,
+            "PartName": "EYE_ENLIGHTENED",
+            "scaleX": -0.3308,
+            "scaleY": 0.1959,
+            "rotation": 0,
+            "offsetX": 0.0383,
+            "offsetY": -0.0582,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_HALF_CLOSED": {
+            "SlotIndex": 102,
+            "PartName": "EYE_HALF_CLOSED",
+            "scaleX": 0.4544,
+            "scaleY": 0.5276,
+            "rotation": 0,
+            "offsetX": 0.1209,
+            "offsetY": -0.0178,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SLEEPY_LEFT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SLEEPY_LEFT",
+            "scaleX": 0.514,
+            "scaleY": 0.2325,
+            "rotation": 0,
+            "offsetX": 0.1117,
+            "offsetY": 0.0042,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_HALF_CLOSED": {
+            "SlotIndex": 101,
+            "PartName": "EYE_HALF_CLOSED",
+            "scaleX": -0.4544,
+            "scaleY": 0.5276,
+            "rotation": 0,
+            "offsetX": 0.0581,
+            "offsetY": -0.0285,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SLEEPY_RIGHT": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SLEEPY_RIGHT",
+            "scaleX": 0.5225,
+            "scaleY": 0.2325,
+            "rotation": 0,
+            "offsetX": 0.0512,
+            "offsetY": -0.0041,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SQUINT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SQUINT",
+            "scaleX": 0.5062,
+            "scaleY": 0.3563,
+            "rotation": 0,
+            "offsetX": 0.1523,
+            "offsetY": -0.0208,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_WORRIED_LEFT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_WORRIED_LEFT",
+            "scaleX": 0.4602,
+            "scaleY": 0.2925,
+            "rotation": 0,
+            "offsetX": 0.1539,
+            "offsetY": -0.0362,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeL_EYE_SICK_LEFT": {
+            "SlotIndex": 102,
+            "PartName": "EYE_SICK_LEFT",
+            "scaleX": 0.4339,
+            "scaleY": 0.2227,
+            "rotation": 0,
+            "offsetX": 0.149,
+            "offsetY": 0.019,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SQUINT": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SQUINT",
+            "scaleX": -0.5062,
+            "scaleY": 0.3563,
+            "rotation": 0,
+            "offsetX": 0.0459,
+            "offsetY": -0.0311,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_WORRIED_RIGHT": {
+            "SlotIndex": 101,
+            "PartName": "EYE_WORRIED_RIGHT",
+            "scaleX": 0.4821,
+            "scaleY": 0.2925,
+            "rotation": 0,
+            "offsetX": 0.0372,
+            "offsetY": -0.047,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "eyeR_EYE_SICK_RIGHT": {
+            "SlotIndex": 101,
+            "PartName": "EYE_SICK_RIGHT",
+            "scaleX": 0.4533,
+            "scaleY": 0.2227,
+            "rotation": 0,
+            "offsetX": 0.0216,
+            "offsetY": 0.0182,
+            "colorChoices": [
+                "#FFFFFF"
+            ]
+        },
+        "color_ARM_LEFT_SKIN": {
+            "SlotIndex": 36,
+            "PartName": "ARM_LEFT_SKIN",
+            "colorChoices": [
+                "#606E72"
+            ]
+        },
+        "color_ARM_RIGHT_SKIN": {
+            "SlotIndex": 74,
+            "PartName": "ARM_RIGHT_SKIN",
+            "colorChoices": [
+                "#606E72"
+            ]
+        },
+        "color_LEG_LEFT_SKIN": {
+            "SlotIndex": 48,
+            "PartName": "LEG_LEFT_SKIN",
+            "colorChoices": [
+                "#606E72"
+            ]
+        },
+        "color_LEG_RIGHT_SKIN": {
+            "SlotIndex": 49,
+            "PartName": "LEG_RIGHT_SKIN",
+            "colorChoices": [
+                "#606E72"
+            ]
+        },
+        "color_Body_Naked": {
+            "SlotIndex": 53,
+            "PartName": "Body_Naked",
+            "colorChoices": [
+                "#606E72"
+            ]
+        },
+        "color_Body_Naked_Up": {
+            "SlotIndex": 53,
+            "PartName": "Body_Naked_Up",
+            "colorChoices": [
+                "#606E72"
+            ]
+        },
+        "color_WEAPON_HAND_SKIN": {
+            "SlotIndex": 47,
+            "PartName": "WEAPON_HAND_SKIN",
+            "colorChoices": [
+                "#606E72"
+            ]
+        }
+    }
+}
